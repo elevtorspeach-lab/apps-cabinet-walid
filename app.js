@@ -1668,6 +1668,8 @@ async function openDesktopStateFile(){
     && typeof window.cabinetDesktopState.openStateFile === 'function'
   ){
     try{
+      // Force-write latest in-memory state before opening the file.
+      await persistDesktopStateFileNow();
       const result = await window.cabinetDesktopState.openStateFile();
       if(result?.ok) return;
       const fallbackPath = String(result?.filePath || '').trim();
@@ -1683,21 +1685,7 @@ async function openDesktopStateFile(){
       return;
     }
   }
-
-  if(
-    typeof window !== 'undefined'
-    && window.cabinetDesktopState
-    && typeof window.cabinetDesktopState.getStatePath === 'function'
-  ){
-    try{
-      const path = await window.cabinetDesktopState.getStatePath();
-      if(path){
-        alert(`Fichier d'état: ${path}`);
-        return;
-      }
-    }catch(err){}
-  }
-  alert('Disponible uniquement dans la version desktop.');
+  alert('Option disponible uniquement dans la version Desktop (EXE/DMG).');
 }
 
 async function persistDesktopStateFileNow(payload = buildAppStatePayload()){
@@ -5069,16 +5057,27 @@ function renderEquipe(){
 function addSalleJudge(){
   if(!canEditData()) return alert('Accès refusé');
   const day = normalizeSalleWeekday(selectedSalleDay);
-  const salle = normalizeSalleName($('salleNameInput')?.value || '');
-  const juge = normalizeJudgeName($('salleJudgeInput')?.value || '');
-  if(!salle || !juge) return alert('Salle et Juge obligatoires');
+  const salleInput = $('salleNameInput');
+  const jugeInput = $('salleJudgeInput');
+  const salle = normalizeSalleName(salleInput?.value || '');
+  const juge = normalizeJudgeName(jugeInput?.value || '');
+  if(!salle || !juge){
+    if(!salle && salleInput){
+      salleInput.focus();
+      return;
+    }
+    if(!juge && jugeInput){
+      jugeInput.focus();
+    }
+    return;
+  }
   const exists = AppState.salleAssignments.some(row=>
     normalizeSalleWeekday(row?.day) === day
     && String(row?.salle || '').toLowerCase() === salle.toLowerCase()
     && String(row?.juge || '').toLowerCase() === juge.toLowerCase()
   );
   if(exists){
-    $('salleJudgeInput').value = '';
+    if(jugeInput) jugeInput.value = '';
     return;
   }
   AppState.salleAssignments.push({
@@ -5089,7 +5088,7 @@ function addSalleJudge(){
   });
   AppState.salleAssignments = normalizeSalleAssignments(AppState.salleAssignments);
   queuePersistAppState();
-  $('salleJudgeInput').value = '';
+  if(jugeInput) jugeInput.value = '';
   renderSalle();
 }
 
