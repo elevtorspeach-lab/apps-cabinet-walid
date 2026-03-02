@@ -1,6 +1,5 @@
 const { app, BrowserWindow, shell } = require('electron');
-
-const APP_URL = 'https://confirmations3d.online/';
+const path = require('path');
 
 async function createWindow() {
   const win = new BrowserWindow({
@@ -14,12 +13,8 @@ async function createWindow() {
     }
   });
 
-  // Force latest domain content on each app start.
-  await win.webContents.session.clearCache();
-  const version = app.getVersion();
-  const sep = APP_URL.includes('?') ? '&' : '?';
-  const liveUrl = `${APP_URL}${sep}appVersion=${encodeURIComponent(version)}&t=${Date.now()}`;
-  win.loadURL(liveUrl);
+  const appIndexPath = path.join(__dirname, 'offline-web', 'index.html');
+  await win.loadFile(appIndexPath);
 
   win.once('ready-to-show', () => {
     win.show();

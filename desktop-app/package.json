@@ -1,7 +1,7 @@
 {
   "name": "cabinet-avocat-desktop",
   "version": "1.0.0",
-  "description": "Desktop app wrapper for confirmations3d.online",
+  "description": "Cabinet Avocat offline desktop app",
   "main": "main.js",
   "author": "Cabinet Araqi Houssaini",
   "private": true,
@@ -15,11 +15,12 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "online.confirmations3d.cabinet",
+    "appId": "com.cabinetavocat.offline",
     "productName": "Cabinet Avocat",
     "icon": "build/icon.png",
     "files": [
-      "main.js"
+      "main.js",
+      "offline-web/**/*"
     ],
     "mac": {
       "target": [

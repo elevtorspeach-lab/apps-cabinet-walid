@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cabinet ARAQI HOUSSAINI - Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-orb login-orb-a"></div>
+  <div class="login-orb login-orb-b"></div>
+  <div class="login-box">
+    <div class="login-badge"><i class="fa-solid fa-shield-halved"></i></div>
+    <h2><i class="fa-solid fa-gavel"></i> Cabinet ARAQI HOUSSAINI</h2>
+    <p class="login-subtitle">Plateforme sécurisée de gestion des dossiers</p>
+
+    <label class="login-label" for="username">Nom d'utilisateur</label>
+    <div class="login-input-wrap">
+      <i class="fa-regular fa-user"></i>
+      <input type="text" id="username" placeholder="Entrer votre utilisateur"/>
+    </div>
+
+    <label class="login-label" for="password">Mot de passe</label>
+    <div class="login-input-wrap">
+      <i class="fa-solid fa-key"></i>
+      <input type="password" id="password" placeholder="Entrer votre mot de passe"/>
+    </div>
+
+    <button id="loginBtn" class="btn-success login-submit">Se connecter</button>
+    <p id="errorMsg" class="error-msg">Nom d'utilisateur ou mot de passe incorrect</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appContent" class="app-content" style="display:none;">
+  <div class="sidebar">
+    <h2><i class="fa-solid fa-gavel"></i> Cabinet ARAQI HOUSSAINI</h2>
+    <div id="syncStatusBadge" class="sync-status is-syncing">
+      <span class="dot"></span>
+      <span id="syncStatusText">Synchronisation serveur...</span>
+    </div>
+    <div class="sync-metrics" aria-live="polite">
+      <span id="syncPingMetric" class="sync-metric">Ping: --</span>
+      <span id="syncLiveMetric" class="sync-metric">Live: --</span>
+    </div>
+    <div id="dashboardLink" class="nav-link active"><i class="fa-solid fa-chart-pie"></i> Dashboard</div>
+    <div id="clientsLink" class="nav-link"><i class="fa-solid fa-users"></i> Clients</div>
+    <div id="creationLink" class="nav-link"><i class="fa-solid fa-folder-plus"></i> Création de Dossier</div>
+    <div id="suiviLink" class="nav-link"><i class="fa-solid fa-folder-open"></i> Suivi des dossiers</div>
+    <div id="audienceLink" class="nav-link">
+        <i class="fa-solid fa-gavel"></i> Audience
+      </div>
+    <div id="diligenceLink" class="nav-link">
+        <i class="fa-solid fa-list-check"></i> Diligence
+      </div>
+    <div id="salleLink" class="nav-link">
+        <i class="fa-solid fa-door-open"></i> Salle
+      </div>
+    <div id="equipeLink" class="nav-link">
+        <i class="fa-solid fa-user-group"></i> Equipe
+      </div>
+
+    <button id="logoutBtn" class="btn-danger logout-btn">
+      <i class="fa-solid fa-right-from-bracket"></i> Déconnecter
+    </button>
+  </div>
+
+  <button id="sidebarToggleBtn" class="sidebar-toggle-btn" type="button" title="Masquer/Afficher le menu">
+    <i class="fa-solid fa-chevron-left"></i>
+  </button>
+
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div id="dashboardSection" class="section">
+      <h1><i class="fa-solid fa-chart-pie"></i> Tableau de bord</h1>
+      <div class="stats-container">
+        <div id="totalClientsCard" class="stat-card blue">
+          <i class="fa-solid fa-users fa-2x"></i>
+          <h3>Total Clients</h3>
+          <p id="totalClients">0</p>
+        </div>
+        <div class="stat-card green">
+          <i class="fa-solid fa-spinner fa-2x"></i>
+          <h3>Dossiers en cours</h3>
+          <p id="dossiersEnCours">0</p>
+        </div>
+        <div class="stat-card purple">
+          <i class="fa-solid fa-check fa-2x"></i>
+          <h3>Dossiers Clôture</h3>
+          <p id="dossiersTermines">0</p>
+        </div>
+        <div class="stat-card orange">
+          <i class="fa-solid fa-hourglass-half fa-2x"></i>
+          <h3>Dossiers Att sort</h3>
+          <p id="dossiersAttSort">0</p>
+        </div>
+        <div class="stat-card red">
+          <i class="fa-solid fa-triangle-exclamation fa-2x"></i>
+          <h3>Erreurs Audience</h3>
+          <p id="audienceErrorsCount">0</p>
+        </div>
+      </div>
+      <div class="dashboard-calendar-card">
+        <div class="dashboard-calendar-head">
+          <h3><i class="fa-solid fa-calendar-days"></i> Calendrier des audiences</h3>
+          <div class="dashboard-calendar-nav">
+            <button id="calendarPrevBtn" class="btn-primary" type="button"><i class="fa-solid fa-chevron-left"></i></button>
+            <span id="calendarMonthLabel"></span>
+            <button id="calendarNextBtn" class="btn-primary" type="button"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+        </div>
+        <div id="dashboardCalendarGrid" class="dashboard-calendar-grid"></div>
+      </div>
+    </div>
+    <!-- AUDIENCE -->
+<!-- AUDIENCE -->
+<div id="audienceSection" class="section" style="display:none;">
+  <h1><i class="fa-solid fa-gavel"></i> Audience</h1>
+
+  <div class="clients-toolbar audience-toolbar">
+    <div class="audience-actions-row">
+      <div class="audience-actions-left">
+        <button id="saveAudienceBtn" class="btn-success">
+          <i class="fa-solid fa-floppy-disk"></i> Enregistrer
+        </button>
+      </div>
+
+      <div class="audience-actions-center">
+        <div class="color-filters">
+          <button class="color-btn all active" data-color="all">Tous</button>
+          <button id="audienceErrorsBtn" class="color-btn error" type="button">Erreurs</button>
+          <button class="color-btn blue" data-color="blue">Att sort</button>
+          <button class="color-btn green" data-color="green">Att jugement</button>
+          <button class="color-btn yellow" data-color="yellow">Jugement ok</button>
+          <button class="color-btn purple-dark" data-color="purple-dark">Soldé</button>
+          <button class="color-btn purple-light" data-color="purple-light">Arrêt définitif</button>
+        </div>
+      </div>
+
+      <div class="audience-actions-right">
+        <span id="audienceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+        <button id="printAudienceBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-square-check"></i> Cocher
+        </button>
+        <button id="selectAllPrintAudienceBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-check-double"></i> Tout cocher
+        </button>
+        <button id="clearAllPrintAudienceBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-eraser"></i> Tout décocher
+        </button>
+        <button id="exportAudienceBtn" class="btn-primary">
+          <i class="fa-solid fa-file-export"></i> Exporter
+        </button>
+        <button id="exportAudienceDetailBtn" class="btn-primary">
+          <i class="fa-solid fa-file-lines"></i> Export d'audience
+        </button>
+      </div>
+    </div>
+
+    <div class="audience-filter-row">
+      <div class="search-box">
+        <i class="fa-solid fa-filter"></i>
+        <input type="text" id="filterAudience" placeholder="Filter global (toutes les infos)..." />
+      </div>
+
+      <div class="audience-color-filter">
+        <label for="filterAudienceColor">Couleur</label>
+        <select id="filterAudienceColor">
+          <option value="all">Toutes</option>
+          <option value="blue">Att sort</option>
+          <option value="green">Att jugement</option>
+          <option value="yellow">Jugement ok</option>
+          <option value="purple-dark">Soldé</option>
+          <option value="purple-light">Arrêt définitif</option>
+        </select>
+      </div>
+
+      <div class="audience-color-filter">
+        <label for="filterAudienceProcedure">Procédure</label>
+        <select id="filterAudienceProcedure">
+          <option value="all">Toutes</option>
+        </select>
+      </div>
+
+      <div class="audience-color-filter">
+        <label for="filterAudienceTribunal">Tribunal</label>
+        <select id="filterAudienceTribunal">
+          <option value="all">Tous</option>
+        </select>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Client</th>
+          <th>Référence Client</th>
+          <th>Débiteur</th>
+          <th>Référence dossier</th>
+          <th>Date d’audience</th>
+          <th>Juge</th>
+          <th>Sort</th>
+          <th>Tribunal</th>
+          <th>Procédure</th>
+          <th>Date dépôt</th>
+        </tr>
+      </thead>
+      <tbody id="audienceBody"></tbody>
+    </table>
+  </div>
+</div>
+
+    <!-- DILIGENCE -->
+    <div id="diligenceSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-list-check"></i> Diligence</h1>
+      <div class="pro-card">
+        <div class="pro-header">
+          <div class="pro-title">
+            <i class="fa-solid fa-clipboard-list"></i> Procédures
+          </div>
+        </div>
+        <div class="pro-body">
+          <div class="diligence-toolbar">
+            <div class="search-box diligence-search-box">
+              <i class="fa-solid fa-filter"></i>
+              <input type="text" id="diligenceSearchInput" placeholder="Filtrer (client / débiteur / réf dossier / att ok / exécution / délégation / huissier / sort / tribunal)..." />
+            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceSortFilter">Sort</label>
+              <select id="diligenceSortFilter">
+                <option value="all">Tous</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceDelegationFilter">Délégation</label>
+              <select id="diligenceDelegationFilter">
+                <option value="all">Toutes</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceOrdonnanceFilter">Ordonnance</label>
+              <select id="diligenceOrdonnanceFilter">
+                <option value="all">Toutes</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceProcedureFilter">Procédure</label>
+              <select id="diligenceProcedureFilter">
+                <option value="all">Toutes</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceTribunalFilter">Tribunal</label>
+              <select id="diligenceTribunalFilter">
+                <option value="all">Tous</option>
+              </select>
+            </div>
+            <button id="exportDiligenceBtn" class="btn-primary" type="button">
+              <i class="fa-solid fa-file-export"></i> Exporter
+            </button>
+          </div>
+          <div id="diligenceCount" class="diligence-count"></div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr id="diligenceHeadRow">
+                  <th>Client</th>
+                  <th>Débiteur</th>
+                  <th>Date dépôt</th>
+                  <th>Référence dossier</th>
+                  <th>Ordonnance</th>
+                  <th>Notification N°</th>
+                  <th>Statut notification</th>
+                  <th>Date notification</th>
+                  <th>Certificat non appel</th>
+                  <th>Execution N°</th>
+                  <th>Ville</th>
+                  <th>Délégation</th>
+                  <th>Huissier</th>
+                  <th>Sort</th>
+                  <th>Tribunal</th>
+                </tr>
+              </thead>
+              <tbody id="diligenceBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- SALLE -->
+    <div id="salleSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-door-open"></i> Salle</h1>
+      <div class="pro-card">
+        <div class="pro-header">
+          <div class="pro-title">
+            <i class="fa-solid fa-users-viewfinder"></i> Les juges par salle
+          </div>
+        </div>
+        <div class="pro-body">
+          <div id="salleDayTabs" class="salle-day-tabs"></div>
+          <div id="salleEditRow" class="salle-toolbar">
+            <input type="text" id="salleNameInput" placeholder="Salle (ex: Salle 2)">
+            <input type="text" id="salleJudgeInput" placeholder="Juge">
+            <button id="addSalleJudgeBtn" type="button" class="btn-primary">
+              <i class="fa-solid fa-plus"></i> Ajouter
+            </button>
+          </div>
+          <div class="salle-toolbar">
+            <div class="audience-color-filter">
+              <label for="salleFilterSelect">Filtrer par salle</label>
+              <select id="salleFilterSelect">
+                <option value="all">Toutes</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="salleTribunalFilter">Tribunal</label>
+              <select id="salleTribunalFilter">
+                <option value="all">Tous</option>
+                <option value="commerciale">المحكمة التجارية</option>
+                <option value="appel">محكمة الاستئناف</option>
+              </select>
+            </div>
+            <div class="audience-color-filter">
+              <label for="salleAudienceDateFilter">Date d'audience</label>
+              <input type="date" id="salleAudienceDateFilter">
+            </div>
+          </div>
+          <div class="table-container" style="margin-top:8px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Salle</th>
+                  <th>Juges</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="salleBody"></tbody>
+            </table>
+          </div>
+          <div id="sidebarSalleSessions" class="sidebar-salle-sessions" style="display:none;margin-top:14px;"></div>
+        </div>
+      </div>
+    </div>
+    <!-- EQUIPE -->
+    <div id="equipeSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-user-group"></i> Equipe</h1>
+      <div id="teamLocked" class="diligence-empty" style="display:none;">
+        Réservé au gestionnaire.
+      </div>
+      <div id="teamManagerPanel">
+        <div class="pro-card">
+          <div class="pro-header">
+            <div class="pro-title"><i class="fa-solid fa-user-plus"></i> Ajouter / Modifier utilisateur</div>
+          </div>
+          <div class="pro-body">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" id="teamUsername" placeholder="username" />
+            </div>
+            <div class="form-group">
+              <label>Mot de passe</label>
+              <input type="password" id="teamPassword" placeholder="mot de passe" />
+            </div>
+            <div class="form-group">
+              <label>Rôle</label>
+              <select id="teamRole">
+                <option value="viewer">client</option>
+                <option value="admin">admin</option>
+                <option value="manager">gestionnaire</option>
+              </select>
+            </div>
+            <div id="teamClientsWrap" class="form-group full">
+              <input type="text" id="teamClientSearchInput" placeholder="Rechercher client..." />
+              <div id="teamClientCount" class="diligence-empty">0 client sélectionné</div>
+              <div id="teamClientsList" class="team-clients-list"></div>
+            </div>
+            <div class="form-group full" style="display:flex;gap:8px;flex-direction:row;">
+              <button id="teamSaveBtn" class="btn-success"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+              <button id="teamResetBtn" class="btn-primary" type="button"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-container" style="margin-top:12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Rôle</th>
+                <th>Clients autorisés</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="teamUsersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  
+
+    <!-- CLIENTS -->
+    <div id="clientSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-users"></i> Gestion des Clients</h1>
+      <div class="clients-toolbar">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="searchClientInput" placeholder="Rechercher un client..." />
+        </div>
+        <div class="add-client-form pro">
+          <input type="text" id="clientName" placeholder="Nom du client"/>
+          <button id="addClientBtn" class="btn-success">
+            <i class="fa-solid fa-plus"></i> Ajouter
+          </button>
+        </div>
+        <div class="import-excel">
+          <input type="file" id="importExcelInput" accept=".xlsx,.xls" style="display:none;">
+          <button id="importExcelBtn" class="btn-primary">
+            <i class="fa-solid fa-file-import"></i> Importer Excel
+          </button>
+          <button id="exportBackupExcelBtn" class="btn-primary" type="button">
+            <i class="fa-solid fa-file-export"></i> Sauvegarde Excel
+          </button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Nb Dossiers</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="clientsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CREATION DOSSIER -->
+    <div id="creationSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-folder-plus"></i> Création de Dossier</h1>
+
+      <div class="pro-card">
+        <div class="pro-header">
+          <div class="pro-title">
+            <i class="fa-solid fa-file-circle-plus"></i> Nouveau dossier
+          </div>
+        </div>
+
+        <div class="pro-body">
+          <div class="form-group full">
+            <label>Boîte N°</label>
+            <input type="text" id="boiteNoInput" placeholder="Numéro de boîte"/>
+          </div>
+
+          <div class="form-group">
+            <label>Client</label>
+            <select id="selectClient"></select>
+          </div>
+
+          <div class="form-group">
+            <label>Référence Client</label>
+            <input type="text" id="referenceClientInput" placeholder="Référence client"/>
+          </div>
+
+          <div class="form-group">
+            <label>Date d’affectation</label>
+            <input type="text" id="dateAffectation" placeholder="jj/mm/aaaa" inputmode="numeric" autocomplete="off"/>
+          </div>
+
+          <div class="form-group">
+            <label>Ville</label>
+            <input type="text" id="villeInput" placeholder="Ville"/>
+          </div>
+
+          <div class="form-group">
+            <label>Adresse</label>
+            <input type="text" id="adresseInput" placeholder="Adresse"/>
+          </div>
+
+          <div class="form-group">
+            <label>Montant</label>
+            <input type="number" id="montantInput" placeholder="Montant"/>
+          </div>
+
+          <div class="form-group">
+            <label>Débiteur</label>
+            <input type="text" id="debiteurInput" placeholder="Nom du débiteur"/>
+          </div>
+
+          <div class="form-group">
+            <label>WW</label>
+            <input type="text" id="wwInput" placeholder="WW"/>
+          </div>
+
+          <div class="form-group">
+            <label>Marque</label>
+            <input type="text" id="marqueInput" placeholder="Marque"/>
+          </div>
+
+          <div class="form-group">
+            <label>Type</label>
+            <input type="text" id="typeInput" placeholder="Type"/>
+          </div>
+
+          <div class="form-group">
+            <label>Caution</label>
+            <input type="text" id="cautionInput" placeholder="Caution"/>
+          </div>
+
+          <div class="form-group">
+            <label>Adresse de caution</label>
+            <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution"/>
+          </div>
+
+          <div class="form-group">
+            <label>Ville de caution</label>
+            <input type="text" id="cautionVilleInput" placeholder="Ville de caution"/>
+          </div>
+
+          <div class="form-group">
+            <label>CIN de caution</label>
+            <input type="text" id="cautionCinInput" placeholder="CIN de caution"/>
+          </div>
+
+          <div class="form-group full">
+            <label>Montant par procédure</label>
+            <div id="procedureMontantGroups" class="procedure-montant-groups"></div>
+          </div>
+
+          <!-- Procédure -->
+          <div class="form-group full">
+            <label>Procédure (choix multiple)</label>
+            <div class="checkbox-group">
+              <label data-proc="ASS"><input type="checkbox" value="ASS" class="proc-check"> ASS</label>
+              <label data-proc="Restitution"><input type="checkbox" value="Restitution" class="proc-check"> Restitution</label>
+              <label data-proc="Nantissement"><input type="checkbox" value="Nantissement" class="proc-check"> Nantissement</label>
+              <label data-proc="SFDC"><input type="checkbox" value="SFDC" class="proc-check"> SFDC</label>
+              <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
+              <label data-proc="Injonction"><input type="checkbox" value="Injonction" class="proc-check"> Injonction</label>
+            </div>
+            <div class="proc-add">
+              <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">
+              <button type="button" id="addProcedureBtn" class="btn-primary">Plus</button>
+            </div>
+            <div id="customProcedures" class="custom-procs"></div>
+          </div>
+
+          <div id="procedureDetails" class="procedure-details full"></div>
+
+          <!-- DOCUMENTS + NOTE/STATUT -->
+          <div class="form-group full two-col">
+            <div class="panel">
+              <label>Documents</label>
+              <div id="dropzone" class="dropzone exact-design">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <p>Glisser-déposer des fichiers ici ou</p>
+                <button type="button" id="uploadBtn" class="btn-primary btn-upload">
+                  Télécharger un fichier
+                </button>
+                <input type="file" id="fileInput" multiple hidden accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" />
+              </div>
+              <ul id="fileList" class="file-list"></ul>
+            </div>
+
+            <div class="panel">
+              <div class="panel-field">
+                <textarea id="noteInput" rows="3" placeholder="Note dossier (optionnelle)..."></textarea>
+              </div>
+
+              <div class="panel-field">
+                <textarea id="avancementInput" rows="5" placeholder="Ex: notification envoyée, audience fixée, en attente jugement..."></textarea>
+              </div>
+
+              <div class="panel-field">
+                <select id="statutInput">
+                  <option value="En cours" selected>En cours</option>
+                  <option value="Soldé">Soldé</option>
+                  <option value="Arrêt définitif">Arrêt définitif</option>
+                  <option value="Clôture">Clôture</option>
+                  <option value="Suspension">Suspension</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group full">
+            <button id="addDossierBtn" class="btn-primary btn-big">
+              <i class="fa-solid fa-floppy-disk"></i> Créer le Dossier
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- SUIVI -->
+    <div id="suiviSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-folder-open"></i> Suivi des dossiers</h1>
+
+      <div class="clients-toolbar suivi-toolbar" style="margin-bottom:15px;">
+        <div class="search-box" style="flex:1;">
+          <i class="fa-solid fa-filter"></i>
+          <input 
+            type="text" 
+            id="filterGlobal" 
+            placeholder="Filter global (toutes les infos du dossier)..." 
+          />
+        </div>
+        <div class="audience-color-filter">
+          <label for="filterSuiviProcedure">Procédure</label>
+          <select id="filterSuiviProcedure">
+            <option value="all">Toutes</option>
+          </select>
+        </div>
+        <div class="audience-color-filter">
+          <label for="filterSuiviTribunal">Tribunal</label>
+          <select id="filterSuiviTribunal">
+            <option value="all">Tous</option>
+          </select>
+        </div>
+      </div>
+      
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Date d’affectation</th>
+              <th>Référence Client</th>
+              <th>Procédure</th>
+              <th>Débiteur</th>
+              <th>Montant</th>
+              <th>Ville</th>
+              <th>Statut</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="suiviBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- DOSSIER DETAILS MODAL -->
+<div id="dossierModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2><i class="fa-solid fa-folder-open"></i> Détails du dossier</h2>
+      <button id="closeDossierModalBtn" class="btn-danger" type="button">
+        <i class="fa-solid fa-xmark"></i> Fermer
+      </button>
+    </div>
+    <div id="dossierModalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- EXCEL IMPORT RESULT MODAL -->
+<div id="importResultModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card import-result-card">
+    <div class="modal-head">
+      <h2><i class="fa-solid fa-file-import"></i> Résultat import Excel</h2>
+      <button id="closeImportResultModalBtn" class="btn-danger" type="button">
+        <i class="fa-solid fa-xmark"></i> Fermer
+      </button>
+    </div>
+    <div class="modal-body">
+      <pre id="importResultSummary" class="import-result-summary"></pre>
+      <div class="import-result-label">Détails des erreurs ignorées</div>
+      <div id="importResultErrors" class="import-result-errors" role="region" aria-label="Détails des erreurs ignorées"></div>
+      <div class="import-result-actions">
+        <button id="copyImportErrorsBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-copy"></i> Copier les erreurs
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
