@@ -1,0 +1,25 @@
+GitHub quick upload (from project root):
+
+1) Create empty repo on GitHub (example: cabinet-avocat-offline)
+2) Run:
+   git init
+   git add .
+   git commit -m "Cabinet Avocat offline package"
+   git branch -M main
+   git remote add origin https://github.com/<YOUR_USER>/<YOUR_REPO>.git
+   git push -u origin main
+
+If repo already exists locally:
+   git add .
+   git commit -m "Update offline package"
+   git push
+
+Windows package to publish on GitHub (recommended to avoid installer issues):
+   release/windows/Cabinet-Avocat-Windows-READY/
+
+Create ZIP before upload:
+   cd release/windows
+   zip -r Cabinet-Avocat-Windows-READY.zip Cabinet-Avocat-Windows-READY
+
+Package to send directly (without GitHub):
+   release/windows/Cabinet-Avocat-Windows-READY.zip
