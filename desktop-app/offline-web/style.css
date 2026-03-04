@@ -1385,6 +1385,11 @@ tr:hover{background:#f1f5f9}
   align-items:end;
 }
 
+.audience-filter-import-row{
+  display:flex;
+  justify-content:flex-start;
+}
+
 .audience-filter-row .search-box{
   flex:0 1 560px;
   min-width:320px;
@@ -1596,6 +1601,10 @@ tr.color-purple-light{border-left:6px solid #f97316;background:#fff7ed}
     width:100%;
     min-width:0;
     max-width:none;
+  }
+  #audienceSection .audience-filter-import-row,
+  #audienceSection .audience-filter-import-row .btn-primary{
+    width:100%;
   }
   #audienceSection .table-container{
     overflow:visible;
