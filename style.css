@@ -1546,6 +1546,18 @@ tr.color-purple-light{border-left:6px solid #f97316;background:#fff7ed}
   height:16px;
   cursor:pointer;
 }
+.audience-ref-missing{
+  border-color:#ef4444 !important;
+  background:#fff1f2 !important;
+  color:#991b1b !important;
+}
+.audience-inline-error{
+  margin-top:4px;
+  font-size:11px;
+  line-height:1.2;
+  color:#b91c1c;
+  font-weight:700;
+}
 
 @media (max-width: 600px){
   #audienceSection{

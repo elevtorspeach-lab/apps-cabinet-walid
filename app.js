@@ -1818,6 +1818,192 @@ function buildAppStatePayload(){
   };
 }
 
+function makeClientMatchKey(value){
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function makeDossierMergeSignature(dossier){
+  if(!dossier || typeof dossier !== 'object') return '';
+  const ref = normalizeReferenceValue(String(dossier.referenceClient || '').trim());
+  const debiteur = String(dossier.debiteur || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const procedures = normalizeProcedures(dossier).map(v=>String(v || '').trim()).filter(Boolean).sort();
+  const procedureKey = procedures.join('|');
+  const dateAffectation = normalizeDateDDMMYYYY(dossier.dateAffectation || '') || String(dossier.dateAffectation || '').trim();
+  return [ref, debiteur, procedureKey, dateAffectation].join('::');
+}
+
+function normalizeImportedPayload(raw){
+  if(!raw || typeof raw !== 'object') return null;
+  if(Array.isArray(raw.clients)){
+    return raw;
+  }
+  if(raw.data && typeof raw.data === 'object' && Array.isArray(raw.data.clients)){
+    return raw.data;
+  }
+  if(raw.state && typeof raw.state === 'object' && Array.isArray(raw.state.clients)){
+    return raw.state;
+  }
+  return null;
+}
+
+async function importAppsavocatPayload(rawPayload){
+  const payload = normalizeImportedPayload(rawPayload);
+  if(!payload){
+    throw new Error('Format non reconnu: structure "clients" introuvable.');
+  }
+
+  const importedClients = Array.isArray(payload.clients)
+    ? payload.clients.map(normalizeClient).filter(Boolean)
+    : [];
+  const importedUsers = Array.isArray(payload.users)
+    ? payload.users.map(normalizeUser).filter(Boolean)
+    : [];
+  const importedSalleAssignments = normalizeSalleAssignments(payload.salleAssignments);
+
+  if(!importedClients.length && !importedUsers.length && !importedSalleAssignments.length){
+    throw new Error('Le fichier ne contient aucune donnée exploitable.');
+  }
+
+  const existingClients = Array.isArray(AppState.clients) ? AppState.clients : [];
+  const existingByName = new Map();
+  const allClientIds = new Set();
+  const importedClientIdToResolvedId = new Map();
+  existingClients.forEach(client=>{
+    allClientIds.add(Number(client?.id) || 0);
+    const key = makeClientMatchKey(client?.name || '');
+    if(key) existingByName.set(key, client);
+  });
+  const nextClientId = ()=>{
+    let id = Date.now() + Math.floor(Math.random() * 1000000);
+    while(allClientIds.has(id)) id += 1;
+    allClientIds.add(id);
+    return id;
+  };
+
+  let addedClients = 0;
+  let addedDossiers = 0;
+  let skippedDossiers = 0;
+
+  importedClients.forEach(importedClient=>{
+    const key = makeClientMatchKey(importedClient.name || '');
+    if(!key) return;
+    const importedClientId = Number(importedClient.id);
+    const target = existingByName.get(key);
+    if(!target){
+      const resolvedClientId = allClientIds.has(importedClientId) ? nextClientId() : importedClientId;
+      const nextClient = {
+        ...importedClient,
+        id: resolvedClientId,
+        dossiers: Array.isArray(importedClient.dossiers) ? importedClient.dossiers.slice() : []
+      };
+      nextClient.dossiers.forEach(()=>{ addedDossiers += 1; });
+      AppState.clients.push(nextClient);
+      existingByName.set(key, nextClient);
+      allClientIds.add(Number(nextClient.id));
+      if(Number.isFinite(importedClientId)) importedClientIdToResolvedId.set(importedClientId, Number(nextClient.id));
+      addedClients += 1;
+      return;
+    }
+    if(Number.isFinite(importedClientId)){
+      importedClientIdToResolvedId.set(importedClientId, Number(target.id));
+    }
+
+    const existingSignatures = new Set(
+      (Array.isArray(target.dossiers) ? target.dossiers : [])
+        .map(d=>makeDossierMergeSignature(d))
+        .filter(Boolean)
+    );
+    const importedDossiers = Array.isArray(importedClient.dossiers) ? importedClient.dossiers : [];
+    importedDossiers.forEach(dossier=>{
+      const signature = makeDossierMergeSignature(dossier);
+      if(signature && existingSignatures.has(signature)){
+        skippedDossiers += 1;
+        return;
+      }
+      if(signature) existingSignatures.add(signature);
+      if(!Array.isArray(target.dossiers)) target.dossiers = [];
+      target.dossiers.push(dossier);
+      addedDossiers += 1;
+    });
+  });
+
+  const existingUserByUsername = new Map(
+    USERS.map(user=>[String(user?.username || '').trim().toLowerCase(), user])
+  );
+  let addedUsers = 0;
+  importedUsers.forEach(user=>{
+    const usernameKey = String(user?.username || '').trim().toLowerCase();
+    if(!usernameKey) return;
+    if(existingUserByUsername.has(usernameKey)) return;
+    const mappedClientIds = Array.isArray(user?.clientIds)
+      ? [...new Set(user.clientIds.map(v=>{
+        const num = Number(v);
+        if(!Number.isFinite(num)) return null;
+        return importedClientIdToResolvedId.has(num)
+          ? importedClientIdToResolvedId.get(num)
+          : num;
+      }).filter(v=>Number.isFinite(v)))]
+      : [];
+    USERS.push({
+      ...user,
+      id: Number(user.id) || Date.now() + Math.floor(Math.random() * 1000000),
+      clientIds: mappedClientIds
+    });
+    existingUserByUsername.set(usernameKey, user);
+    addedUsers += 1;
+  });
+  USERS = ensureManagerUser(USERS);
+
+  AppState.salleAssignments = normalizeSalleAssignments([
+    ...(Array.isArray(AppState.salleAssignments) ? AppState.salleAssignments : []),
+    ...importedSalleAssignments
+  ]);
+
+  // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
+  audienceDraft = {};
+
+  queuePersistAppState();
+  renderClients();
+  renderDashboard();
+  updateClientDropdown();
+  renderSuivi();
+  renderAudience();
+  renderDiligence();
+  renderSalle();
+  renderEquipe();
+
+  alert(
+    [
+      'Import appsavocat terminé.',
+      `Clients ajoutés: ${addedClients}`,
+      `Dossiers ajoutés: ${addedDossiers}`,
+      `Dossiers ignorés (doublons): ${skippedDossiers}`,
+      `Utilisateurs ajoutés: ${addedUsers}`,
+      `Salles fusionnées: ${AppState.salleAssignments.length}`
+    ].join('\n')
+  );
+}
+
+async function handleAppsavocatImportFile(file){
+  if(!file) return;
+  if(!canEditData()){
+    alert('Accès refusé');
+    return;
+  }
+  try{
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    await importAppsavocatPayload(parsed);
+  }catch(err){
+    console.error(err);
+    const details = String(err?.message || '').trim();
+    alert(`Import appsavocat impossible.${details ? `\nDétail: ${details}` : ''}`);
+  }
+}
+
 function hasDesktopStateBridge(){
   return typeof window !== 'undefined'
     && !!window.cabinetDesktopState
@@ -2625,6 +2811,7 @@ function applyExcelImport(payload, options = {}){
   const knownProcedureSet = new Set(['ASS', 'Restitution', 'Nantissement', 'SFDC', 'S/bien', 'Injonction']);
   let importedDossiersCount = 0;
   let linkedAudiencesCount = 0;
+  const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
 
   const clientMap = new Map();
   AppState.clients.forEach(c=>clientMap.set(String(c.name || '').trim().toLowerCase(), c));
@@ -2632,6 +2819,7 @@ function applyExcelImport(payload, options = {}){
   const refToProcMap = new Map();
   const dossierRefClientSet = new Set();
   const rowRefClientToProcMap = new Map();
+  const audienceOrphanDossierMap = new Map();
   const candidateSeenByMap = new WeakMap();
 
   const pushCandidate = (map, key, candidate)=>{
@@ -2667,6 +2855,77 @@ function applyExcelImport(payload, options = {}){
     if(zone) parts.push(`Zone: ${zone}`);
     if(procedure) parts.push(`Procédure: ${procedure}`);
     return parts.length ? ` | ${parts.join(' | ')}` : '';
+  };
+
+  const getOrCreateAudienceOrphanClient = ()=>{
+    const key = AUDIENCE_ORPHAN_CLIENT_NAME.toLowerCase();
+    let client = clientMap.get(key);
+    if(client) return client;
+    client = {
+      id: Date.now() + Math.floor(Math.random() * 100000),
+      name: AUDIENCE_ORPHAN_CLIENT_NAME,
+      dossiers: []
+    };
+    AppState.clients.push(client);
+    clientMap.set(key, client);
+    return client;
+  };
+
+  const buildAudienceOrphanDossierKey = (refKey, row)=>{
+    const safeRef = String(refKey || '').trim();
+    const safeRefClient = normalizeReferenceValue(String(row?.refClient || '').trim());
+    const safeDebiteur = String(row?.debiteur || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    return `${safeRef}::${safeRefClient}::${safeDebiteur}`;
+  };
+
+  const getOrCreateAudienceOrphanDossier = (refKey, row, preferredProc = 'ASS')=>{
+    const key = buildAudienceOrphanDossierKey(refKey, row);
+    const normalizedPreferredProc = parseProcedureToken(preferredProc || '') || 'ASS';
+    if(audienceOrphanDossierMap.has(key)){
+      const existing = audienceOrphanDossierMap.get(key);
+      if(!existing.procedureDetails[normalizedPreferredProc]){
+        existing.procedureDetails[normalizedPreferredProc] = { _missingGlobal: true };
+      }else{
+        existing.procedureDetails[normalizedPreferredProc]._missingGlobal = true;
+      }
+      const nextProcedures = normalizeProcedures(existing);
+      existing.procedureList = nextProcedures;
+      existing.procedure = nextProcedures.join(', ');
+      return existing;
+    }
+
+    const orphanClient = getOrCreateAudienceOrphanClient();
+    const rowRefClient = String(row?.refClient || '').trim();
+    const rowDebiteur = String(row?.debiteur || '').trim();
+    const dossier = {
+      debiteur: rowDebiteur || '-',
+      boiteNo: '',
+      referenceClient: rowRefClient || String(row?.refDossier || '').trim(),
+      isAudienceOrphanImport: true,
+      dateAffectation: '',
+      procedure: normalizedPreferredProc,
+      procedureList: [normalizedPreferredProc],
+      procedureDetails: {
+        [normalizedPreferredProc]: { _missingGlobal: true }
+      },
+      ville: '',
+      adresse: '',
+      montant: '',
+      montantByProcedure: [],
+      ww: '',
+      marque: '',
+      type: '',
+      note: '',
+      avancement: '',
+      statut: 'En cours',
+      files: []
+    };
+    orphanClient.dossiers.push(dossier);
+    audienceOrphanDossierMap.set(key, dossier);
+    return dossier;
   };
 
   const registerFallbackFromDossier = (client, dossier)=>{
@@ -2927,6 +3186,12 @@ function applyExcelImport(payload, options = {}){
     if(String(row.audience || '').trim() && !normalizedAudienceDate){
       importIgnoredRows.push(`${rowNumberLabel}: date audience invalide "${row.audience}" (format attendu jj/mm/aaaa)${audienceBaseContext}`);
     }
+    const explicitProcRaw = String(row?.procedureText || '').trim();
+    const explicitProc = explicitProcRaw ? parseProcedureToken(explicitProcRaw) : '';
+    if(explicitProcRaw && !knownProcedureSet.has(explicitProc)){
+      importIgnoredRows.push(`${rowNumberLabel}: procédure audience inconnue "${explicitProcRaw}"${audienceBaseContext}`);
+      return;
+    }
     const rowRefClientParts = splitReferenceValues(row.refClient || '');
     const rowRefClientKeys = rowRefClientParts.map(v=>normalizeReferenceValue(v)).filter(Boolean);
     const rowRefClientKeySet = new Set(rowRefClientKeys);
@@ -2959,10 +3224,25 @@ function applyExcelImport(payload, options = {}){
         });
       });
       if(!fallback.length){
-        importIgnoredRows.push(`${rowNumberLabel}: ref dossier introuvable "${ref}" (aucun dossier importé correspondant)${missingRefContext}`);
-        return;
+        const procFallback = explicitProc && knownProcedureSet.has(explicitProc)
+          ? explicitProc
+          : (hintedProc && knownProcedureSet.has(hintedProc) ? hintedProc : 'ASS');
+        if(audienceOnlyMode && !isAudienceProcedure(procFallback)){
+          importIgnoredRows.push(`${rowNumberLabel}: procédure "${procFallback}" ignorée (import Audience réservé aux procédures hors SFDC/S-bien/Injonction)${audienceBaseContext}`);
+          return;
+        }
+        const orphanDossier = getOrCreateAudienceOrphanDossier(refKey, row, procFallback);
+        candidates = [{
+          dossier: orphanDossier,
+          client: getOrCreateAudienceOrphanClient(),
+          proc: procFallback,
+          rowRefClient: normalizeReferenceValue(String(row?.refClient || '').trim()),
+          rowDebiteur: String(row?.debiteur || '').trim().toLowerCase()
+        }];
+        importIgnoredRows.push(`${rowNumberLabel}: ${ref || '-'} introuvable dans dossier global (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`);
+      }else{
+        candidates = fallback;
       }
-      candidates = fallback;
       // Fallback by ref client is a successful link path, not an import error.
     }
     const rowDebiteur = String(row.debiteur || '').trim().toLowerCase();
@@ -2979,12 +3259,6 @@ function applyExcelImport(payload, options = {}){
     }
     if(!match) match = activeCandidates[0];
     const { dossier, proc } = match;
-    const explicitProcRaw = String(row?.procedureText || '').trim();
-    const explicitProc = explicitProcRaw ? parseProcedureToken(explicitProcRaw) : '';
-    if(explicitProcRaw && !knownProcedureSet.has(explicitProc)){
-      importIgnoredRows.push(`${rowNumberLabel}: procédure audience inconnue "${explicitProcRaw}"${audienceBaseContext}`);
-      return;
-    }
     let targetProc = explicitProc && knownProcedureSet.has(explicitProc)
       ? explicitProc
       : (hintedProc && knownProcedureSet.has(hintedProc) ? hintedProc : proc);
@@ -2999,6 +3273,9 @@ function applyExcelImport(payload, options = {}){
     if(!dossier.procedureDetails) dossier.procedureDetails = {};
     if(!dossier.procedureDetails[targetProc]) dossier.procedureDetails[targetProc] = {};
     const p = dossier.procedureDetails[targetProc];
+    if(!!dossier?.isAudienceOrphanImport){
+      p._missingGlobal = true;
+    }
     if(ref) p.referenceClient = ref;
     if(row.audience) p.audience = row.audience;
     if(row.juge) p.juge = row.juge;
@@ -3421,6 +3698,16 @@ function setupEvents(){
   $('sidebarToggleBtn')?.addEventListener('click', toggleSidebar);
   $('openDesktopStateFileBtn')?.addEventListener('click', ()=>{
     openDesktopStateFile().catch(()=>{});
+  });
+  $('importAppsavocatBtn')?.addEventListener('click', ()=>{
+    if(!canEditData()) return alert('Accès refusé');
+    $('importAppsavocatInput')?.click();
+  });
+  $('importAppsavocatInput')?.addEventListener('change', (e)=>{
+    const file = e.target?.files?.[0];
+    if(!file) return;
+    handleAppsavocatImportFile(file).catch(err=>console.error(err));
+    e.target.value = '';
   });
   $('dashboardLink').onclick = ()=>showView('dashboard');
   $('clientsLink').onclick = ()=>showView('clients');
@@ -6032,6 +6319,7 @@ function renderAudience(){
     const duplicateKey = buildAudienceDuplicateKey(row);
     const isDuplicate = !!(duplicateKey && duplicateKeySet.has(duplicateKey));
     const hasError = isAudienceRowInvalid(row, duplicateKeySet);
+    const isMissingGlobal = !!row?.p?._missingGlobal;
     const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
     const procKeyEncoded = encodeURIComponent(String(procKey));
     const keyEncoded = encodeURIComponent(String(key));
@@ -6052,7 +6340,10 @@ function renderAudience(){
         <td data-label="Client">${escapeHtml(c.name)}</td>
         <td data-label="Référence Client">${escapeHtml(d.referenceClient || '-')}</td>
         <td data-label="Débiteur">${escapeHtml(d.debiteur||'-')}</td>
-        <td data-label="Référence dossier"><input value="${escapeAttr(draft.refDossier||p.referenceClient||'')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)"></td>
+        <td data-label="Référence dossier">
+          <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(draft.refDossier||p.referenceClient||'')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)">
+          ${isMissingGlobal ? '<div class="audience-inline-error">Introuvable dans dossier global</div>' : ''}
+        </td>
         <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)"></td>
         <td data-label="Juge"><input value="${escapeAttr(draft.juge||p.juge||'')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)"></td>
         <td data-label="Sort"><input value="${escapeAttr(draft.sort||p.sort||'')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)"></td>
@@ -6265,9 +6556,10 @@ function isAudienceRowInvalid(row, duplicateKeySet = null){
   const juge = String(row?.draft?.juge ?? row?.p?.juge ?? '').trim();
   const sort = String(row?.draft?.sort ?? row?.p?.sort ?? '').trim();
   const hasAttNum = /att\s*(num|numero|num[eé]ro|n°|nº)/i.test(refDossier);
+  const missingGlobal = !!row?.p?._missingGlobal;
   const duplicateKey = buildAudienceDuplicateKey(row);
   const isDuplicate = !!(duplicateKeySet && duplicateKey && duplicateKeySet.has(duplicateKey));
-  return isDuplicate || hasAttNum || (!dateAudience && !juge && !sort);
+  return isDuplicate || hasAttNum || missingGlobal || (!dateAudience && !juge && !sort);
 }
 
 function getAudienceErrorRows(){
