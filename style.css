@@ -524,6 +524,32 @@ table{width:100%;border-collapse:collapse}
 th,td{padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:left;white-space:nowrap}
 th{background:#f8fafc;color:#1e3a8a}
 tr:hover{background:#f1f5f9}
+.table-pagination{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.table-pagination-info{
+  color:#475569;
+  font-size:13px;
+  font-weight:700;
+}
+.table-pagination-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.table-pagination-actions .btn-primary{
+  padding:6px 10px;
+}
+.table-pagination-page{
+  color:#1e3a8a;
+  font-weight:700;
+  font-size:13px;
+}
 
 /* ================== SEARCH BOX ================== */
 .search-box{display:flex;align-items:center;gap:8px;background:#f1f5f9;padding:8px 12px;border-radius:10px}

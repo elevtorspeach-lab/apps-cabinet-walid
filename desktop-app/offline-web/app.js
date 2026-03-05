@@ -55,6 +55,7 @@ let audienceLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
+let lastAudienceRenderedRows = [];
 const dashboardMetricState = new Map();
 const SIDEBAR_COLLAPSED_KEY = 'cabinet-avocat-sidebar-collapsed';
 const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
@@ -3216,8 +3217,6 @@ function applyExcelImport(payload, options = {}){
   };
 
   const registerFallbackFromDossier = (client, dossier)=>{
-    // Keep matching scoped to real global dossiers only.
-    if(dossier?.isAudienceOrphanImport) return;
     const rowDebiteur = String(dossier?.debiteur || '').trim().toLowerCase();
     const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
       ? dossier.procedureDetails
@@ -3273,7 +3272,7 @@ function applyExcelImport(payload, options = {}){
     const seen = new Set();
     AppState.clients.forEach(client=>{
       (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
-        if(!dossier || dossier.isAudienceOrphanImport) return;
+        if(!dossier) return;
         const dossierRefs = getDossierAudienceReferenceKeys(dossier);
         if(!dossierRefs.has(targetRefKey)) return;
 
@@ -3597,9 +3596,7 @@ function applyExcelImport(payload, options = {}){
     const candidatePool = hintedProc
       ? candidates.filter(c=>String(c?.proc || '').trim() === hintedProc)
       : candidates;
-    const activeCandidatesRaw = candidatePool.length ? candidatePool : candidates;
-    const nonOrphanCandidates = activeCandidatesRaw.filter(c=>!c?.dossier?.isAudienceOrphanImport);
-    const activeCandidates = nonOrphanCandidates.length ? nonOrphanCandidates : activeCandidatesRaw;
+    const activeCandidates = candidatePool.length ? candidatePool : candidates;
     if(activeCandidates.length){
       let bestCandidate = null;
       let bestScore = -1;
@@ -6693,7 +6690,10 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  return getAudienceRows()
+  const sourceRows = Array.isArray(lastAudienceRenderedRows)
+    ? lastAudienceRenderedRows
+    : getAudienceRows();
+  return sourceRows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .length;
 }
@@ -6833,6 +6833,7 @@ function renderAudience(){
   syncAudienceFilterOptions(allRows);
   const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
   const rows = getFilteredAudienceRows(allRows);
+  lastAudienceRenderedRows = rows;
 
   let rowsHtml = '';
   rows.forEach(row=>{
@@ -7396,8 +7397,8 @@ function updateAudienceDraft(key, field, value){
   const { ci, di, procKey } = parseAudienceDraftKey(key);
   const p = getAudienceProcedure(ci, di, procKey);
   applyAudienceFieldToProcedure(p, field, value);
-  queuePersistAppState();
-  queueAudienceLinkedRenders();
+  // Avoid full-state persist and linked heavy renders on every keystroke.
+  // We keep in-memory update immediate and persist through debounced autosave.
   queueAudienceAutoSave();
 }
 
@@ -7457,7 +7458,7 @@ function queueAudienceAutoSave(){
       rerender: false,
       showAlert: false
     });
-  }, 700);
+  }, 1200);
 }
 
 // ================== PROCEDURE DETAILS ==================

@@ -13,6 +13,8 @@ let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
 let filterAudienceErrorsOnly = false;
+let paginationState = { audience: 1, suivi: 1, diligence: 1 };
+let paginationFilterState = { audience: '', suivi: '', diligence: '' };
 let audienceTribunalAliasMap = new Map();
 let audiencePrintSelection = new Set();
 let filterSuiviProcedure = 'all';
@@ -55,6 +57,7 @@ let audienceLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
+let lastAudienceRenderedRows = [];
 const dashboardMetricState = new Map();
 const SIDEBAR_COLLAPSED_KEY = 'cabinet-avocat-sidebar-collapsed';
 const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
@@ -63,6 +66,10 @@ const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
+const PAGINATION_PAGE_SIZE = 100;
+const IMPORT_CHUNK_SIZE = 80;
+const IMPORT_EXCEL_CHUNK_SIZE = 40;
+const IMPORT_STATUS_THROTTLE_MS = 120;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
 const XLSX_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/xlsx.full.min.js' : '/vendor/libs/xlsx.full.min.js';
 const EXCELJS_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/exceljs.min.js' : '/vendor/libs/exceljs.min.js';
@@ -226,6 +233,131 @@ function debounce(fn, wait = 120){
       fn(...args);
     }, wait);
   };
+}
+
+function captureSyncStatusSnapshot(){
+  const text = $('syncStatusText');
+  return {
+    status: getCurrentSyncStatus(),
+    message: text ? String(text.innerText || '').trim() : ''
+  };
+}
+
+function restoreSyncStatusSnapshot(snapshot){
+  if(!snapshot || typeof snapshot !== 'object'){
+    setSyncStatus('pending');
+    return;
+  }
+  setSyncStatus(snapshot.status, snapshot.message || undefined);
+}
+
+function yieldToMainThread(){
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    return new Promise(resolve=>window.requestAnimationFrame(()=>resolve()));
+  }
+  return new Promise(resolve=>setTimeout(resolve, 0));
+}
+
+async function runChunked(items, task, options = {}){
+  const list = Array.isArray(items) ? items : [];
+  const chunkSize = Math.max(1, Number(options.chunkSize) || IMPORT_CHUNK_SIZE);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  for(let index = 0; index < list.length; index += 1){
+    await task(list[index], index, list.length);
+    if((index + 1) % chunkSize === 0){
+      if(onProgress) onProgress(index + 1, list.length);
+      await yieldToMainThread();
+    }
+  }
+  if(onProgress) onProgress(list.length, list.length);
+}
+
+function makeProgressReporter(prefix){
+  let lastAt = 0;
+  return (done, total)=>{
+    const now = Date.now();
+    if(done < total && now - lastAt < IMPORT_STATUS_THROTTLE_MS) return;
+    lastAt = now;
+    setSyncStatus('syncing', `${prefix} ${done}/${total}...`);
+  };
+}
+
+function getRenderForSection(section){
+  if(section === 'audience') return renderAudience;
+  if(section === 'suivi') return renderSuivi;
+  if(section === 'diligence') return renderDiligence;
+  return null;
+}
+
+function resetPaginationPage(section){
+  if(!Object.prototype.hasOwnProperty.call(paginationState, section)) return;
+  paginationState[section] = 1;
+}
+
+function syncPaginationFilterState(section, key){
+  if(!Object.prototype.hasOwnProperty.call(paginationFilterState, section)) return;
+  const next = String(key || '');
+  if(paginationFilterState[section] === next) return;
+  paginationFilterState[section] = next;
+  paginationState[section] = 1;
+}
+
+function paginateRows(rows, section){
+  const list = Array.isArray(rows) ? rows : [];
+  const safeSection = String(section || '');
+  const rawPage = Number(paginationState[safeSection]) || 1;
+  const totalRows = list.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / PAGINATION_PAGE_SIZE));
+  const page = Math.min(Math.max(1, rawPage), totalPages);
+  const start = (page - 1) * PAGINATION_PAGE_SIZE;
+  const end = start + PAGINATION_PAGE_SIZE;
+  paginationState[safeSection] = page;
+  return {
+    rows: list.slice(start, end),
+    page,
+    totalPages,
+    totalRows,
+    from: totalRows ? start + 1 : 0,
+    to: Math.min(totalRows, end)
+  };
+}
+
+function renderPagination(section, pagination){
+  const el = $(`${section}Pagination`);
+  if(!el) return;
+  const meta = pagination && typeof pagination === 'object'
+    ? pagination
+    : { page: 1, totalPages: 1, totalRows: 0, from: 0, to: 0 };
+  if(!meta.totalRows){
+    el.innerHTML = '';
+    return;
+  }
+  const prevDisabled = meta.page <= 1 ? 'disabled' : '';
+  const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
+  el.innerHTML = `
+    <div class="table-pagination-info">
+      ${meta.from}-${meta.to} / ${meta.totalRows} (${PAGINATION_PAGE_SIZE}/page)
+    </div>
+    <div class="table-pagination-actions">
+      <button type="button" class="btn-primary" ${prevDisabled} onclick="changePaginationPage('${section}', -1)">
+        <i class="fa-solid fa-chevron-left"></i> Préc
+      </button>
+      <span class="table-pagination-page">Page ${meta.page}/${meta.totalPages}</span>
+      <button type="button" class="btn-primary" ${nextDisabled} onclick="changePaginationPage('${section}', 1)">
+        Suiv <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </div>
+  `;
+}
+
+function changePaginationPage(section, delta){
+  const key = String(section || '').trim();
+  if(!Object.prototype.hasOwnProperty.call(paginationState, key)) return;
+  const step = Number(delta);
+  if(!Number.isFinite(step) || step === 0) return;
+  paginationState[key] = Math.max(1, (Number(paginationState[key]) || 1) + step);
+  const render = getRenderForSection(key);
+  if(typeof render === 'function') render();
 }
 
 function loadExternalScript(url, key){
@@ -2079,44 +2211,47 @@ function normalizeImportedPayload(raw){
 }
 
 async function importAppsavocatPayload(rawPayload){
-  const payload = normalizeImportedPayload(rawPayload);
-  if(!payload){
-    throw new Error('Format non reconnu: structure "clients" introuvable.');
-  }
+  const syncSnapshot = captureSyncStatusSnapshot();
+  try{
+    const payload = normalizeImportedPayload(rawPayload);
+    if(!payload){
+      throw new Error('Format non reconnu: structure "clients" introuvable.');
+    }
 
-  const importedClients = Array.isArray(payload.clients)
-    ? payload.clients.map(normalizeClient).filter(Boolean)
-    : [];
-  const importedUsers = Array.isArray(payload.users)
-    ? payload.users.map(normalizeUser).filter(Boolean)
-    : [];
-  const importedSalleAssignments = normalizeSalleAssignments(payload.salleAssignments);
+    const importedClients = Array.isArray(payload.clients)
+      ? payload.clients.map(normalizeClient).filter(Boolean)
+      : [];
+    const importedUsers = Array.isArray(payload.users)
+      ? payload.users.map(normalizeUser).filter(Boolean)
+      : [];
+    const importedSalleAssignments = normalizeSalleAssignments(payload.salleAssignments);
 
-  if(!importedClients.length && !importedUsers.length && !importedSalleAssignments.length){
-    throw new Error('Le fichier ne contient aucune donnée exploitable.');
-  }
+    if(!importedClients.length && !importedUsers.length && !importedSalleAssignments.length){
+      throw new Error('Le fichier ne contient aucune donnée exploitable.');
+    }
 
-  const existingClients = Array.isArray(AppState.clients) ? AppState.clients : [];
-  const existingByName = new Map();
-  const allClientIds = new Set();
-  const importedClientIdToResolvedId = new Map();
-  existingClients.forEach(client=>{
-    allClientIds.add(Number(client?.id) || 0);
-    const key = makeClientMatchKey(client?.name || '');
-    if(key) existingByName.set(key, client);
-  });
-  const nextClientId = ()=>{
-    let id = Date.now() + Math.floor(Math.random() * 1000000);
-    while(allClientIds.has(id)) id += 1;
-    allClientIds.add(id);
-    return id;
-  };
+    const existingClients = Array.isArray(AppState.clients) ? AppState.clients : [];
+    const existingByName = new Map();
+    const allClientIds = new Set();
+    const importedClientIdToResolvedId = new Map();
+    existingClients.forEach(client=>{
+      allClientIds.add(Number(client?.id) || 0);
+      const key = makeClientMatchKey(client?.name || '');
+      if(key) existingByName.set(key, client);
+    });
+    const nextClientId = ()=>{
+      let id = Date.now() + Math.floor(Math.random() * 1000000);
+      while(allClientIds.has(id)) id += 1;
+      allClientIds.add(id);
+      return id;
+    };
 
-  let addedClients = 0;
-  let addedDossiers = 0;
-  let skippedDossiers = 0;
+    let addedClients = 0;
+    let addedDossiers = 0;
+    let skippedDossiers = 0;
 
-  importedClients.forEach(importedClient=>{
+    const reportClientsProgress = makeProgressReporter('Import appsavocat - clients');
+    await runChunked(importedClients, async (importedClient)=>{
     const key = makeClientMatchKey(importedClient.name || '');
     if(!key) return;
     const importedClientId = Number(importedClient.id);
@@ -2157,13 +2292,14 @@ async function importAppsavocatPayload(rawPayload){
       target.dossiers.push(dossier);
       addedDossiers += 1;
     });
-  });
+    }, { chunkSize: IMPORT_CHUNK_SIZE, onProgress: reportClientsProgress });
 
-  const existingUserByUsername = new Map(
-    USERS.map(user=>[String(user?.username || '').trim().toLowerCase(), user])
-  );
-  let addedUsers = 0;
-  importedUsers.forEach(user=>{
+    const existingUserByUsername = new Map(
+      USERS.map(user=>[String(user?.username || '').trim().toLowerCase(), user])
+    );
+    let addedUsers = 0;
+    const reportUsersProgress = makeProgressReporter('Import appsavocat - utilisateurs');
+    await runChunked(importedUsers, async (user)=>{
     const usernameKey = String(user?.username || '').trim().toLowerCase();
     if(!usernameKey) return;
     if(existingUserByUsername.has(usernameKey)) return;
@@ -2183,48 +2319,54 @@ async function importAppsavocatPayload(rawPayload){
     });
     existingUserByUsername.set(usernameKey, user);
     addedUsers += 1;
-  });
-  USERS = ensureManagerUser(USERS);
+    }, { chunkSize: IMPORT_CHUNK_SIZE, onProgress: reportUsersProgress });
+    USERS = ensureManagerUser(USERS);
 
-  AppState.salleAssignments = normalizeSalleAssignments([
-    ...(Array.isArray(AppState.salleAssignments) ? AppState.salleAssignments : []),
-    ...importedSalleAssignments
-  ]);
+    AppState.salleAssignments = normalizeSalleAssignments([
+      ...(Array.isArray(AppState.salleAssignments) ? AppState.salleAssignments : []),
+      ...importedSalleAssignments
+    ]);
 
-  // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
-  audienceDraft = {};
-  const reconciliation = reconcileAudienceOrphanDossiers();
+    // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
+    audienceDraft = {};
+    const reconciliation = reconcileAudienceOrphanDossiers();
 
-  queuePersistAppState();
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderSalle();
-  renderEquipe();
+    queuePersistAppState();
+    renderClients();
+    renderDashboard();
+    updateClientDropdown();
+    renderSuivi();
+    renderAudience();
+    renderDiligence();
+    renderSalle();
+    renderEquipe();
 
-  alert(
-    [
-      'Import appsavocat terminé.',
-      `Clients ajoutés: ${addedClients}`,
-      `Dossiers ajoutés: ${addedDossiers}`,
-      `Dossiers ignorés (doublons): ${skippedDossiers}`,
-      `Utilisateurs ajoutés: ${addedUsers}`,
-      `Salles fusionnées: ${AppState.salleAssignments.length}`,
-      `Audience hors global rapprochée: ${reconciliation.matchedDossiers}`
-    ].join('\n')
-  );
+    alert(
+      [
+        'Import appsavocat terminé.',
+        `Clients ajoutés: ${addedClients}`,
+        `Dossiers ajoutés: ${addedDossiers}`,
+        `Dossiers ignorés (doublons): ${skippedDossiers}`,
+        `Utilisateurs ajoutés: ${addedUsers}`,
+        `Salles fusionnées: ${AppState.salleAssignments.length}`,
+        `Audience hors global rapprochée: ${reconciliation.matchedDossiers}`
+      ].join('\n')
+    );
+  }finally{
+    restoreSyncStatusSnapshot(syncSnapshot);
+  }
 }
 
 async function handleAppsavocatImportFile(file){
+  if(importInProgress) return;
   if(!file) return;
   if(!canEditData()){
     alert('Accès refusé');
     return;
   }
+  importInProgress = true;
   try{
+    setSyncStatus('syncing', 'Import appsavocat en cours...');
     const text = await file.text();
     const parsed = JSON.parse(text);
     await importAppsavocatPayload(parsed);
@@ -2232,6 +2374,8 @@ async function handleAppsavocatImportFile(file){
     console.error(err);
     const details = String(err?.message || '').trim();
     alert(`Import appsavocat impossible.${details ? `\nDétail: ${details}` : ''}`);
+  }finally{
+    importInProgress = false;
   }
 }
 
@@ -3026,8 +3170,9 @@ function showExcelImportResult(summary, issuesText){
   modal.style.display = 'flex';
 }
 
-function applyExcelImport(payload, options = {}){
+async function applyExcelImport(payload, options = {}){
   const { dossiers, audiences } = payload;
+  const syncSnapshot = captureSyncStatusSnapshot();
   const referenceHints = payload && typeof payload.referenceHints === 'object'
     ? payload.referenceHints
     : {};
@@ -3051,6 +3196,8 @@ function applyExcelImport(payload, options = {}){
   const allowedDossierProcedureSet = opts.allowedDossierProcedureSet instanceof Set
     ? opts.allowedDossierProcedureSet
     : null;
+  setSyncStatus('syncing', 'Import Excel en cours...');
+  try{
 
   const resetAudienceDataForGlobalImport = ()=>{
     AppState.clients.forEach(client=>{
@@ -3104,6 +3251,7 @@ function applyExcelImport(payload, options = {}){
   AppState.clients.forEach(c=>clientMap.set(String(c.name || '').trim().toLowerCase(), c));
 
   const refToProcMap = new Map();
+  const refToStateProcMap = new Map();
   const dossierRefClientSet = new Set();
   const rowRefClientToProcMap = new Map();
   const audienceOrphanDossierMap = new Map();
@@ -3216,7 +3364,6 @@ function applyExcelImport(payload, options = {}){
   };
 
   const registerFallbackFromDossier = (client, dossier)=>{
-    // Keep matching scoped to real global dossiers only.
     if(dossier?.isAudienceOrphanImport) return;
     const rowDebiteur = String(dossier?.debiteur || '').trim().toLowerCase();
     const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
@@ -3246,6 +3393,11 @@ function applyExcelImport(payload, options = {}){
         ? dossier.procedureList
         : String(dossier?.procedure || '').split(',').map(v=>String(v || '').trim()).filter(Boolean));
     const defaultProc = procList[0] || 'ASS';
+    const procCandidates = procList.length ? procList : [defaultProc];
+    const mainRefParts = splitReferenceValues(dossier?.referenceClient || '')
+      .map(v=>normalizeReferenceValue(v))
+      .filter(Boolean);
+    const rowRefClient = mainRefParts[0] || normalizeReferenceValue(String(dossier?.referenceClient || '').trim());
 
     allRefs.forEach(({ ref, proc })=>{
       const refKey = normalizeReferenceValue(ref);
@@ -3259,6 +3411,19 @@ function applyExcelImport(payload, options = {}){
         rowDebiteur
       });
     });
+
+    const refKeys = getDossierAudienceReferenceKeys(dossier);
+    refKeys.forEach(refKey=>{
+      procCandidates.forEach(proc=>{
+        pushCandidate(refToStateProcMap, refKey, {
+          dossier,
+          client,
+          proc: String(proc || '').trim() || defaultProc,
+          rowRefClient,
+          rowDebiteur
+        });
+      });
+    });
   };
 
   AppState.clients.forEach(client=>{
@@ -3267,59 +3432,11 @@ function applyExcelImport(payload, options = {}){
     });
   });
 
-  const findCandidatesByRefDossierFromState = (targetRefKey)=>{
-    if(!targetRefKey) return [];
-    const found = [];
-    const seen = new Set();
-    AppState.clients.forEach(client=>{
-      (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
-        if(!dossier || dossier.isAudienceOrphanImport) return;
-        const dossierRefs = getDossierAudienceReferenceKeys(dossier);
-        if(!dossierRefs.has(targetRefKey)) return;
-
-        const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
-          ? dossier.procedureDetails
-          : {};
-        const matchingProcNames = Object.entries(details)
-          .filter(([, procDetails])=>{
-            const refs = splitReferenceValues(procDetails?.referenceClient || '')
-              .map(v=>normalizeReferenceValue(v))
-              .filter(Boolean);
-            return refs.includes(targetRefKey);
-          })
-          .map(([procName])=>String(procName || '').trim())
-          .filter(Boolean);
-
-        const baseProcList = normalizeProcedures(dossier);
-        const procCandidates = matchingProcNames.length
-          ? matchingProcNames
-          : (baseProcList.length ? baseProcList : ['ASS']);
-
-        const mainRefParts = splitReferenceValues(dossier?.referenceClient || '')
-          .map(v=>normalizeReferenceValue(v))
-          .filter(Boolean);
-        const rowRefClient = mainRefParts[0] || normalizeReferenceValue(String(dossier?.referenceClient || '').trim());
-        const rowDebiteur = String(dossier?.debiteur || '').trim().toLowerCase();
-
-        procCandidates.forEach(proc=>{
-          const signature = `${client?.id || ''}::${proc || ''}::${rowRefClient || ''}::${rowDebiteur || ''}`;
-          if(seen.has(signature)) return;
-          seen.add(signature);
-          found.push({
-            dossier,
-            client,
-            proc,
-            rowRefClient,
-            rowDebiteur
-          });
-        });
-      });
-    });
-    return found;
-  };
+  const getCandidatesByRefDossier = (targetRefKey)=>refToStateProcMap.get(targetRefKey) || [];
 
   if(importDossiers){
-    dossiers.forEach(row=>{
+    const reportDossiersProgress = makeProgressReporter('Import Excel - dossiers');
+    await runChunked(dossiers, async (row)=>{
     const rowNumberLabel = Number.isFinite(Number(row?.rowNumber)) ? `Ligne ${Number(row.rowNumber)}` : 'Ligne ?';
     const dossierProcedureContext = formatProcedureContextFromText(row?.procedureText || '');
     const dossierContext = buildIssueContext({
@@ -3510,12 +3627,14 @@ function applyExcelImport(payload, options = {}){
     dossier.procedure = orderedImportedProcs.join(', ');
 
     client.dossiers.push(dossier);
+    registerFallbackFromDossier(client, dossier);
     importedDossiersCount += 1;
-    });
+    }, { chunkSize: IMPORT_EXCEL_CHUNK_SIZE, onProgress: reportDossiersProgress });
   }
 
   if(importAudiences){
-    audiences.forEach(row=>{
+    const reportAudiencesProgress = makeProgressReporter('Import Excel - audiences');
+    await runChunked(audiences, async (row)=>{
     const rowNumberLabel = Number.isFinite(Number(row?.rowNumber)) ? `Ligne ${Number(row.rowNumber)}` : 'Ligne ?';
     const audienceBaseContext = buildIssueContext({
       source: 'Audience',
@@ -3549,7 +3668,7 @@ function applyExcelImport(payload, options = {}){
       zone: 'Dossiers globaux',
       procedure: procByRefDossier
     });
-    const byGlobalScan = findCandidatesByRefDossierFromState(refKey);
+    const byGlobalScan = getCandidatesByRefDossier(refKey);
     let candidates = [];
     const mergedCandidateSeen = new Set();
     [...candidatesByRefDossier, ...byGlobalScan].forEach(candidate=>{
@@ -3677,7 +3796,7 @@ function applyExcelImport(payload, options = {}){
     dossier.procedureList = normalizedProcedures;
     dossier.procedure = normalizedProcedures.join(', ');
     linkedAudiencesCount += 1;
-    });
+    }, { chunkSize: IMPORT_EXCEL_CHUNK_SIZE, onProgress: reportAudiencesProgress });
   }
 
   let reconciledOrphans = 0;
@@ -3708,6 +3827,9 @@ function applyExcelImport(payload, options = {}){
     `Erreurs ignorées (non bloquantes): ${importIgnoredRows.length}`
   ].join('\n');
   showExcelImportResult(summary, issuesText);
+  }finally{
+    restoreSyncStatusSnapshot(syncSnapshot);
+  }
 }
 
 async function handleExcelImportFile(file, options = {}){
@@ -3719,7 +3841,9 @@ async function handleExcelImportFile(file, options = {}){
   }
   importInProgress = true;
   try{
+    setSyncStatus('syncing', 'Import Excel: lecture du fichier...');
     const buffer = await file.arrayBuffer();
+    setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
     const workbook = XLSX.read(buffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     if(!sheetName){
@@ -3739,7 +3863,8 @@ async function handleExcelImportFile(file, options = {}){
       throw new Error('Format de feuille non reconnu.');
     }
     const parsed = parseExcelData(rows);
-    applyExcelImport(parsed, options);
+    setSyncStatus('syncing', 'Import Excel: fusion des données...');
+    await applyExcelImport(parsed, options);
   }catch(err){
     console.error(err);
     const details = String(err?.message || '').trim();
@@ -4869,11 +4994,13 @@ function removeFile(index){
 // ================== SUIVI ==================
 function renderSuivi(){
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
+  syncPaginationFilterState('suivi', [q, filterSuiviProcedure, filterSuiviTribunal].join('||'));
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
   suiviBody.innerHTML='';
   if(!isManager() && getVisibleClients().length === 0){
     suiviBody.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     return;
   }
   const allRowsMeta = [];
@@ -4936,9 +5063,12 @@ function renderSuivi(){
     duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
   });
 
-  filteredRows
-    .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts))
-    .forEach(row=>{
+  const sortedRows = filteredRows
+    .slice()
+    .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
+  const pageData = paginateRows(sortedRows, 'suivi');
+
+  pageData.rows.forEach(row=>{
       const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
 
       rowsHtml += `
@@ -4967,6 +5097,7 @@ function renderSuivi(){
     });
 
   suiviBody.innerHTML = rowsHtml || '<tr><td colspan="9" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
+  renderPagination('suivi', pageData);
 
   syncSuiviFilterOptions(allRowsMeta);
 }
@@ -5649,6 +5780,18 @@ function syncDiligenceOrdonnanceFilter(rows){
 }
 
 function renderDiligence(){
+  const diligenceQuery = $('diligenceSearchInput')?.value?.toLowerCase() || '';
+  syncPaginationFilterState(
+    'diligence',
+    [
+      diligenceQuery,
+      filterDiligenceProcedure,
+      filterDiligenceSort,
+      filterDiligenceDelegation,
+      filterDiligenceOrdonnance,
+      filterDiligenceTribunal
+    ].join('||')
+  );
   const body = $('diligenceBody');
   const count = $('diligenceCount');
   const headRow = $('diligenceHeadRow');
@@ -5712,10 +5855,12 @@ function renderDiligence(){
 
   if(!rows.length){
     body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 15 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+    renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     return;
   }
 
-  body.innerHTML = rows.map(row=>{
+  const pageData = paginateRows(rows, 'diligence');
+  body.innerHTML = pageData.rows.map(row=>{
     const procEncoded = encodeURIComponent(String(row.procedure || ''));
     const isChecked = isDiligenceSelectedForPrint(row);
     const refValue = row.details?.referenceClient || '';
@@ -5785,6 +5930,7 @@ function renderDiligence(){
       </tr>
     `;
   }).join('');
+  renderPagination('diligence', pageData);
 
   applyDiligenceAutoSizing(body);
 }
@@ -6693,7 +6839,10 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  return getAudienceRows()
+  const sourceRows = Array.isArray(lastAudienceRenderedRows)
+    ? lastAudienceRenderedRows
+    : getAudienceRows();
+  return sourceRows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .length;
 }
@@ -6816,6 +6965,19 @@ function setAllVisibleAudienceRowsForPrint(checked){
 }
 
 function renderAudience(){
+  const audienceQuery = $('filterAudience')?.value?.toLowerCase() || '';
+  syncPaginationFilterState(
+    'audience',
+    [
+      audienceQuery,
+      filterAudienceColor,
+      filterAudienceProcedure,
+      filterAudienceTribunal,
+      filterAudienceDate,
+      filterAudienceErrorsOnly ? '1' : '0',
+      selectedAudienceColor
+    ].join('||')
+  );
   const body = $('audienceBody');
   if(!body){
     renderSidebarSalleSessions();
@@ -6824,6 +6986,7 @@ function renderAudience(){
   body.innerHTML='';
   if(!isManager() && getVisibleClients().length === 0){
     body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     updateAudienceCheckedCount();
     renderSidebarSalleSessions();
     return;
@@ -6833,9 +6996,11 @@ function renderAudience(){
   syncAudienceFilterOptions(allRows);
   const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
   const rows = getFilteredAudienceRows(allRows);
+  lastAudienceRenderedRows = rows;
+  const pageData = paginateRows(rows, 'audience');
 
   let rowsHtml = '';
-  rows.forEach(row=>{
+  pageData.rows.forEach(row=>{
     const { c, d, procKey, p, color, key, draft } = row;
     const canEdit = canEditClient(c) && canEditData();
     const safeColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(color) ? color : '';
@@ -6884,6 +7049,7 @@ function renderAudience(){
     `;
   });
   body.innerHTML = rowsHtml || '<tr><td colspan="11" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+  renderPagination('audience', pageData);
   updateAudienceCheckedCount();
   renderSidebarSalleSessions();
 }
@@ -7396,8 +7562,8 @@ function updateAudienceDraft(key, field, value){
   const { ci, di, procKey } = parseAudienceDraftKey(key);
   const p = getAudienceProcedure(ci, di, procKey);
   applyAudienceFieldToProcedure(p, field, value);
-  queuePersistAppState();
-  queueAudienceLinkedRenders();
+  // Avoid full-state persist and linked heavy renders on every keystroke.
+  // We keep in-memory update immediate and persist through debounced autosave.
   queueAudienceAutoSave();
 }
 
@@ -7457,7 +7623,7 @@ function queueAudienceAutoSave(){
       rerender: false,
       showAlert: false
     });
-  }, 700);
+  }, 1200);
 }
 
 // ================== PROCEDURE DETAILS ==================
