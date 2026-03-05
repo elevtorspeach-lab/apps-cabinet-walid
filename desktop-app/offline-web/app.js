@@ -4139,6 +4139,7 @@ function setupEvents(){
     closeImportResultModal();
   });
   $('addClientBtn').onclick = ()=>addClient($('clientName').value);
+  $('deleteAllClientsBtn')?.addEventListener('click', deleteAllClients);
   $('importExcelBtn')?.addEventListener('click', ()=> $('importExcelInput')?.click());
   $('exportBackupExcelBtn')?.addEventListener('click', ()=>{
     if(!canEditData()) return alert('Accès refusé');
@@ -4541,6 +4542,7 @@ function applyRoleUI(){
   if($('clientsLink')) $('clientsLink').style.display = viewer ? 'none' : '';
   if($('equipeLink')) $('equipeLink').style.display = manager ? '' : 'none';
   if($('addClientBtn')) $('addClientBtn').style.display = canCreateClient ? '' : 'none';
+  if($('deleteAllClientsBtn')) $('deleteAllClientsBtn').style.display = canDeleteData() ? '' : 'none';
   if($('totalClientsCard')) $('totalClientsCard').style.display = viewer ? 'none' : '';
 
   const audienceEditable = canEditData();
@@ -4635,6 +4637,41 @@ function deleteClient(clientId){
   renderAudience();
   renderDiligence();
   renderEquipe();
+}
+
+function deleteAllClients(){
+  if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer tous les clients');
+  const totalClients = AppState.clients.length;
+  if(!totalClients) return alert('Aucun client à supprimer');
+  const totalDossiers = AppState.clients.reduce((sum, client)=>{
+    const count = Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
+    return sum + count;
+  }, 0);
+  const warning =
+    `Supprimer TOUS les clients (${totalClients}) et TOUS les dossiers (${totalDossiers}) ?\n\n`
+    + 'Cette action est irréversible.';
+  if(!window.confirm(warning)) return;
+
+  AppState.clients = [];
+  audienceDraft = {};
+  audiencePrintSelection = new Set();
+  diligencePrintSelection = new Set();
+  USERS = ensureManagerUser(
+    USERS.map(user=>({
+      ...user,
+      clientIds: []
+    }))
+  );
+
+  queuePersistAppState();
+  renderClients();
+  updateClientDropdown();
+  renderDashboard();
+  renderSuivi();
+  renderAudience();
+  renderDiligence();
+  renderEquipe();
+  renderSalle();
 }
 
 function goToCreation(clientId){
