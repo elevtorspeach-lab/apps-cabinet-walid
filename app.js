@@ -7257,7 +7257,7 @@ function renderAudience(){
   const rows = getFilteredAudienceRows(allRows);
   lastAudienceRenderedRows = rows;
   const pageData = paginateRows(rows, 'audience');
-  const useVirtual = pageData.rows.length >= AUDIENCE_VIRTUAL_MIN_ROWS;
+  const useVirtual = shouldUseAudienceVirtualization(pageData.rows.length);
   audienceVirtualRows = pageData.rows;
   audienceVirtualDuplicateKeySet = duplicateKeySet;
   audienceVirtualLastRange = { start: -1, end: -1 };
@@ -7271,6 +7271,22 @@ function renderAudience(){
   renderPagination('audience', pageData);
   updateAudienceCheckedCount();
   renderSidebarSalleSessions();
+}
+
+function shouldUseAudienceVirtualization(rowCount){
+  if(Number(rowCount) < AUDIENCE_VIRTUAL_MIN_ROWS) return false;
+  const container = $('audienceTableContainer');
+  if(!container) return false;
+  if(typeof window === 'undefined' || typeof window.getComputedStyle !== 'function'){
+    return false;
+  }
+  const style = window.getComputedStyle(container);
+  const overflowY = String(style.overflowY || '').toLowerCase();
+  const maxHeight = String(style.maxHeight || '').trim().toLowerCase();
+  const height = String(style.height || '').trim().toLowerCase();
+  const hasConstrainedHeight = (maxHeight && maxHeight !== 'none') || (height && height !== 'auto');
+  if(!hasConstrainedHeight) return false;
+  return overflowY === 'auto' || overflowY === 'scroll';
 }
 
 function captureAudienceScrollState(){
