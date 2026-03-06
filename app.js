@@ -1653,7 +1653,7 @@ function parseProcedureToken(token){
   if(!raw) return '';
   const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   if(compact === 'ass') return 'ASS';
-  if(compact === 'rest' || compact === 'restitution' || compact === 'restit') return 'Restitution';
+  if(compact === 'rest' || compact === 'restitution' || compact === 'restit' || compact === 'rv' || compact === 'res') return 'Restitution';
   if(compact === 'nant' || compact === 'nantissement' || compact === 'nanti') return 'Nantissement';
   if(compact === 'sfdc') return 'SFDC';
   if(compact === 'sbien') return 'S/bien';
@@ -3886,8 +3886,9 @@ async function applyExcelImport(payload, options = {}){
     }
 
     const parsedProceduresRaw = parseProcedureList(row.procedureText);
-    const parsedProcedures = parsedProceduresRaw.length
-      ? parsedProceduresRaw
+    const parsedKnownProcedures = parsedProceduresRaw.filter(proc=>knownProcedureSet.has(proc));
+    const parsedProcedures = parsedKnownProcedures.length
+      ? parsedKnownProcedures
       : defaultDossierProceduresWhenMissing.slice();
     const movedToAudience = allowedDossierProcedureSet
       ? parsedProcedures.filter(proc=>!allowedDossierProcedureSet.has(proc))
@@ -4002,8 +4003,20 @@ async function applyExcelImport(payload, options = {}){
     // Split montants only when there are truly two affectation dates.
     const hasDualMontants = hasDualDates && orderedImportedProcs.length > 1 && !!primaryMontant && !!secondaryMontantCandidate;
 
+    const sharedReferenceCandidate = String(
+      row.refAssignation
+      || row.refRestitution
+      || row.refSfdc
+      || row.refInjonction
+      || row.refClient
+      || ''
+    ).trim();
+
     orderedImportedProcs.forEach((proc, idx)=>{
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
+      if(sharedReferenceCandidate && !String(dossier.procedureDetails[proc].referenceClient || '').trim()){
+        dossier.procedureDetails[proc].referenceClient = sharedReferenceCandidate;
+      }
       let procDate = normalizedPrimaryDate || normalizedSecondaryDate;
       if(hasDualDates){
         procDate = idx === 0
