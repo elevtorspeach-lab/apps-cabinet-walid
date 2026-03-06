@@ -77,7 +77,11 @@ const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
-const PAGINATION_PAGE_SIZE = 100;
+const PAGINATION_PAGE_SIZES = {
+  audience: 30,
+  suivi: 300,
+  diligence: 300
+};
 const IMPORT_CHUNK_SIZE = 80;
 const IMPORT_EXCEL_CHUNK_SIZE = 40;
 const IMPORT_STATUS_THROTTLE_MS = 120;
@@ -309,6 +313,13 @@ function getTableContainerBySection(section){
   return $(`${String(section || '').trim()}TableContainer`);
 }
 
+function getPaginationPageSize(section){
+  const key = String(section || '').trim();
+  const raw = Number(PAGINATION_PAGE_SIZES[key]);
+  if(Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return 300;
+}
+
 function resetPaginationPage(section){
   if(!Object.prototype.hasOwnProperty.call(paginationState, section)) return;
   paginationState[section] = 1;
@@ -327,12 +338,13 @@ function syncPaginationFilterState(section, key){
 function paginateRows(rows, section){
   const list = Array.isArray(rows) ? rows : [];
   const safeSection = String(section || '');
+  const pageSize = getPaginationPageSize(safeSection);
   const rawPage = Number(paginationState[safeSection]) || 1;
   const totalRows = list.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / PAGINATION_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const page = Math.min(Math.max(1, rawPage), totalPages);
-  const start = (page - 1) * PAGINATION_PAGE_SIZE;
-  const end = start + PAGINATION_PAGE_SIZE;
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
   paginationState[safeSection] = page;
   return {
     rows: list.slice(start, end),
@@ -347,6 +359,7 @@ function paginateRows(rows, section){
 function renderPagination(section, pagination){
   const el = $(`${section}Pagination`);
   if(!el) return;
+  const pageSize = getPaginationPageSize(section);
   const meta = pagination && typeof pagination === 'object'
     ? pagination
     : { page: 1, totalPages: 1, totalRows: 0, from: 0, to: 0 };
@@ -358,7 +371,7 @@ function renderPagination(section, pagination){
   const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
   el.innerHTML = `
     <div class="table-pagination-info">
-      ${meta.from}-${meta.to} / ${meta.totalRows} (${PAGINATION_PAGE_SIZE}/page)
+      ${meta.from}-${meta.to} / ${meta.totalRows} (${pageSize}/page)
     </div>
     <div class="table-pagination-actions">
       <button type="button" class="btn-primary" ${prevDisabled} onclick="changePaginationPage('${section}', -1)">

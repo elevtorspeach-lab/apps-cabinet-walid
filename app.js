@@ -79,7 +79,11 @@ const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
-const PAGINATION_PAGE_SIZE = 300;
+const PAGINATION_PAGE_SIZES = {
+  audience: 30,
+  suivi: 300,
+  diligence: 300
+};
 const IMPORT_CHUNK_SIZE = 80;
 const IMPORT_EXCEL_CHUNK_SIZE = 40;
 const IMPORT_STATUS_THROTTLE_MS = 120;
@@ -325,6 +329,13 @@ function getTableContainerBySection(section){
   return $(`${String(section || '').trim()}TableContainer`);
 }
 
+function getPaginationPageSize(section){
+  const key = String(section || '').trim();
+  const raw = Number(PAGINATION_PAGE_SIZES[key]);
+  if(Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return 300;
+}
+
 function resetPaginationPage(section){
   if(!Object.prototype.hasOwnProperty.call(paginationState, section)) return;
   paginationState[section] = 1;
@@ -343,12 +354,13 @@ function syncPaginationFilterState(section, key){
 function paginateRows(rows, section){
   const list = Array.isArray(rows) ? rows : [];
   const safeSection = String(section || '');
+  const pageSize = getPaginationPageSize(safeSection);
   const rawPage = Number(paginationState[safeSection]) || 1;
   const totalRows = list.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / PAGINATION_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const page = Math.min(Math.max(1, rawPage), totalPages);
-  const start = (page - 1) * PAGINATION_PAGE_SIZE;
-  const end = start + PAGINATION_PAGE_SIZE;
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
   paginationState[safeSection] = page;
   return {
     rows: list.slice(start, end),
@@ -363,6 +375,7 @@ function paginateRows(rows, section){
 function renderPagination(section, pagination){
   const el = $(`${section}Pagination`);
   if(!el) return;
+  const pageSize = getPaginationPageSize(section);
   const meta = pagination && typeof pagination === 'object'
     ? pagination
     : { page: 1, totalPages: 1, totalRows: 0, from: 0, to: 0 };
@@ -374,7 +387,7 @@ function renderPagination(section, pagination){
   const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
   el.innerHTML = `
     <div class="table-pagination-info">
-      ${meta.from}-${meta.to} / ${meta.totalRows} (${PAGINATION_PAGE_SIZE}/page)
+      ${meta.from}-${meta.to} / ${meta.totalRows} (${pageSize}/page)
     </div>
     <div class="table-pagination-actions">
       <button type="button" class="btn-primary" ${prevDisabled} onclick="changePaginationPage('${section}', -1)">
@@ -1730,6 +1743,49 @@ function normalizeReferenceValue(value){
     .toUpperCase();
 }
 
+function normalizeDossierReferenceValue(value){
+  const raw = String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u061C]/g, '');
+  if(!raw) return '';
+
+  const unified = raw
+    .replace(/[’'`´]/g, '')
+    .replace(/[\\\/⁄∕／]+/g, '/')
+    .replace(/[_\-.]+/g, '/')
+    .replace(/\s+/g, '');
+
+  let parts = null;
+  const slashMatch = unified.match(/(\d{1,10})\/(\d{1,10})\/(\d{2,4})/);
+  if(slashMatch){
+    parts = [slashMatch[1], slashMatch[2], slashMatch[3]];
+  }else{
+    const numericParts = unified.match(/\d+/g) || [];
+    if(numericParts.length >= 3){
+      parts = [numericParts[0], numericParts[1], numericParts[2]];
+    }
+  }
+  if(!parts) return '';
+
+  const firstNum = Number.parseInt(parts[0], 10);
+  const secondNum = Number.parseInt(parts[1], 10);
+  const yearNum = Number.parseInt(parts[2], 10);
+  if(!Number.isFinite(firstNum) || !Number.isFinite(secondNum) || !Number.isFinite(yearNum)){
+    return '';
+  }
+  const year = parts[2].length === 2
+    ? (yearNum >= 70 ? 1900 + yearNum : 2000 + yearNum)
+    : yearNum;
+  return `${firstNum}/${secondNum}/${year}`;
+}
+
+function normalizeReferenceForAudienceLookup(value){
+  const dossierRef = normalizeDossierReferenceValue(value);
+  if(dossierRef) return dossierRef;
+  return normalizeReferenceValue(value);
+}
+
 function splitReferenceValues(value){
   const rawChunks = String(value || '')
     .replace(/\r\n/g, '\n')
@@ -2315,7 +2371,7 @@ function getDossierAudienceReferenceKeys(dossier){
   const refs = new Set();
   const pushRef = (value)=>{
     splitReferenceValues(value).forEach(part=>{
-      const key = normalizeReferenceValue(part);
+      const key = normalizeReferenceForAudienceLookup(part);
       if(key) refs.add(key);
     });
   };
@@ -2336,7 +2392,7 @@ function getDossierProcedureReferenceKeys(dossier){
     : {};
   Object.values(details).forEach(proc=>{
     splitReferenceValues(proc?.referenceClient || '').forEach(part=>{
-      const key = normalizeReferenceValue(part);
+      const key = normalizeReferenceForAudienceLookup(part);
       if(key) refs.add(key);
     });
   });
@@ -3099,7 +3155,7 @@ function parseExcelData(rows){
   };
   const referenceHints = {};
   const registerReferenceHint = (rawRef, procName, extras = {})=>{
-    const key = normalizeReferenceValue(rawRef);
+    const key = normalizeReferenceForAudienceLookup(rawRef);
     const proc = String(procName || '').trim();
     if(!key || !proc) return;
     const executionNo = String(extras.executionNo || '').trim();
@@ -3727,7 +3783,7 @@ async function applyExcelImport(payload, options = {}){
     const rowRefClient = mainRefParts[0] || normalizeReferenceValue(String(dossier?.referenceClient || '').trim());
 
     allRefs.forEach(({ ref, proc })=>{
-      const refKey = normalizeReferenceValue(ref);
+      const refKey = normalizeReferenceForAudienceLookup(ref);
       if(!refKey) return;
       dossierRefClientSet.add(refKey);
       pushCandidate(rowRefClientToProcMap, refKey, {
@@ -3843,7 +3899,7 @@ async function applyExcelImport(payload, options = {}){
     const procedureSet = new Set(procedures);
     const setProcRef = (proc, ref)=>{
       const refText = String(ref || '').trim();
-      const refKey = normalizeReferenceValue(refText);
+      const refKey = normalizeReferenceForAudienceLookup(refText);
       if(!refKey) return;
       dossierRefClientSet.add(refKey);
       const keepProcedureInDossier = !allowedDossierProcedureSet || allowedDossierProcedureSet.has(proc);
@@ -3968,7 +4024,7 @@ async function applyExcelImport(payload, options = {}){
       zone: 'Import audience'
     });
     const ref = String(row.refDossier || '').trim();
-    const refKey = normalizeReferenceValue(ref);
+    const refKey = normalizeReferenceForAudienceLookup(ref);
     const hint = getReferenceHint(refKey);
     const hintedProc = parseProcedureToken(hint.procedure || '');
     if(!refKey){
@@ -5419,7 +5475,7 @@ function renderSuivi(){
 }
 
 function parseSuiviReferenceParts(value){
-  const ref = normalizeReferenceValue(value);
+  const ref = normalizeReferenceForAudienceLookup(value);
   if(!ref) return null;
   const m = ref.match(/^([A-Za-z]+)?(\d+)([A-Za-z]+)?(\d+)?$/);
   if(m){
@@ -7095,9 +7151,7 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  const sourceRows = Array.isArray(lastAudienceRenderedRows)
-    ? lastAudienceRenderedRows
-    : getAudienceRows();
+  const sourceRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   return sourceRows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .length;
@@ -7348,17 +7402,17 @@ function getAudienceDateDepotDisplayValue(row){
 }
 
 function getSelectedAudienceRowsForExport(){
-  return getAudienceRows()
+  return getAudienceRows({ ignoreSearch: true, ignoreColor: true })
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .sort(compareAudienceRowsByReferenceProximity);
 }
 
 function getAudienceRowReferenceValue(row){
-  return normalizeReferenceValue(String(row?.draft?.refDossier ?? row?.p?.referenceClient ?? '').trim());
+  return normalizeReferenceForAudienceLookup(String(row?.draft?.refDossier ?? row?.p?.referenceClient ?? '').trim());
 }
 
 function parseAudienceReferenceParts(value){
-  const ref = normalizeReferenceValue(value);
+  const ref = normalizeReferenceForAudienceLookup(value);
   const m = ref.match(/^(\d+)\/(\d+)\/(\d{2,4})$/);
   if(!m) return null;
   const first = Number(m[1]);
@@ -7402,7 +7456,7 @@ function compareAudienceRowsByReferenceProximity(a, b){
 }
 
 function buildAudienceDuplicateKey(row){
-  const refDossier = normalizeReferenceValue(String(row?.draft?.refDossier ?? row?.p?.referenceClient ?? '').trim());
+  const refDossier = normalizeReferenceForAudienceLookup(String(row?.draft?.refDossier ?? row?.p?.referenceClient ?? '').trim());
   const procedure = String(row?.procKey || '').trim().toLowerCase();
   const debiteur = String(row?.d?.debiteur || '')
     .trim()
@@ -7594,8 +7648,11 @@ function hasAudienceProcedureData(procData, draftData){
   return fields.some(value=>String(value || '').trim().length > 0);
 }
 
-function getAudienceRows(){
-  const q = $('filterAudience')?.value?.toLowerCase() || '';
+function getAudienceRows(options = {}){
+  const opts = options && typeof options === 'object' ? options : {};
+  const ignoreSearch = !!opts.ignoreSearch;
+  const ignoreColor = !!opts.ignoreColor;
+  const q = ignoreSearch ? '' : ($('filterAudience')?.value?.toLowerCase() || '');
   const rows = [];
   AppState.clients.forEach((c, ci)=>{
     if(!canViewClient(c)) return;
@@ -7609,12 +7666,12 @@ function getAudienceRows(){
         if(!isAudienceProcedure(procKey)) return;
         const p = getAudienceProcedure(ci, di, procKey);
         const color = p.color || '';
-        if(filterAudienceColor !== 'all' && color !== filterAudienceColor) return;
+        if(!ignoreColor && filterAudienceColor !== 'all' && color !== filterAudienceColor) return;
         const key = makeAudienceDraftKey(ci, di, procKey);
         const draft = audienceDraft[key] || {};
         if(!hasAudienceProcedureData(p, draft)) return;
         const haystack = buildAudienceSearchHaystack(c.name, d, procKey, p, draft);
-        if(q && !haystack.includes(q)) return;
+        if(!ignoreSearch && q && !haystack.includes(q)) return;
         rows.push({ c, d, procKey, p, color, key, draft, ci, di });
       });
     });
