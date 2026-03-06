@@ -57,6 +57,7 @@ let audienceLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
+let syncMetricsRenderQueued = false;
 let lastAudienceRenderedRows = [];
 let audienceVirtualRows = [];
 let audienceVirtualDuplicateKeySet = new Set();
@@ -69,6 +70,7 @@ let diligenceVirtualRows = [];
 let diligenceVirtualLastRange = { start: -1, end: -1 };
 let diligenceVirtualRafId = null;
 let diligenceVirtualShowInjonctionColumns = false;
+let audienceColorButtons = [];
 const dashboardMetricState = new Map();
 const SIDEBAR_COLLAPSED_KEY = 'cabinet-avocat-sidebar-collapsed';
 const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
@@ -77,7 +79,7 @@ const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
-const PAGINATION_PAGE_SIZE = 100;
+const PAGINATION_PAGE_SIZE = 300;
 const IMPORT_CHUNK_SIZE = 80;
 const IMPORT_EXCEL_CHUNK_SIZE = 40;
 const IMPORT_STATUS_THROTTLE_MS = 120;
@@ -225,9 +227,23 @@ function renderSyncMetrics(){
   if(liveNode) liveNode.innerText = `Live: ${formatSyncMetricMs(lastLiveDelayMs)}`;
 }
 
+function queueSyncMetricsRender(){
+  if(syncMetricsRenderQueued) return;
+  syncMetricsRenderQueued = true;
+  const render = ()=>{
+    syncMetricsRenderQueued = false;
+    renderSyncMetrics();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(render);
+    return;
+  }
+  setTimeout(render, 0);
+}
+
 function setPingMetric(value){
   lastPingMs = Number.isFinite(Number(value)) ? Number(value) : null;
-  renderSyncMetrics();
+  queueSyncMetricsRender();
 }
 
 function setLiveDelayMetricFromIso(updatedAtIso){
@@ -237,7 +253,7 @@ function setLiveDelayMetricFromIso(updatedAtIso){
   }else{
     lastLiveDelayMs = Math.max(0, Date.now() - ts);
   }
-  renderSyncMetrics();
+  queueSyncMetricsRender();
 }
 
 function debounce(fn, wait = 120){
@@ -688,7 +704,7 @@ function loadExternalScript(url, key){
   });
 }
 
-async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false } = {}){
+async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false, silent = false } = {}){
   try{
     if(needXlsx && typeof XLSX === 'undefined'){
       if(!xlsxLoadPromise){
@@ -715,11 +731,23 @@ async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false } = {
     return true;
   }catch(err){
     console.error(err);
+    if(silent) return false;
     const details = String(err?.message || '').trim();
     const extra = details ? `\nDétail: ${details}` : '';
     alert(`Chargement du module Excel impossible.${extra}`);
     return false;
   }
+}
+
+function warmupExcelLibrariesOnIdle(){
+  const warmup = ()=>{
+    ensureExcelLibraries({ needXlsx: true, needExcelJs: true, silent: true }).catch(()=>{});
+  };
+  if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+    window.requestIdleCallback(warmup, { timeout: 2000 });
+    return;
+  }
+  setTimeout(warmup, 900);
 }
 
 function getCurrentSyncStatus(){
@@ -4511,6 +4539,7 @@ async function initApplication(){
   renderAudience();
   renderDiligence();
   renderEquipe();
+  warmupExcelLibrariesOnIdle();
   startRemoteSync();
   showView('dashboard');
 }
@@ -4788,7 +4817,8 @@ function setupEvents(){
   });
 
   // ===== Audience color filters =====
-  document.querySelectorAll('.color-btn[data-color]').forEach(btn=>{
+  audienceColorButtons = Array.from(document.querySelectorAll('.color-btn[data-color]'));
+  audienceColorButtons.forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const color = btn.dataset.color;
       // Color buttons are paint mode selectors (not table filters).
@@ -4817,8 +4847,9 @@ function setupEvents(){
 
 function setSelectedAudienceColor(color, syncFilter){
   selectedAudienceColor = color;
-  document.querySelectorAll('.color-btn[data-color]').forEach(b=>b.classList.remove('active'));
-  const btn = document.querySelector(`.color-btn[data-color="${color}"]`);
+  const buttons = audienceColorButtons.length ? audienceColorButtons : Array.from(document.querySelectorAll('.color-btn[data-color]'));
+  buttons.forEach(b=>b.classList.remove('active'));
+  const btn = buttons.find(b=>b.dataset.color === color) || null;
   if(btn) btn.classList.add('active');
   if(syncFilter){
     filterAudienceColor = color;
@@ -5007,23 +5038,23 @@ function addClient(name){
 function updateClientDropdown(){
   const selectClient = $('selectClient');
   if(!selectClient) return;
-  selectClient.innerHTML = '<option value="">Client</option>';
-  getVisibleClients().filter(c=>canEditClient(c)).forEach(c=>{
-    selectClient.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
-  });
+  const optionsHtml = getVisibleClients()
+    .filter(c=>canEditClient(c))
+    .map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    .join('');
+  selectClient.innerHTML = `<option value="">Client</option>${optionsHtml}`;
 }
 
 function renderClients(){
   const q = $('searchClientInput')?.value?.toLowerCase() || '';
   const clientsBody = $('clientsBody');
-  clientsBody.innerHTML='';
-
-  getVisibleClients()
+  if(!clientsBody) return;
+  const rowsHtml = getVisibleClients()
     .filter(c => c.name.toLowerCase().includes(q))
-    .forEach(c=>{
+    .map(c=>{
       const canEdit = canEditClient(c);
       const canDelete = canDeleteData();
-      clientsBody.innerHTML += `
+      return `
         <tr>
           <td data-label="Client">${escapeHtml(c.name)}</td>
           <td data-label="Nb Dossiers">${c.dossiers.length}</td>
@@ -5037,7 +5068,9 @@ function renderClients(){
           </td>
         </tr>
       `;
-    });
+    })
+    .join('');
+  clientsBody.innerHTML = rowsHtml;
 }
 
 function deleteClient(clientId){
@@ -7240,6 +7273,44 @@ function renderAudience(){
   renderSidebarSalleSessions();
 }
 
+function captureAudienceScrollState(){
+  const container = $('audienceTableContainer');
+  return {
+    containerTop: container ? Number(container.scrollTop) || 0 : null,
+    containerLeft: container ? Number(container.scrollLeft) || 0 : null,
+    pageX: (typeof window !== 'undefined' ? Number(window.scrollX) : 0) || 0,
+    pageY: (typeof window !== 'undefined' ? Number(window.scrollY) : 0) || 0
+  };
+}
+
+function restoreAudienceScrollState(snapshot){
+  if(!snapshot || typeof snapshot !== 'object') return;
+  const container = $('audienceTableContainer');
+  if(container && Number.isFinite(snapshot.containerTop)){
+    container.scrollTop = Math.max(0, snapshot.containerTop);
+    if(Number.isFinite(snapshot.containerLeft)){
+      container.scrollLeft = Math.max(0, snapshot.containerLeft);
+    }
+    if(Array.isArray(audienceVirtualRows) && audienceVirtualRows.length >= AUDIENCE_VIRTUAL_MIN_ROWS){
+      queueAudienceVirtualRender();
+    }
+  }
+  if(typeof window !== 'undefined' && typeof window.scrollTo === 'function'){
+    window.scrollTo(snapshot.pageX || 0, snapshot.pageY || 0);
+  }
+}
+
+function renderAudienceKeepingPosition(){
+  const snapshot = captureAudienceScrollState();
+  renderAudience();
+  const apply = ()=>restoreAudienceScrollState(snapshot);
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(()=>window.requestAnimationFrame(apply));
+    return;
+  }
+  setTimeout(apply, 0);
+}
+
 function getAudienceDateDepotDisplayValue(row){
   const depotLeRaw = String(row?.p?.depotLe || '').trim();
   if(depotLeRaw){
@@ -7682,12 +7753,12 @@ function setAudienceColor(ci, di, procKey, checked){
     }
     queuePersistAppState();
     renderDashboard();
-    renderAudience();
+    renderAudienceKeepingPosition();
     return;
   }
   if(selectedAudienceColor === 'all' || !allowed.has(selectedAudienceColor)){
     renderDashboard();
-    renderAudience();
+    renderAudienceKeepingPosition();
     return;
   }
   p.color = selectedAudienceColor;
@@ -7695,7 +7766,7 @@ function setAudienceColor(ci, di, procKey, checked){
   if(selectedAudienceColor === 'purple-light') dossier.statut = 'Arrêt définitif';
   queuePersistAppState();
   renderDashboard();
-  renderAudience();
+  renderAudienceKeepingPosition();
   renderSuivi();
 }
 
