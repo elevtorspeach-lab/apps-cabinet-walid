@@ -2416,13 +2416,28 @@ function chooseAudienceProcedureTarget(globalDossier, orphanProcKey){
 
 function mergeAudienceProcedureFields(targetProc, sourceProc){
   const fields = ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'color', 'instruction'];
+  let sourceHasAudienceData = false;
+  let targetHasAudienceData = false;
+  let changed = false;
   fields.forEach(field=>{
     const incoming = String(sourceProc?.[field] ?? '').trim();
     const existing = String(targetProc?.[field] ?? '').trim();
-    if(!incoming || existing) return;
-    targetProc[field] = sourceProc[field];
+    if(incoming){
+      sourceHasAudienceData = true;
+      if(!existing){
+        targetProc[field] = sourceProc[field];
+        changed = true;
+      }
+    }
+    const targetValue = String(targetProc?.[field] ?? '').trim();
+    if(targetValue){
+      targetHasAudienceData = true;
+    }
   });
   delete targetProc._missingGlobal;
+  // Mark as merged only when source actually contains audience payload and
+  // target now carries audience values (newly copied or already present).
+  return sourceHasAudienceData && (changed || targetHasAudienceData);
 }
 
 function resolveAudienceTargetProcKey(dossier, preferredProcKey, sourceProcData){
@@ -2544,9 +2559,11 @@ function reconcileAudienceOrphanDossiers(){
       }
       const targetProc = bestCandidate.dossier.procedureDetails[targetProcKey] || {};
       const sourceProc = orphanProcData || {};
-      mergeAudienceProcedureFields(targetProc, sourceProc);
-      mergedProcedures += 1;
-      mergedForCurrentOrphan += 1;
+      const didMergeAudienceData = mergeAudienceProcedureFields(targetProc, sourceProc);
+      if(didMergeAudienceData){
+        mergedProcedures += 1;
+        mergedForCurrentOrphan += 1;
+      }
     });
 
     const updatedProcedures = normalizeProcedures(bestCandidate.dossier);
