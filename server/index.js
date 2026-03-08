@@ -6,6 +6,7 @@ const path = require('path');
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
+const WEB_DIR = path.join(__dirname, '..');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -24,6 +25,9 @@ let cachedState = null;
 const sseClients = new Set();
 
 app.use(express.json({ limit: '120mb' }));
+app.use(express.static(WEB_DIR, {
+  index: false
+}));
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -126,6 +130,10 @@ app.get('/api/state/stream', async (req, res) => {
     sseClients.delete(res);
     res.end();
   });
+});
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(WEB_DIR, 'index.html'));
 });
 
 ensureDataFile()
