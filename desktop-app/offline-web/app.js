@@ -40,10 +40,12 @@ let dashboardCalendarCursor = new Date(new Date().getFullYear(), new Date().getM
 let procedureMontantGroups = [];
 const STORAGE_KEY = 'cabinet-avocat-state-v1';
 const INDEXED_DB_NAME = 'cabinet-avocat-db-v1';
-const INDEXED_DB_VERSION = 1;
+const INDEXED_DB_VERSION = 2;
 const INDEXED_DB_STORE = 'state_store';
+const INDEXED_DB_BACKUP_STORE = 'backup_store';
 const INDEXED_DB_STATE_KEY = 'app_state';
 const API_BASE_STORAGE_KEY = 'cabinet-avocat-api-base-v1';
+const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
 let API_BASE = 'http://127.0.0.1:3000/api';
 let API_BASE_RESOLVED = false;
 let persistTimer = null;
@@ -66,6 +68,8 @@ let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
 let syncMetricsRenderQueued = false;
+let lastAutoBackupAt = 0;
+let lastAutoBackupSignature = '';
 let lastAudienceRenderedRows = [];
 let audienceVirtualRows = [];
 let audienceVirtualDuplicateKeySet = new Set();
@@ -116,7 +120,56 @@ let diligenceFilterSortRowsRef = null;
 let diligenceFilterDelegationRowsRef = null;
 let diligenceFilterOrdonnanceRowsRef = null;
 let audienceColorButtons = [];
+let backgroundDataWarmupTimer = null;
+let backgroundDataWarmupVersion = -1;
+let visibleClientsCache = null;
+let visibleClientsCacheVersion = -1;
+let visibleClientsCacheUserKey = '';
+let editableClientsCache = null;
+let editableClientsCacheVersion = -1;
+let editableClientsCacheUserKey = '';
+let clientListSummaryCache = null;
+let clientListSummaryCacheVersion = -1;
+let clientListSummaryCacheUserKey = '';
+let dashboardSnapshotCache = null;
+let dashboardSnapshotCacheVersion = -1;
+let dashboardSnapshotCacheUserKey = '';
+let dashboardCalendarEventsCache = null;
+let dashboardCalendarEventsCacheVersion = -1;
+let dashboardCalendarEventsCacheUserKey = '';
+let dashboardCalendarRenderTimer = null;
+let dashboardHeavyRenderTimer = null;
+let audienceErrorCountCacheVersion = -1;
+let audienceErrorCountCacheValue = 0;
+let knownJudgesCache = null;
+let knownJudgesCacheVersion = -1;
+let salleAudienceMapCache = null;
+let salleAudienceMapCacheVersion = -1;
+let salleAudienceMapCacheUserKey = '';
 const dashboardMetricState = new Map();
+const DEFERRED_RENDER_SECTION_IDS = {
+  dashboard: 'dashboardSection',
+  clients: 'clientSection',
+  creation: 'creationSection',
+  suivi: 'suiviSection',
+  audience: 'audienceSection',
+  diligence: 'diligenceSection',
+  salle: 'salleSection',
+  equipe: 'equipeSection',
+  recycle: 'recycleSection'
+};
+const deferredRenderDirtyState = {
+  dashboard: true,
+  clients: true,
+  creation: true,
+  suivi: true,
+  audience: true,
+  diligence: true,
+  salle: true,
+  equipe: true,
+  recycle: true,
+  clientDropdown: true
+};
 const DOSSIER_HISTORY_MAX_ENTRIES = 400;
 const DOSSIER_HISTORY_DEBOUNCE_MS = 900;
 const RECYCLE_BIN_MAX_ENTRIES = 600;
@@ -172,6 +225,8 @@ const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 3;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
+const AUTO_BACKUP_RETENTION_COUNT = 12;
+const AUTO_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
 const PAGINATION_PAGE_SIZES = {
@@ -511,6 +566,29 @@ function getAudienceViewerCacheKey(){
 
 function markAudienceRowsCacheDirty(){
   audienceRowsRawDataVersion += 1;
+  backgroundDataWarmupVersion = -1;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
+  dashboardSnapshotCache = null;
+  dashboardSnapshotCacheVersion = -1;
+  dashboardSnapshotCacheUserKey = '';
+  dashboardCalendarEventsCache = null;
+  dashboardCalendarEventsCacheVersion = -1;
+  dashboardCalendarEventsCacheUserKey = '';
+  audienceErrorCountCacheVersion = -1;
+  audienceErrorCountCacheValue = 0;
+  knownJudgesCache = null;
+  knownJudgesCacheVersion = -1;
+  salleAudienceMapCache = null;
+  salleAudienceMapCacheVersion = -1;
+  salleAudienceMapCacheUserKey = '';
   audienceRowsRawCache = null;
   audienceRowsDedupeCache = null;
   audienceRowsViewCacheSource = null;
@@ -572,14 +650,14 @@ function buildApiBaseCandidates(){
   const metaApiBase = document.querySelector('meta[name="api-base"]')?.getAttribute('content');
   appendCandidateVariants(out, seen, metaApiBase);
 
+  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
+    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
+    appendCandidateVariants(out, seen, window.location.origin);
+  }
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   if(isLocalHost){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
-  }
-  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
-    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
-    appendCandidateVariants(out, seen, window.location.origin);
   }
   if(!IS_REMOTE_WEB_HOST){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
@@ -622,6 +700,45 @@ function restoreSidebarState(){
     return;
   }
   setSidebarCollapsed(raw === '1');
+}
+
+function markDeferredRenderDirty(...keys){
+  keys.forEach(key=>{
+    if(Object.prototype.hasOwnProperty.call(deferredRenderDirtyState, key)){
+      deferredRenderDirtyState[key] = true;
+    }
+  });
+}
+
+function clearDeferredRenderDirty(key){
+  if(Object.prototype.hasOwnProperty.call(deferredRenderDirtyState, key)){
+    deferredRenderDirtyState[key] = false;
+  }
+}
+
+function isDeferredRenderSectionVisible(key){
+  const id = DEFERRED_RENDER_SECTION_IDS[key];
+  if(!id) return true;
+  const el = $(id);
+  return !!el && el.style.display !== 'none';
+}
+
+function shouldRenderDeferredSection(key, options = {}){
+  if(options.force === true || isDeferredRenderSectionVisible(key)){
+    clearDeferredRenderDirty(key);
+    return true;
+  }
+  markDeferredRenderDirty(key);
+  return false;
+}
+
+function shouldRenderClientDropdown(options = {}){
+  if(options.force === true || isDeferredRenderSectionVisible('creation')){
+    clearDeferredRenderDirty('clientDropdown');
+    return true;
+  }
+  markDeferredRenderDirty('clientDropdown');
+  return false;
 }
 
 function setSyncStatus(status, message){
@@ -1293,6 +1410,49 @@ function warmupExcelLibrariesOnIdle(){
   setTimeout(warmup, 900);
 }
 
+function scheduleBackgroundDataWarmup(delayMs = 1500){
+  if(typeof window === 'undefined' || !currentUser) return;
+  const targetVersion = audienceRowsRawDataVersion;
+  if(backgroundDataWarmupVersion === targetVersion) return;
+  if(backgroundDataWarmupTimer){
+    clearTimeout(backgroundDataWarmupTimer);
+    backgroundDataWarmupTimer = null;
+  }
+  const warmup = ()=>{
+    backgroundDataWarmupTimer = null;
+    if(!currentUser) return;
+    if(backgroundDataWarmupVersion === audienceRowsRawDataVersion) return;
+    try{
+      getClientListSummaries();
+      getDashboardSnapshot();
+      getDashboardCalendarEvents();
+      getSuiviBaseRowsCached();
+      const audienceRows = getAudienceRows();
+      const prevAudienceColor = selectedAudienceColor;
+      const prevErrorsOnly = filterAudienceErrorsOnly;
+      selectedAudienceColor = 'all';
+      filterAudienceErrorsOnly = false;
+      getFilteredAudienceRows(audienceRows);
+      selectedAudienceColor = 'blue';
+      getFilteredAudienceRows(audienceRows);
+      selectedAudienceColor = prevAudienceColor;
+      filterAudienceErrorsOnly = prevErrorsOnly;
+      getDiligenceRows();
+      backgroundDataWarmupVersion = audienceRowsRawDataVersion;
+    }catch(err){
+      console.warn('Préchargement des caches impossible', err);
+    }
+  };
+  backgroundDataWarmupTimer = setTimeout(()=>{
+    backgroundDataWarmupTimer = null;
+    if(typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(warmup, { timeout: 2500 });
+      return;
+    }
+    warmup();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
 function getCurrentSyncStatus(){
   const badge = $('syncStatusBadge');
   if(!badge) return 'pending';
@@ -1558,8 +1718,69 @@ function syncCurrentUserFromUsers(){
   }
 }
 
+function getCurrentClientAccessCacheKey(){
+  const user = currentUser || {};
+  const ids = Array.isArray(user?.clientIds) ? user.clientIds.map(v=>Number(v)).filter(Number.isFinite).sort((a, b)=>a - b) : [];
+  return [
+    String(user?.id || ''),
+    String(user?.role || ''),
+    ids.join(',')
+  ].join('||');
+}
+
 function getVisibleClients(){
-  return AppState.clients.filter(c=>canViewClient(c));
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    visibleClientsCache
+    && visibleClientsCacheVersion === audienceRowsRawDataVersion
+    && visibleClientsCacheUserKey === userKey
+  ){
+    return visibleClientsCache;
+  }
+  const next = AppState.clients.filter(c=>canViewClient(c));
+  visibleClientsCache = next;
+  visibleClientsCacheVersion = audienceRowsRawDataVersion;
+  visibleClientsCacheUserKey = userKey;
+  return next;
+}
+
+function getEditableClients(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    editableClientsCache
+    && editableClientsCacheVersion === audienceRowsRawDataVersion
+    && editableClientsCacheUserKey === userKey
+  ){
+    return editableClientsCache;
+  }
+  const next = getVisibleClients().filter(c=>canEditClient(c));
+  editableClientsCache = next;
+  editableClientsCacheVersion = audienceRowsRawDataVersion;
+  editableClientsCacheUserKey = userKey;
+  return next;
+}
+
+function getClientListSummaries(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    clientListSummaryCache
+    && clientListSummaryCacheVersion === audienceRowsRawDataVersion
+    && clientListSummaryCacheUserKey === userKey
+  ){
+    return clientListSummaryCache;
+  }
+  const next = getVisibleClients().map(client=>({
+    client,
+    id: client?.id,
+    name: String(client?.name || ''),
+    nameLower: String(client?.name || '').toLowerCase(),
+    dossierCount: Array.isArray(client?.dossiers) ? client.dossiers.length : 0,
+    canEdit: canEditClient(client)
+  }));
+  clientListSummaryCache = next;
+  clientListSummaryCacheVersion = audienceRowsRawDataVersion;
+  clientListSummaryCacheUserKey = userKey;
+  return next;
 }
 
 function collectDeepValues(value, out = []){
@@ -2615,27 +2836,33 @@ function normalizeUser(rawUser){
   return { id, username, password, role, clientIds };
 }
 
-function normalizeClient(rawClient){
+function normalizeClient(rawClient, options = {}){
   if(!rawClient || typeof rawClient !== 'object') return null;
+  const opts = options && typeof options === 'object' ? options : {};
+  const deepNormalize = opts.deep !== false;
   const id = Number(rawClient.id);
   const name = String(rawClient.name || '').trim();
   const dossiers = Array.isArray(rawClient.dossiers)
-    ? rawClient.dossiers.map(d=>{
-      if(!d || typeof d !== 'object') return d;
-      const normalizedDate = normalizeDateDDMMYYYY(d.dateAffectation || '');
-      const normalizedProcedures = normalizeProcedures(d);
-      return {
-        ...d,
-        dateAffectation: normalizedDate || '',
-        montant: getLowerMontantValue(d.montant || ''),
-        history: normalizeDossierHistoryEntries(d.history),
-        montantByProcedure: normalizeProcedureMontantGroups(
-          d.montantByProcedure,
-          normalizedProcedures,
-          getLowerMontantValue(d.montant || '')
-        )
-      };
-    })
+    ? (
+      deepNormalize
+        ? rawClient.dossiers.map(d=>{
+          if(!d || typeof d !== 'object') return d;
+          const normalizedDate = normalizeDateDDMMYYYY(d.dateAffectation || '');
+          const normalizedProcedures = normalizeProcedures(d);
+          return {
+            ...d,
+            dateAffectation: normalizedDate || '',
+            montant: getLowerMontantValue(d.montant || ''),
+            history: normalizeDossierHistoryEntries(d.history),
+            montantByProcedure: normalizeProcedureMontantGroups(
+              d.montantByProcedure,
+              normalizedProcedures,
+              getLowerMontantValue(d.montant || '')
+            )
+          };
+        })
+        : rawClient.dossiers.filter(d=>!!d && typeof d === 'object')
+    )
     : [];
   if(!Number.isFinite(id) || !name) return null;
   return { id, name, dossiers };
@@ -2915,7 +3142,8 @@ function clearRecycleBinToBackup(){
   alert('Corbeille vidée. Backup interne conservé.');
 }
 
-function renderRecycleBin(){
+function renderRecycleBin(options = {}){
+  if(!shouldRenderDeferredSection('recycle', options)) return;
   const body = $('recycleBody');
   if(!body) return;
   const restoreAllBtn = $('restoreAllRecycleBtn');
@@ -2967,6 +3195,9 @@ function renderRecycleBin(){
 }
 
 function getKnownJudges(){
+  if(knownJudgesCache && knownJudgesCacheVersion === audienceRowsRawDataVersion){
+    return knownJudgesCache;
+  }
   const set = new Set();
   AppState.clients.forEach(c=>{
     c.dossiers.forEach(d=>{
@@ -2976,11 +3207,21 @@ function getKnownJudges(){
       });
     });
   });
-  return [...set].sort((a, b)=>a.localeCompare(b, 'fr'));
+  knownJudgesCache = [...set].sort((a, b)=>a.localeCompare(b, 'fr'));
+  knownJudgesCacheVersion = audienceRowsRawDataVersion;
+  return knownJudgesCache;
 }
 
 function buildSalleAudienceMap(dayKey = selectedSalleDay){
   const targetDay = normalizeSalleWeekday(dayKey);
+  const userKey = `${getCurrentClientAccessCacheKey()}||${targetDay}`;
+  if(
+    salleAudienceMapCache
+    && salleAudienceMapCacheVersion === audienceRowsRawDataVersion
+    && salleAudienceMapCacheUserKey === userKey
+  ){
+    return salleAudienceMapCache;
+  }
   const salleToJudges = new Map();
   normalizeSalleAssignments(AppState.salleAssignments).forEach(row=>{
     if(normalizeSalleWeekday(row?.day) !== targetDay) return;
@@ -3040,6 +3281,9 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
     });
   });
 
+  salleAudienceMapCache = bySalleAndJudge;
+  salleAudienceMapCacheVersion = audienceRowsRawDataVersion;
+  salleAudienceMapCacheUserKey = userKey;
   return bySalleAndJudge;
 }
 
@@ -3700,6 +3944,9 @@ function getIndexedDbConnection(){
         if(!db.objectStoreNames.contains(INDEXED_DB_STORE)){
           db.createObjectStore(INDEXED_DB_STORE);
         }
+        if(!db.objectStoreNames.contains(INDEXED_DB_BACKUP_STORE)){
+          db.createObjectStore(INDEXED_DB_BACKUP_STORE);
+        }
       };
       req.onsuccess = ()=>resolve(req.result || null);
       req.onerror = ()=>{
@@ -3735,6 +3982,27 @@ async function writeStateToIndexedDb(payload){
   });
 }
 
+async function writeAutoBackupToIndexedDb(entry){
+  const db = await getIndexedDbConnection();
+  if(!db) return false;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(INDEXED_DB_BACKUP_STORE, 'readwrite');
+      const store = tx.objectStore(INDEXED_DB_BACKUP_STORE);
+      store.put(entry, entry.id);
+      tx.oncomplete = ()=>resolve(true);
+      tx.onerror = ()=>{
+        console.warn('Echec sauvegarde backup IndexedDB', tx.error);
+        resolve(false);
+      };
+      tx.onabort = ()=>resolve(false);
+    }catch(err){
+      console.warn('Ecriture backup IndexedDB impossible', err);
+      resolve(false);
+    }
+  });
+}
+
 async function readStateFromIndexedDb(){
   const db = await getIndexedDbConnection();
   if(!db) return null;
@@ -3753,6 +4021,98 @@ async function readStateFromIndexedDb(){
       resolve(null);
     }
   });
+}
+
+function readAutoBackupsFromLocalStorage(){
+  if(typeof localStorage === 'undefined') return [];
+  try{
+    const raw = localStorage.getItem(AUTO_BACKUP_STORAGE_KEY);
+    if(!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(err){
+    console.warn('Lecture auto backup localStorage impossible', err);
+    return [];
+  }
+}
+
+function writeAutoBackupsToLocalStorage(entries){
+  if(typeof localStorage === 'undefined') return false;
+  try{
+    localStorage.setItem(
+      AUTO_BACKUP_STORAGE_KEY,
+      JSON.stringify(Array.isArray(entries) ? entries.slice(0, AUTO_BACKUP_RETENTION_COUNT) : [])
+    );
+    return true;
+  }catch(err){
+    console.warn('Echec auto backup localStorage (quota/accès)', err);
+    return false;
+  }
+}
+
+async function pruneIndexedDbAutoBackups(){
+  const db = await getIndexedDbConnection();
+  if(!db) return;
+  await new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(INDEXED_DB_BACKUP_STORE, 'readwrite');
+      const store = tx.objectStore(INDEXED_DB_BACKUP_STORE);
+      const getAllReq = store.getAll();
+      getAllReq.onsuccess = ()=>{
+        const entries = Array.isArray(getAllReq.result) ? getAllReq.result : [];
+        const extras = entries
+          .sort((a, b)=>String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')))
+          .slice(AUTO_BACKUP_RETENTION_COUNT);
+        extras.forEach(entry=>{
+          if(entry?.id) store.delete(entry.id);
+        });
+      };
+      getAllReq.onerror = ()=>resolve();
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>resolve();
+      tx.onabort = ()=>resolve();
+    }catch(err){
+      console.warn('Nettoyage auto backup IndexedDB impossible', err);
+      resolve();
+    }
+  });
+}
+
+async function createAutoBackupSnapshot(payload, options = {}){
+  const safePayload = payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
+  const force = options.force === true;
+  const signature = buildStateSignature(
+    safePayload.clients,
+    safePayload.salleAssignments,
+    safePayload.users,
+    safePayload.audienceDraft,
+    safePayload.recycleBin,
+    safePayload.recycleArchive
+  );
+  const now = Date.now();
+  if(!force){
+    if(signature && signature === lastAutoBackupSignature) return false;
+    if(lastAutoBackupAt && (now - lastAutoBackupAt) < AUTO_BACKUP_MIN_INTERVAL_MS) return false;
+  }
+
+  const createdAt = new Date(now).toISOString();
+  const entry = {
+    id: `backup_${createdAt}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt,
+    source: String(options.source || 'auto'),
+    payload: safePayload
+  };
+
+  await writeAutoBackupToIndexedDb(entry);
+  const localEntries = readAutoBackupsFromLocalStorage();
+  localEntries.unshift(entry);
+  writeAutoBackupsToLocalStorage(localEntries);
+  pruneIndexedDbAutoBackups().catch(()=>{});
+  lastAutoBackupAt = now;
+  lastAutoBackupSignature = signature;
+  return true;
 }
 
 function writeStateToLocalStorage(payload){
@@ -3814,7 +4174,7 @@ function queueDesktopStateFilePersist(){
 async function persistAppStateNow(){
   flushAllDossierHistoryPendingEntries();
   const payload = buildAppStatePayload();
-  lastPersistedStateSignature = buildStateSignature(
+  const nextSignature = buildStateSignature(
     payload.clients,
     payload.salleAssignments,
     payload.users,
@@ -3822,8 +4182,10 @@ async function persistAppStateNow(){
     payload.recycleBin,
     payload.recycleArchive
   );
+  lastPersistedStateSignature = nextSignature;
   await writeStateToIndexedDb(payload);
   writeStateToLocalStorage(payload);
+  await createAutoBackupSnapshot(payload, { source: 'persist' });
   queueDesktopStateFilePersist();
   if(LOCAL_ONLY_MODE){
     setSyncStatus('error', 'Mode local (offline)');
@@ -3869,7 +4231,7 @@ async function loadPersistedState(){
       if(res.ok){
         const parsed = await res.json();
         const loadedClients = Array.isArray(parsed?.clients)
-          ? parsed.clients.map(normalizeClient).filter(Boolean)
+          ? parsed.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
           : [];
         const loadedUsers = Array.isArray(parsed?.users)
           ? parsed.users.map(normalizeUser).filter(Boolean)
@@ -3938,10 +4300,10 @@ async function loadPersistedState(){
   ){
     try{
       const desktopResult = await window.cabinetDesktopState.readState();
-      const parsed = desktopResult?.data;
-      if(parsed && typeof parsed === 'object'){
-        const loadedClients = Array.isArray(parsed?.clients)
-          ? parsed.clients.map(normalizeClient).filter(Boolean)
+        const parsed = desktopResult?.data;
+        if(parsed && typeof parsed === 'object'){
+          const loadedClients = Array.isArray(parsed?.clients)
+          ? parsed.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
           : [];
         const loadedUsers = Array.isArray(parsed?.users)
           ? parsed.users.map(normalizeUser).filter(Boolean)
@@ -3995,7 +4357,7 @@ async function loadPersistedState(){
   const indexedState = await readStateFromIndexedDb();
   if(indexedState && typeof indexedState === 'object'){
     const loadedClients = Array.isArray(indexedState?.clients)
-      ? indexedState.clients.map(normalizeClient).filter(Boolean)
+      ? indexedState.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
       : [];
     const loadedUsers = Array.isArray(indexedState?.users)
       ? indexedState.users.map(normalizeUser).filter(Boolean)
@@ -4044,7 +4406,7 @@ async function loadPersistedState(){
     if(!raw) return false;
     const parsed = JSON.parse(raw);
     const loadedClients = Array.isArray(parsed?.clients)
-      ? parsed.clients.map(normalizeClient).filter(Boolean)
+      ? parsed.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
       : [];
     const loadedUsers = Array.isArray(parsed?.users)
       ? parsed.users.map(normalizeUser).filter(Boolean)
@@ -5783,17 +6145,22 @@ async function initApplication(){
   setupEvents();
   restoreSidebarState();
   renderProcedureMontantGroups();
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderRecycleBin();
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
   warmupExcelLibrariesOnIdle();
   startRemoteSync();
   showView('dashboard');
+  scheduleBackgroundDataWarmup(1800);
 }
 
 // ================== EVENTS ==================
@@ -6147,12 +6514,16 @@ function showView(v){
   document.querySelectorAll('.nav-link').forEach(n=>n.classList.remove('active'));
   const target = $(v+'Link');
   if(target) target.classList.add('active');
-  if(v === 'suivi') renderSuivi();
-  if(v === 'audience') renderAudience();
-  if(v === 'diligence') renderDiligence();
-  if(v === 'salle') renderSalle();
-  if(v === 'equipe') renderEquipe();
-  if(v === 'recycle') renderRecycleBin();
+  if(v === 'dashboard') renderDashboard({ force: true });
+  if(v === 'clients') renderClients({ force: true });
+  if(v === 'creation') updateClientDropdown({ force: true });
+  if(v === 'suivi') renderSuivi({ force: true });
+  if(v === 'audience') renderAudience({ force: true });
+  if(v === 'diligence') renderDiligence({ force: true });
+  if(v === 'salle') renderSalle({ force: true });
+  if(v === 'equipe') renderEquipe({ force: true });
+  if(v === 'recycle') renderRecycleBin({ force: true });
+  if(v === 'dashboard') scheduleBackgroundDataWarmup(1800);
   if(isMobileViewport()){
     setSidebarCollapsed(true);
   }
@@ -6169,6 +6540,15 @@ function login(){
   );
   if(!u){ $('errorMsg').style.display='block'; return; }
   currentUser = u;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
   $('errorMsg').style.display='none';
   const forceDashboardVisible = ()=>{
     if($('loginScreen')) $('loginScreen').style.display = 'none';
@@ -6204,18 +6584,22 @@ function login(){
   };
 
   forceDashboardVisible();
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
   safeRun('applyRoleUI', applyRoleUI);
   safeRun('showView(dashboard)', ()=>showView('dashboard'));
-  safeRun('renderClients', renderClients);
-  safeRun('renderDashboard', renderDashboard);
-  safeRun('updateClientDropdown', updateClientDropdown);
-  safeRun('renderSuivi', renderSuivi);
-  safeRun('renderAudience', renderAudience);
-  safeRun('renderDiligence', renderDiligence);
-  safeRun('renderSalle', renderSalle);
-  safeRun('renderEquipe', renderEquipe);
-  safeRun('renderRecycleBin', renderRecycleBin);
   safeRun('renderSidebarSalleSessions', renderSidebarSalleSessions);
+  scheduleBackgroundDataWarmup(1800);
 
   const hasVisibleSection = [
     'dashboardSection',
@@ -6247,6 +6631,15 @@ function logout(){
   stopRemoteSync();
   closeDossierModal();
   currentUser = null;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
   lastPingMs = null;
   lastLiveDelayMs = null;
   renderSyncMetrics();
@@ -6304,21 +6697,22 @@ function addClient(name){
   renderEquipe();
 }
 
-function updateClientDropdown(){
+function updateClientDropdown(options = {}){
+  if(!shouldRenderClientDropdown(options)) return;
   const selectClient = $('selectClient');
   if(!selectClient) return;
-  const optionsHtml = getVisibleClients()
-    .filter(c=>canEditClient(c))
+  const optionsHtml = getEditableClients()
     .map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`)
     .join('');
   selectClient.innerHTML = `<option value="">Client</option>${optionsHtml}`;
 }
 
-function renderClients(){
+function renderClients(options = {}){
+  if(!shouldRenderDeferredSection('clients', options)) return;
   const q = $('searchClientInput')?.value?.toLowerCase() || '';
   const clientsBody = $('clientsBody');
   if(!clientsBody) return;
-  const allVisibleClients = getVisibleClients();
+  const allVisibleClients = getClientListSummaries();
   const canDelete = canDeleteData();
   syncPaginationFilterState('clients', `${q}||${allVisibleClients.length}`);
 
@@ -6329,17 +6723,18 @@ function renderClients(){
       renderPagination('clients', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
       return;
     }
-    const rowsHtml = pageData.rows.map(c=>{
-      const canEdit = canEditClient(c);
+    const rowsHtml = pageData.rows.map(item=>{
+      const c = item.client;
+      const canEdit = item.canEdit;
       return `
         <tr>
-          <td data-label="Client">${escapeHtml(c.name)}</td>
-          <td data-label="Nb Dossiers">${c.dossiers.length}</td>
+          <td data-label="Client">${escapeHtml(item.name)}</td>
+          <td data-label="Nb Dossiers">${item.dossierCount}</td>
           <td data-label="Actions" class="client-actions-cell">
-            <button class="btn-primary" onclick="goToCreation(${c.id})" ${canEdit ? '' : 'disabled'}>
+            <button class="btn-primary" onclick="goToCreation(${item.id})" ${canEdit ? '' : 'disabled'}>
               <i class="fa-solid fa-folder-plus"></i>
             </button>
-            <button class="btn-danger" onclick="deleteClient(${c.id})" ${canDelete ? '' : 'disabled'}>
+            <button class="btn-danger" onclick="deleteClient(${item.id})" ${canDelete ? '' : 'disabled'}>
               <i class="fa-solid fa-trash"></i>
             </button>
           </td>
@@ -6351,30 +6746,34 @@ function renderClients(){
   };
 
   const canUseWorker = !!getClientFilterWorker() && allVisibleClients.length >= 200;
+  if(!q){
+    renderRows(allVisibleClients);
+    return;
+  }
   if(!canUseWorker){
-    renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+    renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
     return;
   }
 
   const requestId = ++clientFilterRequestSeq;
   clientsBody.innerHTML = '<tr><td colspan="3" class="diligence-empty">Filtrage des clients...</td></tr>';
-  const workerInput = allVisibleClients.map((c, idx)=>({
+  const workerInput = allVisibleClients.map((item, idx)=>({
     idx,
-    name: String(c?.name || '')
+    name: item.name
   }));
 
   runClientFilterInWorker(workerInput, q, requestId)
     .then((filteredIndexes)=>{
       if(requestId !== clientFilterRequestSeq) return;
       if(!Array.isArray(filteredIndexes)){
-        renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+        renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
         return;
       }
       renderRows(filteredIndexes.map(idx=>allVisibleClients[idx]).filter(Boolean));
     })
     .catch(()=>{
       if(requestId !== clientFilterRequestSeq) return;
-      renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+      renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
     });
 }
 
@@ -6648,7 +7047,8 @@ function removeFile(index){
 }
 
 // ================== SUIVI ==================
-function renderSuivi(){
+function renderSuivi(options = {}){
+  if(!shouldRenderDeferredSection('suivi', options)) return;
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
   const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
   syncPaginationFilterState('suivi', suiviFilterKey);
@@ -7555,7 +7955,8 @@ function syncDiligenceOrdonnanceFilter(rows){
   diligenceFilterOrdonnanceRowsRef = rows;
 }
 
-function renderDiligence(){
+function renderDiligence(options = {}){
+  if(!shouldRenderDeferredSection('diligence', options)) return;
   const diligenceQuery = $('diligenceSearchInput')?.value?.toLowerCase() || '';
   syncPaginationFilterState(
     'diligence',
@@ -8149,7 +8550,8 @@ function deleteTeamUser(userId){
   if(editingTeamUserId === userId) resetTeamForm();
 }
 
-function renderEquipe(){
+function renderEquipe(options = {}){
+  if(!shouldRenderDeferredSection('equipe', options)) return;
   const panel = $('teamManagerPanel');
   const locked = $('teamLocked');
   const body = $('teamUsersBody');
@@ -8233,7 +8635,8 @@ function deleteSalleJudge(id){
   renderSalle();
 }
 
-function renderSalle(){
+function renderSalle(options = {}){
+  if(!shouldRenderDeferredSection('salle', options)) return;
   const body = $('salleBody');
   const filterSelect = $('salleFilterSelect');
   const tribunalFilterSelect = $('salleTribunalFilter');
@@ -8445,7 +8848,46 @@ function getDashboardAttSortRows(){
   return rows;
 }
 
+function getDashboardSnapshot(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    dashboardSnapshotCache
+    && dashboardSnapshotCacheVersion === audienceRowsRawDataVersion
+    && dashboardSnapshotCacheUserKey === userKey
+  ){
+    return dashboardSnapshotCache;
+  }
+  const visibleClients = getVisibleClients();
+  let enCours = 0;
+  let clotureCount = 0;
+  visibleClients.forEach(c=>{
+    c.dossiers.forEach(d=>{
+      enCours += 1;
+      if(d.statut === 'Clôture') clotureCount += 1;
+    });
+  });
+  const snapshot = {
+    totalClients: visibleClients.length,
+    enCours,
+    clotureCount,
+    attSortRows: getDashboardAttSortRows(),
+    audienceErrors: getAudienceErrorDossierCount()
+  };
+  dashboardSnapshotCache = snapshot;
+  dashboardSnapshotCacheVersion = audienceRowsRawDataVersion;
+  dashboardSnapshotCacheUserKey = userKey;
+  return snapshot;
+}
+
 function getDashboardCalendarEvents(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    dashboardCalendarEventsCache
+    && dashboardCalendarEventsCacheVersion === audienceRowsRawDataVersion
+    && dashboardCalendarEventsCacheUserKey === userKey
+  ){
+    return dashboardCalendarEventsCache;
+  }
   const byDate = {};
   AppState.clients.forEach((c, ci)=>{
     if(!canViewClient(c)) return;
@@ -8469,6 +8911,9 @@ function getDashboardCalendarEvents(){
       });
     });
   });
+  dashboardCalendarEventsCache = byDate;
+  dashboardCalendarEventsCacheVersion = audienceRowsRawDataVersion;
+  dashboardCalendarEventsCacheUserKey = userKey;
   return byDate;
 }
 
@@ -8511,26 +8956,42 @@ function renderDashboardCalendar(){
   grid.innerHTML = html;
 }
 
+function queueDashboardCalendarRender(){
+  if(dashboardCalendarRenderTimer) return;
+  const render = ()=>{
+    dashboardCalendarRenderTimer = null;
+    renderDashboardCalendar();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+    dashboardCalendarRenderTimer = window.requestIdleCallback(render, { timeout: 1200 });
+    return;
+  }
+  dashboardCalendarRenderTimer = setTimeout(render, 120);
+}
+
+function queueDashboardHeavyRender(){
+  if(dashboardHeavyRenderTimer) return;
+  const render = ()=>{
+    dashboardHeavyRenderTimer = null;
+    const snapshot = getDashboardSnapshot();
+    animateDashboardMetric('dossiersEnCours', snapshot.enCours);
+    animateDashboardMetric('dossiersTermines', snapshot.clotureCount);
+    if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', snapshot.attSortRows.length);
+    if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', snapshot.audienceErrors);
+    queueDashboardCalendarRender();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+    dashboardHeavyRenderTimer = window.requestIdleCallback(render, { timeout: 1500 });
+    return;
+  }
+  dashboardHeavyRenderTimer = setTimeout(render, 80);
+}
+
 // ================== DASHBOARD ==================
-function renderDashboard(){
-  const visibleClients = getVisibleClients();
-  let enCours = 0;
-  let clotureCount = 0;
-  const attSortRows = getDashboardAttSortRows();
-
-  visibleClients.forEach(c=>{
-    c.dossiers.forEach(d=>{
-      enCours += 1;
-      if(d.statut === 'Clôture') clotureCount += 1;
-    });
-  });
-
-  animateDashboardMetric('totalClients', visibleClients.length);
-  animateDashboardMetric('dossiersEnCours', enCours);
-  animateDashboardMetric('dossiersTermines', clotureCount);
-  if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', attSortRows.length);
-  if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', getAudienceErrorDossierCount());
-  renderDashboardCalendar();
+function renderDashboard(options = {}){
+  if(!shouldRenderDeferredSection('dashboard', options)) return;
+  animateDashboardMetric('totalClients', getVisibleClients().length);
+  queueDashboardHeavyRender();
 }
 
 function animateDashboardMetric(id, nextValue){
@@ -8701,6 +9162,30 @@ function getFilteredAudienceRows(allRows = null){
     audienceFilteredRowsCacheOutput = out;
     return out;
   }
+  const canUsePriorityPartition =
+    !filterAudienceErrorsOnly
+    && filterAudienceProcedure === 'all'
+    && filterAudienceTribunal === 'all'
+    && !filterAudienceDate
+    && priorityColor
+    && priorityColor !== 'all'
+    && rows.length > AUDIENCE_DEFAULT_SORT_MAX_ROWS;
+  if(canUsePriorityPartition){
+    const matched = [];
+    const others = [];
+    rows.forEach(row=>{
+      if(String(row?.p?.color || '') === priorityColor){
+        matched.push(row);
+      }else{
+        others.push(row);
+      }
+    });
+    const out = matched.concat(others);
+    audienceFilteredRowsCacheInput = rows;
+    audienceFilteredRowsCacheKey = filterKey;
+    audienceFilteredRowsCacheOutput = out;
+    return out;
+  }
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
   const filtered = rows.filter(row=>{
@@ -8748,7 +9233,8 @@ function setAllVisibleAudienceRowsForPrint(checked){
   renderAudience();
 }
 
-function renderAudience(){
+function renderAudience(options = {}){
+  if(!shouldRenderDeferredSection('audience', options)) return;
   const audienceQuery = $('filterAudience')?.value?.toLowerCase() || '';
   syncPaginationFilterState(
     'audience',
@@ -9110,7 +9596,12 @@ function getAudienceErrorRows(){
 }
 
 function getAudienceErrorDossierCount(){
-  return getAudienceErrorRows().length;
+  if(audienceErrorCountCacheVersion === audienceRowsRawDataVersion){
+    return audienceErrorCountCacheValue;
+  }
+  audienceErrorCountCacheValue = getAudienceErrorRows().length;
+  audienceErrorCountCacheVersion = audienceRowsRawDataVersion;
+  return audienceErrorCountCacheValue;
 }
 
 function syncAudienceFilterOptions(rows){

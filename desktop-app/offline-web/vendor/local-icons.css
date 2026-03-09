@@ -1,0 +1,19 @@
+/* Offline-safe icon fallback.
+   We keep icon slots aligned without depending on a remote font pack. */
+i[class^="fa-"],
+i[class*=" fa-"]{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:1.25em;
+  min-width:1.25em;
+  font-style:normal;
+  line-height:1;
+}
+
+i[class^="fa-"]::before,
+i[class*=" fa-"]::before{
+  content:"•";
+  font-size:.9em;
+  font-weight:700;
+}

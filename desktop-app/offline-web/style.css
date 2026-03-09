@@ -12,7 +12,7 @@
   --shadow:0 18px 45px rgba(15,23,42,.14);
 }
 body{
-  font-family:'Sora','Segoe UI',sans-serif;
+  font-family:'Segoe UI',system-ui,-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
   background:var(--bg);
   color:var(--text);
 }
@@ -1444,9 +1444,7 @@ tr:hover{background:#f1f5f9}
   box-shadow:0 8px 18px rgba(37,99,235,.14);
 }
 .audience-checked-count::before{
-  content:"\f14a";
-  font-family:"Font Awesome 6 Free";
-  font-weight:900;
+  content:"\2611";
   color:#2563eb;
   font-size:14px;
 }
