@@ -13,8 +13,8 @@ let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
 let filterAudienceErrorsOnly = false;
-let paginationState = { audience: 1, suivi: 1, diligence: 1, recycle: 1 };
-let paginationFilterState = { audience: '', suivi: '', diligence: '', recycle: '' };
+let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1 };
+let paginationFilterState = { clients: '', audience: '', suivi: '', diligence: '', recycle: '' };
 let audienceTribunalAliasMap = new Map();
 let audiencePrintSelection = new Set();
 let filterSuiviProcedure = 'all';
@@ -97,6 +97,9 @@ let suiviBaseRowsCache = null;
 let suiviBaseRowsCacheVersion = 0;
 let suiviBaseRowsCacheViewerKey = '';
 let suiviFilterOptionsRowsMetaRef = null;
+let suiviFilteredRowsCacheSource = null;
+let suiviFilteredRowsCacheKey = '';
+let suiviFilteredRowsCacheOutput = [];
 let diligenceVirtualRows = [];
 let diligenceVirtualLastRange = { start: -1, end: -1 };
 let diligenceVirtualRafId = null;
@@ -172,23 +175,39 @@ const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
 const PAGINATION_PAGE_SIZES = {
+  clients: 50,
   audience: 30,
   suivi: 30,
   diligence: 30,
   recycle: 30
 };
-const IMPORT_CHUNK_SIZE = 80;
-const IMPORT_EXCEL_CHUNK_SIZE = 40;
+const IMPORT_CHUNK_SIZE = 180;
+const IMPORT_EXCEL_CHUNK_SIZE = 120;
 const IMPORT_STATUS_THROTTLE_MS = 120;
 const AUDIENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_VIRTUAL_ROW_HEIGHT = 56;
 const AUDIENCE_VIRTUAL_OVERSCAN = 10;
-const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 15000;
+const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 60000;
 const SUIVI_VIRTUAL_MIN_ROWS = 40;
-const SUIVI_DEFAULT_SORT_MAX_ROWS = 20000;
+const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
 const DILIGENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_COLOR_BATCH_MS = 80;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+const LOCAL_ONLY_MODE = (() => {
+  if(typeof window === 'undefined') return false;
+  const query = new URLSearchParams(window.location.search);
+  const rawFlag = String(
+    query.get('localOnly')
+    || query.get('offline')
+    || ''
+  ).trim().toLowerCase();
+  if(rawFlag){
+    return !['0', 'false', 'no', 'off'].includes(rawFlag);
+  }
+  if(typeof window.CABINET_LOCAL_ONLY === 'boolean') return window.CABINET_LOCAL_ONLY;
+  if(IS_FILE_PROTOCOL) return true;
+  return !!window.cabinetDesktopState;
+})();
 const IS_REMOTE_WEB_HOST = (() => {
   if(typeof window === 'undefined' || !window.location) return false;
   const hostname = String(window.location.hostname || '').toLowerCase();
@@ -204,8 +223,12 @@ const XLSX_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/xlsx.full.min.js' : '/v
 const EXCELJS_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/exceljs.min.js' : '/vendor/libs/exceljs.min.js';
 const XLSX_CDN_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 const EXCELJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+const CLIENT_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/client-filter.worker.js' : '/workers/client-filter.worker.js';
 let xlsxLoadPromise = null;
 let excelJsLoadPromise = null;
+let clientFilterWorker = null;
+let clientFilterWorkerFailed = false;
+let clientFilterRequestSeq = 0;
 const SALLE_WEEKDAY_OPTIONS = [
   { key: 'lundi', label: 'Lundi' },
   { key: 'mardi', label: 'Mardi' },
@@ -501,6 +524,9 @@ function markAudienceRowsCacheDirty(){
   audienceDuplicateKeySetCacheOutput = new Set();
   suiviBaseRowsCache = null;
   suiviFilterOptionsRowsMetaRef = null;
+  suiviFilteredRowsCacheSource = null;
+  suiviFilteredRowsCacheKey = '';
+  suiviFilteredRowsCacheOutput = [];
   diligenceRowsCache = null;
   diligenceFilteredRowsCacheInput = null;
   diligenceFilteredRowsCacheKey = '';
@@ -667,6 +693,58 @@ function debounce(fn, wait = 120){
   };
 }
 
+function getClientFilterWorker(){
+  if(clientFilterWorkerFailed) return null;
+  if(clientFilterWorker) return clientFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    clientFilterWorker = new Worker(CLIENT_FILTER_WORKER_URL);
+    return clientFilterWorker;
+  }catch(err){
+    console.warn('Client filter worker indisponible', err);
+    clientFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runClientFilterInWorker(items, query, requestId){
+  const worker = getClientFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'client-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Client filter worker error', err);
+      cleanup();
+      clientFilterWorkerFailed = true;
+      if(clientFilterWorker){
+        try{ clientFilterWorker.terminate(); }catch(_){}
+      }
+      clientFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'client-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
 function captureSyncStatusSnapshot(){
   const text = $('syncStatusText');
   return {
@@ -681,6 +759,59 @@ function restoreSyncStatusSnapshot(snapshot){
     return;
   }
   setSyncStatus(snapshot.status, snapshot.message || undefined);
+}
+
+function openImportProgressModal(title = 'Import en cours...'){
+  const modal = $('importProgressModal');
+  const titleNode = $('importProgressTitle');
+  const textNode = $('importProgressText');
+  const fill = $('importProgressFill');
+  const percentNode = $('importProgressPercent');
+  if(titleNode) titleNode.innerHTML = `<i class="fa-solid fa-rotate"></i> ${escapeHtml(title)}`;
+  if(textNode) textNode.innerText = 'Préparation...';
+  if(fill) fill.style.width = '0%';
+  const track = document.querySelector('#importProgressModal .import-progress-track');
+  if(track) track.setAttribute('aria-valuenow', '0');
+  if(percentNode) percentNode.innerText = '0%';
+  if(modal) modal.style.display = 'flex';
+}
+
+function updateImportProgress(message, done, total){
+  const textNode = $('importProgressText');
+  const fill = $('importProgressFill');
+  const percentNode = $('importProgressPercent');
+  const safeTotal = Number(total);
+  const safeDone = Number(done);
+  const hasNumbers = Number.isFinite(safeTotal) && safeTotal > 0 && Number.isFinite(safeDone);
+  const percent = hasNumbers ? Math.max(0, Math.min(100, Math.round((safeDone / safeTotal) * 100))) : 0;
+  if(textNode){
+    if(hasNumbers){
+      textNode.innerText = `${String(message || 'Import en cours...')} (${safeDone}/${safeTotal})`;
+    }else{
+      textNode.innerText = String(message || 'Import en cours...');
+    }
+  }
+  if(fill) fill.style.width = `${percent}%`;
+  const track = document.querySelector('#importProgressModal .import-progress-track');
+  if(track) track.setAttribute('aria-valuenow', String(percent));
+  if(percentNode) percentNode.innerText = `${percent}%`;
+}
+
+function closeImportProgressModal(markDone = false){
+  const modal = $('importProgressModal');
+  if(!modal) return;
+  if(markDone){
+    updateImportProgress('Import terminé', 1, 1);
+    modal.dataset.doneUntil = String(Date.now() + 220);
+    setTimeout(()=>{
+      if(modal) modal.style.display = 'none';
+    }, 220);
+    return;
+  }
+  const lockUntil = Number(modal.dataset.doneUntil || '0');
+  if(Number.isFinite(lockUntil) && lockUntil > Date.now()) return;
+  delete modal.dataset.doneUntil;
+  modal.style.display = 'none';
 }
 
 function yieldToMainThread(){
@@ -711,10 +842,12 @@ function makeProgressReporter(prefix){
     if(done < total && now - lastAt < IMPORT_STATUS_THROTTLE_MS) return;
     lastAt = now;
     setSyncStatus('syncing', `${prefix} ${done}/${total}...`);
+    updateImportProgress(prefix, done, total);
   };
 }
 
 function getRenderForSection(section){
+  if(section === 'clients') return renderClients;
   if(section === 'audience') return renderAudience;
   if(section === 'suivi') return renderSuivi;
   if(section === 'diligence') return renderDiligence;
@@ -1213,6 +1346,10 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
 }
 
 async function resolveApiBase(forceRetry = false){
+  if(LOCAL_ONLY_MODE){
+    API_BASE_RESOLVED = true;
+    return API_BASE;
+  }
   if(API_BASE_RESOLVED && !forceRetry){
     return API_BASE;
   }
@@ -1239,6 +1376,13 @@ async function resolveApiBase(forceRetry = false){
 }
 
 async function refreshServerConnectionStatus(){
+  if(LOCAL_ONLY_MODE){
+    setPingMetric(null);
+    lastLiveDelayMs = null;
+    renderSyncMetrics();
+    setSyncStatus('error', 'Mode local (offline)');
+    return;
+  }
   const currentProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
   if(currentProbe.ok){
     setPingMetric(currentProbe.latencyMs);
@@ -1296,6 +1440,29 @@ function canViewClient(client){
 function canEditClient(client){
   if(!canEditData()) return false;
   return canViewClient(client);
+}
+
+function grantCurrentViewerAccessToClient(clientId){
+  if(!isViewer()) return;
+  const idNum = Number(clientId);
+  if(!Number.isFinite(idNum)) return;
+  if(!Array.isArray(currentUser.clientIds)){
+    currentUser.clientIds = [];
+  }
+  if(!currentUser.clientIds.includes(idNum)){
+    currentUser.clientIds.push(idNum);
+  }
+  const userIdx = USERS.findIndex(u=>Number(u?.id) === Number(currentUser?.id));
+  if(userIdx === -1){
+    return;
+  }
+  const user = USERS[userIdx];
+  const nextIds = Array.isArray(user?.clientIds) ? user.clientIds.slice() : [];
+  if(!nextIds.includes(idNum)){
+    nextIds.push(idNum);
+  }
+  USERS[userIdx] = { ...user, clientIds: nextIds };
+  currentUser = USERS[userIdx];
 }
 
 function normalizeSalleName(value){
@@ -3338,7 +3505,6 @@ function normalizeImportedPayload(raw){
 }
 
 async function importAppsavocatPayload(rawPayload){
-  const syncSnapshot = captureSyncStatusSnapshot();
   try{
     const payload = normalizeImportedPayload(rawPayload);
     if(!payload){
@@ -3457,8 +3623,9 @@ async function importAppsavocatPayload(rawPayload){
     // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
     audienceDraft = {};
     const reconciliation = reconcileAudienceOrphanDossiers();
+    markAudienceRowsCacheDirty();
 
-    const serverSaved = await persistAppStateNow();
+    await persistAppStateNow();
     renderClients();
     renderDashboard();
     updateClientDropdown();
@@ -3479,11 +3646,8 @@ async function importAppsavocatPayload(rawPayload){
         `Audience hors global rapprochée: ${reconciliation.matchedDossiers}`
       ].join('\n')
     );
-    if(!serverSaved){
-      alert('Import terminé localement, mais sauvegarde serveur non confirmée. Vérifiez la connexion serveur/API.');
-    }
   }finally{
-    restoreSyncStatusSnapshot(syncSnapshot);
+    // Keep current sync status (persist call already set the right state).
   }
 }
 
@@ -3496,15 +3660,21 @@ async function handleAppsavocatImportFile(file){
   }
   importInProgress = true;
   try{
+    openImportProgressModal('Import appsavocat');
+    updateImportProgress('Lecture du fichier...', 0, 1);
     setSyncStatus('syncing', 'Import appsavocat en cours...');
     const text = await file.text();
+    updateImportProgress('Analyse du fichier...', 1, 3);
     const parsed = JSON.parse(text);
+    updateImportProgress('Fusion des données...', 2, 3);
     await importAppsavocatPayload(parsed);
+    closeImportProgressModal(true);
   }catch(err){
     console.error(err);
     const details = String(err?.message || '').trim();
     alert(`Import appsavocat impossible.${details ? `\nDétail: ${details}` : ''}`);
   }finally{
+    closeImportProgressModal(false);
     importInProgress = false;
   }
 }
@@ -3655,6 +3825,10 @@ async function persistAppStateNow(){
   await writeStateToIndexedDb(payload);
   writeStateToLocalStorage(payload);
   queueDesktopStateFilePersist();
+  if(LOCAL_ONLY_MODE){
+    setSyncStatus('error', 'Mode local (offline)');
+    return true;
+  }
   setSyncStatus('syncing');
   try{
     const res = await fetchWithTimeout(`${API_BASE}/state`, {
@@ -3689,70 +3863,72 @@ function queuePersistAppState(){
 async function loadPersistedState(){
   let loaded = false;
   let changed = false;
-  try{
-    const res = await fetchWithTimeout(`${API_BASE}/state`, { cache: 'no-store' }, API_STATE_LOAD_TIMEOUT_MS);
-    if(res.ok){
-      const parsed = await res.json();
-      const loadedClients = Array.isArray(parsed?.clients)
-        ? parsed.clients.map(normalizeClient).filter(Boolean)
-        : [];
-      const loadedUsers = Array.isArray(parsed?.users)
-        ? parsed.users.map(normalizeUser).filter(Boolean)
-        : [];
-      const loadedSalleAssignments = normalizeSalleAssignments(parsed?.salleAssignments);
-      const loadedDraft = parsed?.audienceDraft && typeof parsed.audienceDraft === 'object'
-        ? parsed.audienceDraft
-        : {};
-      const loadedRecycleBin = normalizeRecycleBinEntries(parsed?.recycleBin);
-      const loadedRecycleArchive = normalizeRecycleArchiveEntries(parsed?.recycleArchive);
-      const nextUsers = ensureManagerUser(loadedUsers);
-      const nextSignature = buildStateSignature(
-        loadedClients,
-        loadedSalleAssignments,
-        nextUsers,
-        loadedDraft,
-        loadedRecycleBin,
-        loadedRecycleArchive
-      );
+  if(!LOCAL_ONLY_MODE){
+    try{
+      const res = await fetchWithTimeout(`${API_BASE}/state`, { cache: 'no-store' }, API_STATE_LOAD_TIMEOUT_MS);
+      if(res.ok){
+        const parsed = await res.json();
+        const loadedClients = Array.isArray(parsed?.clients)
+          ? parsed.clients.map(normalizeClient).filter(Boolean)
+          : [];
+        const loadedUsers = Array.isArray(parsed?.users)
+          ? parsed.users.map(normalizeUser).filter(Boolean)
+          : [];
+        const loadedSalleAssignments = normalizeSalleAssignments(parsed?.salleAssignments);
+        const loadedDraft = parsed?.audienceDraft && typeof parsed.audienceDraft === 'object'
+          ? parsed.audienceDraft
+          : {};
+        const loadedRecycleBin = normalizeRecycleBinEntries(parsed?.recycleBin);
+        const loadedRecycleArchive = normalizeRecycleArchiveEntries(parsed?.recycleArchive);
+        const nextUsers = ensureManagerUser(loadedUsers);
+        const nextSignature = buildStateSignature(
+          loadedClients,
+          loadedSalleAssignments,
+          nextUsers,
+          loadedDraft,
+          loadedRecycleBin,
+          loadedRecycleArchive
+        );
 
-      if(nextSignature && nextSignature === lastPersistedStateSignature){
+        if(nextSignature && nextSignature === lastPersistedStateSignature){
+          loaded = true;
+          setSyncStatus('ok', 'Etat charge depuis serveur');
+          return false;
+        }
+
+        AppState.clients = loadedClients;
+        AppState.salleAssignments = loadedSalleAssignments;
+        USERS = nextUsers;
+        markAudienceRowsCacheDirty();
+        audienceDraft = loadedDraft;
+        AppState.recycleBin = loadedRecycleBin;
+        AppState.recycleArchive = loadedRecycleArchive;
+        lastPersistedStateSignature = buildStateSignature(
+          AppState.clients,
+          AppState.salleAssignments,
+          USERS,
+          audienceDraft,
+          AppState.recycleBin,
+          AppState.recycleArchive
+        );
+        syncCurrentUserFromUsers();
         loaded = true;
+        changed = true;
         setSyncStatus('ok', 'Etat charge depuis serveur');
-        return false;
+        const snapshot = {
+          clients: AppState.clients,
+          salleAssignments: AppState.salleAssignments,
+          users: USERS,
+          audienceDraft: audienceDraft,
+          recycleBin: AppState.recycleBin,
+          recycleArchive: AppState.recycleArchive
+        };
+        await writeStateToIndexedDb(snapshot);
+        writeStateToLocalStorage(snapshot);
       }
-
-      AppState.clients = loadedClients;
-      AppState.salleAssignments = loadedSalleAssignments;
-      USERS = nextUsers;
-      markAudienceRowsCacheDirty();
-      audienceDraft = loadedDraft;
-      AppState.recycleBin = loadedRecycleBin;
-      AppState.recycleArchive = loadedRecycleArchive;
-      lastPersistedStateSignature = buildStateSignature(
-        AppState.clients,
-        AppState.salleAssignments,
-        USERS,
-        audienceDraft,
-        AppState.recycleBin,
-        AppState.recycleArchive
-      );
-      syncCurrentUserFromUsers();
-      loaded = true;
-      changed = true;
-      setSyncStatus('ok', 'Etat charge depuis serveur');
-      const snapshot = {
-        clients: AppState.clients,
-        salleAssignments: AppState.salleAssignments,
-        users: USERS,
-        audienceDraft: audienceDraft,
-        recycleBin: AppState.recycleBin,
-        recycleArchive: AppState.recycleArchive
-      };
-      await writeStateToIndexedDb(snapshot);
-      writeStateToLocalStorage(snapshot);
+    }catch(err){
+      console.warn('Impossible de charger depuis le serveur', err);
     }
-  }catch(err){
-    console.warn('Impossible de charger depuis le serveur', err);
   }
 
   if(loaded) return changed;
@@ -3916,6 +4092,7 @@ async function loadPersistedState(){
 }
 
 async function refreshRemoteState(){
+  if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
   if(typeof document !== 'undefined' && document.hidden) return;
   if(editingDossier) return;
@@ -3943,6 +4120,10 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 }
 
 function startRemoteSync(){
+  if(LOCAL_ONLY_MODE){
+    setSyncStatus('error', 'Mode local (offline)');
+    return;
+  }
   if(remoteSyncTimer) return;
   startRemoteSyncStream();
   refreshServerConnectionStatus().catch(()=>{});
@@ -3987,6 +4168,7 @@ function scheduleRemoteSyncStreamRetry(){
 }
 
 function startRemoteSyncStream(){
+  if(LOCAL_ONLY_MODE) return;
   if(typeof EventSource === 'undefined') return;
   if(remoteSyncStream) return;
   try{
@@ -4479,9 +4661,24 @@ function showExcelImportResult(summary, issuesText){
   modal.style.display = 'flex';
 }
 
+function resetAudienceFiltersUi(){
+  filterAudienceColor = 'all';
+  filterAudienceProcedure = 'all';
+  filterAudienceTribunal = 'all';
+  filterAudienceDate = '';
+  filterAudienceErrorsOnly = false;
+  setSelectedAudienceColor('all', false);
+  if($('filterAudience')) $('filterAudience').value = '';
+  if($('filterAudienceColor')) $('filterAudienceColor').value = 'all';
+  if($('filterAudienceProcedure')) $('filterAudienceProcedure').value = 'all';
+  if($('filterAudienceTribunal')) $('filterAudienceTribunal').value = 'all';
+  if($('filterAudienceDate')) $('filterAudienceDate').value = '';
+  const errBtn = $('audienceErrorsBtn');
+  if(errBtn) errBtn.classList.remove('active');
+}
+
 async function applyExcelImport(payload, options = {}){
   const { dossiers, audiences } = payload;
-  const syncSnapshot = captureSyncStatusSnapshot();
   const referenceHints = payload && typeof payload.referenceHints === 'object'
     ? payload.referenceHints
     : {};
@@ -4568,6 +4765,16 @@ async function applyExcelImport(payload, options = {}){
   const rowRefClientToProcMap = new Map();
   const audienceOrphanDossierMap = new Map();
   const candidateSeenByMap = new WeakMap();
+  const dossierAudienceRefsCache = new WeakMap();
+
+  const getDossierAudienceRefsCached = (dossier)=>{
+    if(!dossier || typeof dossier !== 'object') return new Set();
+    const cached = dossierAudienceRefsCache.get(dossier);
+    if(cached) return cached;
+    const refs = getDossierAudienceReferenceKeys(dossier);
+    dossierAudienceRefsCache.set(dossier, refs);
+    return refs;
+  };
 
   const pushCandidate = (map, key, candidate)=>{
     if(!key) return;
@@ -4615,6 +4822,7 @@ async function applyExcelImport(payload, options = {}){
     };
     AppState.clients.push(client);
     clientMap.set(key, client);
+    grantCurrentViewerAccessToClient(client.id);
     return client;
   };
 
@@ -4793,6 +5001,7 @@ async function applyExcelImport(payload, options = {}){
       AppState.clients.push(client);
       clientMap.set(clientKey, client);
     }
+    grantCurrentViewerAccessToClient(client.id);
 
     const parsedProceduresRaw = parseProcedureList(row.procedureText);
     const parsedKnownProcedures = parsedProceduresRaw.filter(proc=>knownProcedureSet.has(proc));
@@ -5076,7 +5285,7 @@ async function applyExcelImport(payload, options = {}){
         let score = 0;
         if(rowRefClientKeySet.size && rowRefClientKeySet.has(candidate.rowRefClient)) score += 220;
         if(rowDebiteur && candidate.rowDebiteur === rowDebiteur) score += 140;
-        const candidateRefs = getDossierAudienceReferenceKeys(candidate?.dossier || {});
+        const candidateRefs = getDossierAudienceRefsCached(candidate?.dossier || null);
         if(candidateRefs.has(refKey)) score += 90;
         if(rowRefClientKeySet.size && [...rowRefClientKeySet].some(key=>candidateRefs.has(key))) score += 80;
         if(score > bestScore){
@@ -5090,7 +5299,7 @@ async function applyExcelImport(payload, options = {}){
     const { dossier, proc } = match;
     let refClientMismatch = null;
     if(rowRefClientKeySet.size){
-      const matchedDossierRefKeys = getDossierAudienceReferenceKeys(dossier);
+      const matchedDossierRefKeys = getDossierAudienceRefsCached(dossier);
       const hasSameRefClient = [...rowRefClientKeySet].some(key=>matchedDossierRefKeys.has(key));
       const hasKnownRefClientElsewhere = [...rowRefClientKeySet].some(key=>dossierRefClientSet.has(key));
       // Only flag ref client mismatch when the provided ref client is unknown globally.
@@ -5133,7 +5342,10 @@ async function applyExcelImport(payload, options = {}){
     if(!!dossier?.isAudienceOrphanImport){
       p._missingGlobal = true;
     }
-    if(ref) p.referenceClient = ref;
+    if(ref){
+      p.referenceClient = ref;
+      dossierAudienceRefsCache.delete(dossier);
+    }
     if(row.audience) p.audience = row.audience;
     if(row.juge) p.juge = row.juge;
     if(row.sort) p.sort = row.sort;
@@ -5158,7 +5370,8 @@ async function applyExcelImport(payload, options = {}){
     }
   }
 
-  const serverSaved = await persistAppStateNow();
+  markAudienceRowsCacheDirty();
+  await persistAppStateNow();
   renderClients();
   renderDashboard();
   updateClientDropdown();
@@ -5167,7 +5380,7 @@ async function applyExcelImport(payload, options = {}){
   renderDiligence();
   renderEquipe();
   const issuesText = buildExcelImportIssueMessage(importIgnoredRows);
-  const summary = [
+  const summaryLines = [
     `Import terminé.`,
     `Dossiers détectés: ${dossiers.length}`,
     `Dossiers importés: ${importedDossiersCount}`,
@@ -5175,13 +5388,15 @@ async function applyExcelImport(payload, options = {}){
     `Audiences détectées: ${audiences.length}`,
     `Audiences liées: ${linkedAudiencesCount}`,
     `Erreurs ignorées (non bloquantes): ${importIgnoredRows.length}`
-  ].join('\n');
-  showExcelImportResult(summary, issuesText);
-  if(!serverSaved){
-    alert('Import terminé localement, mais sauvegarde serveur non confirmée. Vérifiez la connexion serveur/API.');
+  ];
+  if(!importDossiers && importAudiences){
+    summaryLines.push('Mode Audience: création de nouveaux dossiers globaux désactivée.');
   }
+  const summary = summaryLines.join('\n');
+  closeImportProgressModal(true);
+  showExcelImportResult(summary, issuesText);
   }finally{
-    restoreSyncStatusSnapshot(syncSnapshot);
+    // Keep current sync status (persist call already set the right state).
   }
 }
 
@@ -5194,8 +5409,11 @@ async function handleExcelImportFile(file, options = {}){
   }
   importInProgress = true;
   try{
+    openImportProgressModal('Import Excel');
+    updateImportProgress('Lecture du fichier...', 0, 1);
     setSyncStatus('syncing', 'Import Excel: lecture du fichier...');
     const buffer = await file.arrayBuffer();
+    updateImportProgress('Analyse de la feuille...', 1, 3);
     setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
     const workbook = XLSX.read(buffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
@@ -5216,6 +5434,7 @@ async function handleExcelImportFile(file, options = {}){
       throw new Error('Format de feuille non reconnu.');
     }
     const parsed = parseExcelData(rows);
+    updateImportProgress('Fusion des données...', 2, 3);
     setSyncStatus('syncing', 'Import Excel: fusion des données...');
     await applyExcelImport(parsed, options);
   }catch(err){
@@ -5224,16 +5443,20 @@ async function handleExcelImportFile(file, options = {}){
     const extra = details ? `\nDétail: ${details}` : '';
     alert(`Erreur import Excel. Vérifiez le format (xlsx/xls) et les en-têtes.${extra}`);
   }finally{
+    closeImportProgressModal(false);
     importInProgress = false;
   }
 }
 
 async function handleAudienceImportFile(file){
-  return handleExcelImportFile(file, {
+  await handleExcelImportFile(file, {
     importDossiers: false,
     importAudiences: true,
     audienceMode: 'audience-only'
   });
+  resetAudienceFiltersUi();
+  showView('audience');
+  renderAudience();
 }
 
 async function exportBackupExcelImportable(){
@@ -5549,9 +5772,11 @@ async function exportBackupExcelImportable(){
 
 // ================== INIT ==================
 async function initApplication(){
-  setSyncStatus('syncing');
+  setSyncStatus(LOCAL_ONLY_MODE ? 'error' : 'syncing', LOCAL_ONLY_MODE ? 'Mode local (offline)' : undefined);
   renderSyncMetrics();
-  await resolveApiBase();
+  if(!LOCAL_ONLY_MODE){
+    await resolveApiBase();
+  }
   await loadPersistedState();
   await persistDesktopStateFileNow();
   hasLoadedState = true;
@@ -6093,11 +6318,19 @@ function renderClients(){
   const q = $('searchClientInput')?.value?.toLowerCase() || '';
   const clientsBody = $('clientsBody');
   if(!clientsBody) return;
-  const rowsHtml = getVisibleClients()
-    .filter(c => c.name.toLowerCase().includes(q))
-    .map(c=>{
+  const allVisibleClients = getVisibleClients();
+  const canDelete = canDeleteData();
+  syncPaginationFilterState('clients', `${q}||${allVisibleClients.length}`);
+
+  const renderRows = (rows)=>{
+    const pageData = paginateRows(rows, 'clients');
+    if(!pageData.rows.length){
+      clientsBody.innerHTML = '<tr><td colspan="3" class="diligence-empty">Aucun client trouvé.</td></tr>';
+      renderPagination('clients', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      return;
+    }
+    const rowsHtml = pageData.rows.map(c=>{
       const canEdit = canEditClient(c);
-      const canDelete = canDeleteData();
       return `
         <tr>
           <td data-label="Client">${escapeHtml(c.name)}</td>
@@ -6112,9 +6345,37 @@ function renderClients(){
           </td>
         </tr>
       `;
+    }).join('');
+    clientsBody.innerHTML = rowsHtml;
+    renderPagination('clients', pageData);
+  };
+
+  const canUseWorker = !!getClientFilterWorker() && allVisibleClients.length >= 200;
+  if(!canUseWorker){
+    renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+    return;
+  }
+
+  const requestId = ++clientFilterRequestSeq;
+  clientsBody.innerHTML = '<tr><td colspan="3" class="diligence-empty">Filtrage des clients...</td></tr>';
+  const workerInput = allVisibleClients.map((c, idx)=>({
+    idx,
+    name: String(c?.name || '')
+  }));
+
+  runClientFilterInWorker(workerInput, q, requestId)
+    .then((filteredIndexes)=>{
+      if(requestId !== clientFilterRequestSeq) return;
+      if(!Array.isArray(filteredIndexes)){
+        renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+        return;
+      }
+      renderRows(filteredIndexes.map(idx=>allVisibleClients[idx]).filter(Boolean));
     })
-    .join('');
-  clientsBody.innerHTML = rowsHtml;
+    .catch(()=>{
+      if(requestId !== clientFilterRequestSeq) return;
+      renderRows(allVisibleClients.filter(c=>String(c?.name || '').toLowerCase().includes(q)));
+    });
 }
 
 function deleteClient(clientId){
@@ -6389,7 +6650,8 @@ function removeFile(index){
 // ================== SUIVI ==================
 function renderSuivi(){
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
-  syncPaginationFilterState('suivi', [q, filterSuiviProcedure, filterSuiviTribunal].join('||'));
+  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  syncPaginationFilterState('suivi', suiviFilterKey);
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
   suiviBody.innerHTML='';
@@ -6406,9 +6668,13 @@ function renderSuivi(){
   const noTribunalFilter = filterSuiviTribunal === 'all';
   const noSearchFilter = !q;
   let sortedRows = [];
-
-  if(noProcedureFilter && noTribunalFilter && noSearchFilter){
+  if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
+    sortedRows = suiviFilteredRowsCacheOutput;
+  }else if(noProcedureFilter && noTribunalFilter && noSearchFilter){
     sortedRows = base.sortedDefaultRows;
+    suiviFilteredRowsCacheSource = base;
+    suiviFilteredRowsCacheKey = suiviFilterKey;
+    suiviFilteredRowsCacheOutput = sortedRows;
   }else{
     const filteredRows = [];
     base.rawRows.forEach(row=>{
@@ -6437,6 +6703,9 @@ function renderSuivi(){
     sortedRows = filteredRows
       .slice()
       .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
+    suiviFilteredRowsCacheSource = base;
+    suiviFilteredRowsCacheKey = suiviFilterKey;
+    suiviFilteredRowsCacheOutput = sortedRows;
   }
   const pageData = paginateRows(sortedRows, 'suivi');
   const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
@@ -8902,9 +9171,7 @@ function hasAudienceProcedureData(procData, draftData){
     p.sort,
     d.instruction,
     p.instruction,
-    p.tribunal,
-    p.depotLe,
-    p.color
+    p.tribunal
   ];
   return fields.some(value=>String(value || '').trim().length > 0);
 }

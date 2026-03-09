@@ -8,3 +8,4 @@ desktop-app/dist/
 *.log
 backups/
 appsavocatcomplet.zip
+server/data/

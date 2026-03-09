@@ -2317,6 +2317,40 @@ tr.color-purple-light{border-left:6px solid #f97316;background:#fff7ed}
   justify-content:flex-end;
 }
 
+.import-progress-card{
+  width:min(560px, 100%);
+}
+
+.import-progress-text{
+  margin:0 0 12px;
+  color:#0f172a;
+  font-weight:700;
+}
+
+.import-progress-track{
+  width:100%;
+  height:14px;
+  border-radius:999px;
+  overflow:hidden;
+  border:1px solid #bfdbfe;
+  background:linear-gradient(180deg,#eff6ff 0%, #dbeafe 100%);
+}
+
+.import-progress-fill{
+  width:0%;
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg,#1d4ed8 0%, #2563eb 60%, #3b82f6 100%);
+  transition:width .18s ease;
+}
+
+.import-progress-percent{
+  margin:10px 0 0;
+  text-align:right;
+  font-weight:800;
+  color:#1e3a8a;
+}
+
 .team-clients-list{
   margin-top:8px;
   display:flex;
