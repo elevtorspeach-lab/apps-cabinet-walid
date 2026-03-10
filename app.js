@@ -112,6 +112,7 @@ let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
 let audienceLinkedRenderTimer = null;
+let dossierLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
@@ -1293,6 +1294,7 @@ function queueAudienceVirtualRender(){
 function renderAudienceRowHtml(row, duplicateKeySet){
   const { c, d, procKey, p, key, draft } = row;
   const canEdit = canEditClient(c) && canEditData();
+  const canView = Number.isFinite(Number(row?.c?.id)) && Number.isFinite(Number(row?.di));
   const liveColor = String(p?.color || '').trim();
   const safeColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(liveColor) ? liveColor : '';
   const duplicateKey = buildAudienceDuplicateKey(row);
@@ -1336,6 +1338,16 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
+      <td data-label="Actions">
+        <div class="table-actions">
+          <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
+            <i class="fa-solid fa-eye"></i>
+          </button>
+          <button type="button" class="btn-primary" ${(canEdit && canView) ? `onclick="editDossier(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
+            <i class="fa-solid fa-pen"></i>
+          </button>
+        </div>
+      </td>
     </tr>
   `;
 }
@@ -1346,7 +1358,7 @@ function renderAudienceVirtualWindow(force = false){
   const rows = Array.isArray(audienceVirtualRows) ? audienceVirtualRows : [];
   if(!rows.length){
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
     return;
   }
 
@@ -1359,10 +1371,10 @@ function renderAudienceVirtualWindow(force = false){
   const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="11" style="height:${topHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="12" style="height:${topHeight}px"></td></tr>`
     : '';
   const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="11" style="height:${bottomHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="12" style="height:${bottomHeight}px"></td></tr>`
     : '';
   const rowsHtml = rows
     .slice(start, end)
@@ -8699,6 +8711,8 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
     before: previousValue,
     after: nextValue
   });
+  invalidateDerivedCaches({ audience: true });
+  queueDossierLinkedRenders();
   persistDossierReferenceNow(clientId, dossier, { source: 'diligence' }).catch(()=>{});
 }
 
@@ -9763,7 +9777,7 @@ function renderAudience(options = {}){
     audienceVirtualRows = [];
     audienceVirtualDuplicateKeySet = new Set();
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
     renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     updateAudienceCheckedCount();
     queueSidebarSalleSessionsRender();
@@ -9782,7 +9796,7 @@ function renderAudience(options = {}){
   audienceVirtualDuplicateKeySet = duplicateKeySet;
   audienceVirtualLastRange = { start: -1, end: -1 };
   if(!pageData.rows.length){
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
   }else if(useVirtual){
     renderAudienceVirtualWindow(true);
   }else{
@@ -10491,6 +10505,27 @@ function queueAudienceLinkedRenders(){
   audienceLinkedRenderTimer = setTimeout(()=>{
     audienceLinkedRenderTimer = null;
     renderDashboard();
+    if(isDeferredRenderSectionVisible('suivi')){
+      renderSuivi();
+    }else{
+      markDeferredRenderDirty('suivi');
+    }
+    if(isDeferredRenderSectionVisible('salle')){
+      renderSidebarSalleSessions();
+    }
+  }, 180);
+}
+
+function queueDossierLinkedRenders(){
+  if(dossierLinkedRenderTimer) clearTimeout(dossierLinkedRenderTimer);
+  dossierLinkedRenderTimer = setTimeout(()=>{
+    dossierLinkedRenderTimer = null;
+    renderDashboard();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
     if(isDeferredRenderSectionVisible('suivi')){
       renderSuivi();
     }else{
