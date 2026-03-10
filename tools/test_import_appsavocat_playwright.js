@@ -77,7 +77,7 @@ async function runImportTest(fixturePath, expected) {
   const dialogs = [];
   page.on('dialog', async (dialog) => {
     dialogs.push(dialog.message());
-    await dialog.accept();
+    await dialog.accept().catch(() => {});
   });
 
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });

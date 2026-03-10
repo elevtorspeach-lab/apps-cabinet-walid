@@ -21,6 +21,7 @@ const DEFAULT_STATE = {
   audienceDraft: {},
   recycleBin: [],
   recycleArchive: [],
+  version: 0,
   updatedAt: new Date().toISOString()
 };
 
@@ -57,9 +58,11 @@ async function readState() {
   try {
     const raw = await fsp.readFile(STATE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
+    const parsedVersion = Number(parsed?.version);
     cachedState = {
       ...DEFAULT_STATE,
       ...(parsed && typeof parsed === 'object' ? parsed : {}),
+      version: Number.isFinite(parsedVersion) && parsedVersion >= 0 ? parsedVersion : 0,
       updatedAt: String(parsed?.updatedAt || new Date().toISOString())
     };
     return cachedState;
@@ -121,10 +124,18 @@ async function maybeWriteBackupSnapshot(state) {
   await pruneBackupFiles();
 }
 
-async function writeState(nextState) {
+async function writeState(nextState, options = {}) {
+  const previousState = options.previousState && typeof options.previousState === 'object'
+    ? options.previousState
+    : null;
+  const previousVersion = Number(previousState?.version);
+  const nextVersion = Number.isFinite(previousVersion) && previousVersion >= 0
+    ? previousVersion + 1
+    : 0;
   const safe = {
     ...DEFAULT_STATE,
     ...(nextState && typeof nextState === 'object' ? nextState : {}),
+    version: nextVersion,
     updatedAt: new Date().toISOString()
   };
   const tmpFile = `${STATE_FILE}.tmp`;
@@ -137,7 +148,11 @@ async function writeState(nextState) {
 
 function broadcastStateUpdated(payload) {
   const data = `event: state-updated\ndata: ${JSON.stringify({
-    updatedAt: payload?.updatedAt || new Date().toISOString()
+    version: Number(payload?.version) || 0,
+    updatedAt: payload?.updatedAt || new Date().toISOString(),
+    sourceId: payload?.sourceId || '',
+    patchKind: payload?.patchKind || '',
+    patch: payload?.patch && typeof payload.patch === 'object' ? payload.patch : null
   })}\n\n`;
   sseClients.forEach((res) => {
     try {
@@ -146,6 +161,100 @@ function broadcastStateUpdated(payload) {
       sseClients.delete(res);
     }
   });
+}
+
+function extractBaseVersion(body) {
+  const rawBaseVersion = Number(body?._baseVersion);
+  return Number.isFinite(rawBaseVersion) && rawBaseVersion >= 0 ? rawBaseVersion : null;
+}
+
+function buildConflictResponse(state) {
+  return {
+    ok: false,
+    code: 'STATE_CONFLICT',
+    message: 'Server state is newer than the submitted state.',
+    version: Number(state?.version) || 0,
+    updatedAt: state?.updatedAt || new Date().toISOString()
+  };
+}
+
+function sanitizePatchArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function sanitizePatchObject(value) {
+  return value && typeof value === 'object' ? value : null;
+}
+
+function cloneClients(state) {
+  return Array.isArray(state?.clients)
+    ? JSON.parse(JSON.stringify(state.clients))
+    : [];
+}
+
+function findClientIndexById(clients, clientId) {
+  return clients.findIndex((client) => Number(client?.id) === Number(clientId));
+}
+
+function applyDossierPatch(currentState, body) {
+  const clients = cloneClients(currentState);
+  const action = String(body?.action || '').trim().toLowerCase();
+  const clientId = Number(body?.clientId);
+  const dossierIndex = Number(body?.dossierIndex);
+  const targetClientId = Number(body?.targetClientId);
+  const dossier = sanitizePatchObject(body?.dossier);
+
+  if (!action) {
+    throw new Error('Missing dossier patch action.');
+  }
+
+  if (action === 'create') {
+    const clientIdx = findClientIndexById(clients, clientId);
+    if (clientIdx === -1) throw new Error('Client not found.');
+    if (!Array.isArray(clients[clientIdx].dossiers)) clients[clientIdx].dossiers = [];
+    if (!dossier) throw new Error('Missing dossier payload.');
+    clients[clientIdx].dossiers.push(dossier);
+    return clients;
+  }
+
+  if (!Number.isFinite(clientId) || !Number.isFinite(dossierIndex)) {
+    throw new Error('Invalid dossier patch coordinates.');
+  }
+
+  const sourceClientIdx = findClientIndexById(clients, clientId);
+  if (sourceClientIdx === -1) throw new Error('Source client not found.');
+  if (!Array.isArray(clients[sourceClientIdx].dossiers)) clients[sourceClientIdx].dossiers = [];
+
+  if (action === 'delete') {
+    if (dossierIndex < 0 || dossierIndex >= clients[sourceClientIdx].dossiers.length) {
+      throw new Error('Source dossier not found.');
+    }
+    clients[sourceClientIdx].dossiers.splice(dossierIndex, 1);
+    return clients;
+  }
+
+  if (!dossier) throw new Error('Missing dossier payload.');
+
+  if (action === 'update') {
+    if (dossierIndex < 0 || dossierIndex >= clients[sourceClientIdx].dossiers.length) {
+      throw new Error('Source dossier not found.');
+    }
+    const nextTargetClientId = Number.isFinite(targetClientId) ? targetClientId : clientId;
+    const targetClientIdx = findClientIndexById(clients, nextTargetClientId);
+    if (targetClientIdx === -1) throw new Error('Target client not found.');
+    if (!Array.isArray(clients[targetClientIdx].dossiers)) clients[targetClientIdx].dossiers = [];
+
+    if (targetClientIdx === sourceClientIdx) {
+      clients[sourceClientIdx].dossiers[dossierIndex] = dossier;
+      return clients;
+    }
+
+    clients[sourceClientIdx].dossiers.splice(dossierIndex, 1);
+    clients[targetClientIdx].dossiers.push(dossier);
+    return clients;
+  }
+
+  throw new Error('Unsupported dossier patch action.');
 }
 
 app.get('/api/health', async (req, res) => {
@@ -162,9 +271,120 @@ app.get('/api/state', async (req, res) => {
 app.post('/api/state', async (req, res) => {
   await ensureDataFile();
   const body = req.body && typeof req.body === 'object' ? req.body : {};
-  const saved = await writeState(body);
-  broadcastStateUpdated(saved);
-  res.json({ ok: true, updatedAt: saved.updatedAt });
+  const sourceId = String(body?._sourceId || '').trim();
+  const baseVersion = extractBaseVersion(body);
+  const currentState = await readState();
+  if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
+    return res.status(409).json(buildConflictResponse(currentState));
+  }
+  const statePayload = { ...body };
+  delete statePayload._sourceId;
+  delete statePayload._baseVersion;
+  const saved = await writeState(statePayload, { previousState: currentState });
+  broadcastStateUpdated({ ...saved, sourceId });
+  res.json({ ok: true, version: saved.version, updatedAt: saved.updatedAt });
+});
+
+app.post('/api/state/users', async (req, res) => {
+  await ensureDataFile();
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const sourceId = String(body?._sourceId || '').trim();
+  const baseVersion = extractBaseVersion(body);
+  const currentState = await readState();
+  if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
+    return res.status(409).json(buildConflictResponse(currentState));
+  }
+  const nextUsers = sanitizePatchArray(body?.users);
+  const saved = await writeState({
+    ...currentState,
+    users: nextUsers
+  }, { previousState: currentState });
+  broadcastStateUpdated({
+    ...saved,
+    sourceId,
+    patchKind: 'users',
+    patch: { users: nextUsers }
+  });
+  res.json({ ok: true, version: saved.version, updatedAt: saved.updatedAt });
+});
+
+app.post('/api/state/salle-assignments', async (req, res) => {
+  await ensureDataFile();
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const sourceId = String(body?._sourceId || '').trim();
+  const baseVersion = extractBaseVersion(body);
+  const currentState = await readState();
+  if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
+    return res.status(409).json(buildConflictResponse(currentState));
+  }
+  const nextSalleAssignments = sanitizePatchArray(body?.salleAssignments);
+  const saved = await writeState({
+    ...currentState,
+    salleAssignments: nextSalleAssignments
+  }, { previousState: currentState });
+  broadcastStateUpdated({
+    ...saved,
+    sourceId,
+    patchKind: 'salle-assignments',
+    patch: { salleAssignments: nextSalleAssignments }
+  });
+  res.json({ ok: true, version: saved.version, updatedAt: saved.updatedAt });
+});
+
+app.post('/api/state/audience-draft', async (req, res) => {
+  await ensureDataFile();
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const sourceId = String(body?._sourceId || '').trim();
+  const baseVersion = extractBaseVersion(body);
+  const currentState = await readState();
+  if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
+    return res.status(409).json(buildConflictResponse(currentState));
+  }
+  const nextAudienceDraft = body?.audienceDraft && typeof body.audienceDraft === 'object'
+    ? body.audienceDraft
+    : {};
+  const saved = await writeState({
+    ...currentState,
+    audienceDraft: nextAudienceDraft
+  }, { previousState: currentState });
+  broadcastStateUpdated({
+    ...saved,
+    sourceId,
+    patchKind: 'audience-draft',
+    patch: { audienceDraft: nextAudienceDraft }
+  });
+  res.json({ ok: true, version: saved.version, updatedAt: saved.updatedAt });
+});
+
+app.post('/api/state/dossiers', async (req, res) => {
+  await ensureDataFile();
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const sourceId = String(body?._sourceId || '').trim();
+  const baseVersion = extractBaseVersion(body);
+  const currentState = await readState();
+  if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
+    return res.status(409).json(buildConflictResponse(currentState));
+  }
+  try {
+    const nextClients = applyDossierPatch(currentState, body);
+    const saved = await writeState({
+      ...currentState,
+      clients: nextClients
+    }, { previousState: currentState });
+    broadcastStateUpdated({
+      ...saved,
+      sourceId,
+      patchKind: 'dossier',
+      patch: body
+    });
+    res.json({ ok: true, version: saved.version, updatedAt: saved.updatedAt });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      code: 'INVALID_DOSSIER_PATCH',
+      message: err?.message || 'Invalid dossier patch request.'
+    });
+  }
 });
 
 app.get('/api/state/stream', async (req, res) => {
@@ -176,7 +396,10 @@ app.get('/api/state/stream', async (req, res) => {
 
   sseClients.add(res);
   const current = await readState();
-  res.write(`event: state-updated\ndata: ${JSON.stringify({ updatedAt: current.updatedAt })}\n\n`);
+  res.write(`event: state-updated\ndata: ${JSON.stringify({
+    version: Number(current?.version) || 0,
+    updatedAt: current.updatedAt
+  })}\n\n`);
 
   const keepAlive = setInterval(() => {
     try {

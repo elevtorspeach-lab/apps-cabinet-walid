@@ -215,6 +215,7 @@ body{
 .sync-status.is-ok .dot{background:#22c55e}
 .sync-status.is-error .dot{background:#ef4444}
 .sync-status.is-syncing .dot{background:#60a5fa}
+.sync-status.is-conflict .dot{background:#f59e0b}
 .sync-status.is-ok .dot{
   animation:syncPulse 1.5s ease-in-out infinite;
 }

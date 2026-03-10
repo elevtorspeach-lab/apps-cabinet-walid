@@ -2,9 +2,47 @@
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [] };
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
-let USERS = [
-  { id: 1, username: DEFAULT_MANAGER_USERNAME, password: DEFAULT_MANAGER_PASSWORD, role: 'manager', clientIds: [] }
-];
+const DEFAULT_SEEDED_PASSWORD = '1234';
+
+function buildSeedUsers(){
+  const users = [
+    { id: 1, username: DEFAULT_MANAGER_USERNAME, password: DEFAULT_MANAGER_PASSWORD, role: 'manager', clientIds: [] }
+  ];
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 100 + i,
+      username: `admin${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'admin',
+      clientIds: []
+    });
+  }
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 200 + i,
+      username: `gestionnaire${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'manager',
+      clientIds: []
+    });
+  }
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 300 + i,
+      username: `client${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'client',
+      clientIds: []
+    });
+  }
+
+  return users;
+}
+
+let USERS = buildSeedUsers();
 let uploadedFiles = [];
 let audienceDraft = {};
 let selectedAudienceColor = 'all';
@@ -26,6 +64,8 @@ let filterDiligenceDelegation = 'all';
 let filterDiligenceOrdonnance = 'all';
 let filterDiligenceTribunal = 'all';
 let diligencePrintSelection = new Set();
+let audienceCheckedCountRenderQueued = false;
+let diligenceCheckedCountRenderQueued = false;
 let filterSalle = 'all';
 let filterSalleTribunal = 'all';
 let filterSalleAudienceDate = '';
@@ -45,6 +85,7 @@ const INDEXED_DB_STORE = 'state_store';
 const INDEXED_DB_BACKUP_STORE = 'backup_store';
 const INDEXED_DB_STATE_KEY = 'app_state';
 const API_BASE_STORAGE_KEY = 'cabinet-avocat-api-base-v1';
+const APP_INSTANCE_ID = `cabinet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
 let API_BASE = 'http://127.0.0.1:3000/api';
 let API_BASE_RESOLVED = false;
@@ -63,6 +104,13 @@ let remoteSyncStreamRetryTimer = null;
 let remoteSyncHealthTick = 0;
 let remoteSyncStreamConnected = false;
 let lastPersistedStateSignature = '';
+let remoteStateVersion = 0;
+let remoteStateUpdatedAt = '';
+let remoteRefreshPending = false;
+let remoteRefreshInFlight = false;
+let deferredLocalSnapshotTimer = null;
+let deferredLocalSnapshotPayload = null;
+let deferredLocalSnapshotSource = 'persist';
 let audienceLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
@@ -134,6 +182,9 @@ let clientListSummaryCacheUserKey = '';
 let dashboardSnapshotCache = null;
 let dashboardSnapshotCacheVersion = -1;
 let dashboardSnapshotCacheUserKey = '';
+let dashboardAudienceMetricsCache = null;
+let dashboardAudienceMetricsCacheVersion = -1;
+let dashboardAudienceMetricsCacheUserKey = '';
 let dashboardCalendarEventsCache = null;
 let dashboardCalendarEventsCacheVersion = -1;
 let dashboardCalendarEventsCacheUserKey = '';
@@ -224,6 +275,7 @@ const SIDEBAR_COLLAPSED_KEY = 'cabinet-avocat-sidebar-collapsed';
 const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 3;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
+const REMOTE_SYNC_BLOCKED_RETRY_MS = 800;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const AUTO_BACKUP_RETENTION_COUNT = 12;
 const AUTO_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
@@ -356,11 +408,19 @@ function getHistorySourceLabel(source){
 }
 
 function getRoleLabel(role){
-  const key = String(role || '').trim().toLowerCase();
+  const key = normalizeUserRole(role);
   if(key === 'manager') return 'Gestionnaire';
   if(key === 'admin') return 'Admin';
-  if(key === 'viewer') return 'Consultation';
+  if(key === 'client') return 'Client';
   return key || '-';
+}
+
+function normalizeUserRole(role){
+  const key = String(role || '').trim().toLowerCase();
+  if(key === 'manager' || key === 'gestionnaire') return 'manager';
+  if(key === 'admin') return 'admin';
+  if(key === 'viewer' || key === 'client' || key === 'consultation') return 'client';
+  return 'client';
 }
 
 function formatHistoryDateTime(iso){
@@ -556,7 +616,7 @@ function normalizeApiBaseCandidate(value){
 
 function getAudienceViewerCacheKey(){
   const user = currentUser || {};
-  const role = String(user.role || '').trim().toLowerCase();
+  const role = normalizeUserRole(user.role);
   const id = Number(user.id) || 0;
   const clientIds = Array.isArray(user.clientIds)
     ? [...user.clientIds].map(v=>Number(v)).filter(v=>Number.isFinite(v)).sort((a, b)=>a - b).join(',')
@@ -564,8 +624,11 @@ function getAudienceViewerCacheKey(){
   return `${id}::${role}::${clientIds}`;
 }
 
-function markAudienceRowsCacheDirty(){
-  audienceRowsRawDataVersion += 1;
+function invalidateDerivedCaches(options = {}){
+  const audience = options.audience !== false;
+  if(audience){
+    audienceRowsRawDataVersion += 1;
+  }
   backgroundDataWarmupVersion = -1;
   visibleClientsCache = null;
   visibleClientsCacheVersion = -1;
@@ -579,6 +642,21 @@ function markAudienceRowsCacheDirty(){
   dashboardSnapshotCache = null;
   dashboardSnapshotCacheVersion = -1;
   dashboardSnapshotCacheUserKey = '';
+  suiviBaseRowsCache = null;
+  suiviFilterOptionsRowsMetaRef = null;
+  suiviFilteredRowsCacheSource = null;
+  suiviFilteredRowsCacheKey = '';
+  suiviFilteredRowsCacheOutput = [];
+  diligenceRowsCache = null;
+  diligenceFilteredRowsCacheInput = null;
+  diligenceFilteredRowsCacheKey = '';
+  diligenceFilteredRowsCacheOutput = [];
+  diligenceFilterProcedureRowsRef = null;
+  diligenceFilterTribunalRowsRef = null;
+  diligenceFilterSortRowsRef = null;
+  diligenceFilterDelegationRowsRef = null;
+  diligenceFilterOrdonnanceRowsRef = null;
+  if(!audience) return;
   dashboardCalendarEventsCache = null;
   dashboardCalendarEventsCacheVersion = -1;
   dashboardCalendarEventsCacheUserKey = '';
@@ -600,20 +678,31 @@ function markAudienceRowsCacheDirty(){
   audienceFilterOptionsRowsRef = null;
   audienceDuplicateKeySetCacheInput = null;
   audienceDuplicateKeySetCacheOutput = new Set();
-  suiviBaseRowsCache = null;
-  suiviFilterOptionsRowsMetaRef = null;
-  suiviFilteredRowsCacheSource = null;
-  suiviFilteredRowsCacheKey = '';
-  suiviFilteredRowsCacheOutput = [];
-  diligenceRowsCache = null;
-  diligenceFilteredRowsCacheInput = null;
-  diligenceFilteredRowsCacheKey = '';
-  diligenceFilteredRowsCacheOutput = [];
-  diligenceFilterProcedureRowsRef = null;
-  diligenceFilterTribunalRowsRef = null;
-  diligenceFilterSortRowsRef = null;
-  diligenceFilterDelegationRowsRef = null;
-  diligenceFilterOrdonnanceRowsRef = null;
+}
+
+function markAudienceRowsCacheDirty(){
+  invalidateDerivedCaches({ audience: true });
+}
+
+function markAudienceColorCachesDirty(){
+  backgroundDataWarmupVersion = -1;
+  dashboardAudienceMetricsCache = null;
+  dashboardAudienceMetricsCacheVersion = -1;
+  dashboardAudienceMetricsCacheUserKey = '';
+  audienceRowsViewCacheSource = null;
+  audienceRowsViewCacheKey = '';
+  audienceRowsViewCacheOutput = [];
+  audienceFilteredRowsCacheInput = null;
+  audienceFilteredRowsCacheKey = '';
+  audienceFilteredRowsCacheOutput = [];
+}
+
+function markNonAudienceDossierCachesDirty(){
+  invalidateDerivedCaches({ audience: false });
+}
+
+function dossierHasAudienceImpact(dossier){
+  return normalizeProcedures(dossier).some(procName=>isAudienceProcedure(procName));
 }
 
 function pushApiCandidate(candidates, seen, value){
@@ -741,18 +830,133 @@ function shouldRenderClientDropdown(options = {}){
   return false;
 }
 
+function getVisibleDeferredSectionKeys(){
+  return Object.keys(DEFERRED_RENDER_SECTION_IDS).filter(key=>isDeferredRenderSectionVisible(key));
+}
+
+function refreshVisibleSectionsAfterRemoteSync(){
+  const visibleKeys = new Set(getVisibleDeferredSectionKeys());
+  if(visibleKeys.has('dashboard')) renderDashboard();
+  if(visibleKeys.has('clients')) renderClients();
+  if(visibleKeys.has('suivi')) renderSuivi();
+  if(visibleKeys.has('audience')) renderAudience();
+  if(visibleKeys.has('diligence')) renderDiligence();
+  if(visibleKeys.has('salle')) renderSalle();
+  if(visibleKeys.has('equipe')) renderEquipe();
+  if(visibleKeys.has('recycle')) renderRecycleBin();
+  if(visibleKeys.has('creation')) updateClientDropdown();
+}
+
+function applyRemoteDossierPatchLocally(patch){
+  if(!patch || typeof patch !== 'object') return false;
+  const action = String(patch.action || '').trim().toLowerCase();
+  const clientId = Number(patch.clientId);
+  const dossierIndex = Number(patch.dossierIndex);
+  const targetClientId = Number(patch.targetClientId);
+  const dossier = patch.dossier && typeof patch.dossier === 'object'
+    ? JSON.parse(JSON.stringify(patch.dossier))
+    : null;
+  const findClientIndex = (id)=>AppState.clients.findIndex(client=>Number(client?.id) === Number(id));
+
+  if(action === 'create'){
+    const clientIdx = findClientIndex(clientId);
+    if(clientIdx === -1 || !dossier) return false;
+    if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
+    AppState.clients[clientIdx].dossiers.push(dossier);
+    return true;
+  }
+
+  if(action === 'delete'){
+    const clientIdx = findClientIndex(clientId);
+    if(clientIdx === -1 || !Number.isFinite(dossierIndex)) return false;
+    if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
+    if(dossierIndex < 0 || dossierIndex >= AppState.clients[clientIdx].dossiers.length) return false;
+    AppState.clients[clientIdx].dossiers.splice(dossierIndex, 1);
+    return true;
+  }
+
+  if(action === 'update'){
+    const sourceClientIdx = findClientIndex(clientId);
+    if(sourceClientIdx === -1 || !Number.isFinite(dossierIndex) || !dossier) return false;
+    if(!Array.isArray(AppState.clients[sourceClientIdx].dossiers)) AppState.clients[sourceClientIdx].dossiers = [];
+    if(dossierIndex < 0 || dossierIndex >= AppState.clients[sourceClientIdx].dossiers.length) return false;
+    const nextTargetClientId = Number.isFinite(targetClientId) ? targetClientId : clientId;
+    const targetClientIdx = findClientIndex(nextTargetClientId);
+    if(targetClientIdx === -1) return false;
+    if(!Array.isArray(AppState.clients[targetClientIdx].dossiers)) AppState.clients[targetClientIdx].dossiers = [];
+    if(targetClientIdx === sourceClientIdx){
+      AppState.clients[sourceClientIdx].dossiers[dossierIndex] = dossier;
+      return true;
+    }
+    AppState.clients[sourceClientIdx].dossiers.splice(dossierIndex, 1);
+    AppState.clients[targetClientIdx].dossiers.push(dossier);
+    return true;
+  }
+
+  return false;
+}
+
+function applyRemoteSlicePatchLocally(patchKind, patch){
+  if(!patch || typeof patch !== 'object') return false;
+  if(patchKind === 'users'){
+    const nextUsers = Array.isArray(patch.users)
+      ? patch.users.map(normalizeUser).filter(Boolean)
+      : null;
+    if(!nextUsers) return false;
+    USERS = ensureManagerUser(nextUsers);
+    return true;
+  }
+  if(patchKind === 'salle-assignments'){
+    AppState.salleAssignments = normalizeSalleAssignments(patch.salleAssignments);
+    return true;
+  }
+  if(patchKind === 'audience-draft'){
+    audienceDraft = patch.audienceDraft && typeof patch.audienceDraft === 'object'
+      ? patch.audienceDraft
+      : {};
+    return true;
+  }
+  return false;
+}
+
+function finalizeRemoteStateUpdateLocally(options = {}){
+  if(options.audience === false){
+    markNonAudienceDossierCachesDirty();
+  }else{
+    markAudienceRowsCacheDirty();
+  }
+  // Avoid expensive full-state signature recomputation on every live patch.
+  // A later full reload can rebuild the signature if needed.
+  lastPersistedStateSignature = '';
+  syncCurrentUserFromUsers();
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
+  refreshVisibleSectionsAfterRemoteSync();
+}
+
 function setSyncStatus(status, message){
   const badge = $('syncStatusBadge');
   const text = $('syncStatusText');
   if(!badge || !text) return;
-  badge.classList.remove('is-ok', 'is-error', 'is-syncing', 'is-pending');
-  const next = ['ok', 'error', 'syncing', 'pending'].includes(status) ? status : 'pending';
+  badge.classList.remove('is-ok', 'is-error', 'is-syncing', 'is-pending', 'is-conflict');
+  const next = ['ok', 'error', 'syncing', 'pending', 'conflict'].includes(status) ? status : 'pending';
   badge.classList.add(`is-${next}`);
   const fallbackText = {
     pending: 'Modification detectee...',
     syncing: 'Synchronisation serveur...',
     ok: 'Connecte au serveur (actif)',
-    error: 'Serveur indisponible (local)'
+    error: 'Serveur indisponible (local)',
+    conflict: 'Conflit detecte, rechargement...'
   };
   text.innerText = String(message || fallbackText[next]);
 }
@@ -1087,9 +1291,10 @@ function queueAudienceVirtualRender(){
 }
 
 function renderAudienceRowHtml(row, duplicateKeySet){
-  const { c, d, procKey, p, color, key, draft } = row;
+  const { c, d, procKey, p, key, draft } = row;
   const canEdit = canEditClient(c) && canEditData();
-  const safeColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(color) ? color : '';
+  const liveColor = String(p?.color || '').trim();
+  const safeColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(liveColor) ? liveColor : '';
   const duplicateKey = buildAudienceDuplicateKey(row);
   const isDuplicate = !!(duplicateKey && duplicateKeySet.has(duplicateKey));
   const hasError = isAudienceRowInvalid(row, duplicateKeySet);
@@ -1563,15 +1768,15 @@ async function refreshServerConnectionStatus(){
 }
 
 function isManager(){
-  return currentUser?.role === 'manager';
+  return normalizeUserRole(currentUser?.role) === 'manager';
 }
 
 function isAdmin(){
-  return currentUser?.role === 'admin';
+  return normalizeUserRole(currentUser?.role) === 'admin';
 }
 
 function isViewer(){
-  return currentUser?.role === 'viewer';
+  return normalizeUserRole(currentUser?.role) === 'client';
 }
 
 function isDefaultManagerUser(user){
@@ -1623,6 +1828,7 @@ function grantCurrentViewerAccessToClient(clientId){
   }
   USERS[userIdx] = { ...user, clientIds: nextIds };
   currentUser = USERS[userIdx];
+  persistStateSliceNow('users', USERS, { source: 'client-access' }).catch(()=>{});
 }
 
 function normalizeSalleName(value){
@@ -1723,7 +1929,7 @@ function getCurrentClientAccessCacheKey(){
   const ids = Array.isArray(user?.clientIds) ? user.clientIds.map(v=>Number(v)).filter(Number.isFinite).sort((a, b)=>a - b) : [];
   return [
     String(user?.id || ''),
-    String(user?.role || ''),
+    normalizeUserRole(user?.role),
     ids.join(',')
   ].join('||');
 }
@@ -2825,10 +3031,7 @@ function normalizeUser(rawUser){
   const id = Number(rawUser.id);
   const username = String(rawUser.username || '').trim();
   const password = String(rawUser.password || '');
-  const rawRole = String(rawUser.role || '').trim().toLowerCase();
-  const role = rawRole === 'manager' || rawRole === 'admin' || rawRole === 'viewer'
-    ? rawRole
-    : 'viewer';
+  const role = normalizeUserRole(rawUser.role);
   const clientIds = Array.isArray(rawUser.clientIds)
     ? [...new Set(rawUser.clientIds.map(v=>Number(v)).filter(v=>Number.isFinite(v)))]
     : [];
@@ -2907,12 +3110,40 @@ function normalizeRecycleArchiveEntries(rawEntries){
 function pushRecycleBinEntry(type, payload){
   if(!AppState || typeof AppState !== 'object') return;
   if(!Array.isArray(AppState.recycleBin)) AppState.recycleBin = [];
+  const normalizedType = String(type || 'unknown');
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const buildRecycleEntrySignature = (entryType, entryPayload)=>{
+    const safeType = String(entryType || '').trim();
+    const data = entryPayload && typeof entryPayload === 'object' ? entryPayload : {};
+    if(safeType === 'client_delete'){
+      return `${safeType}::${String(data?.client?.name || '').trim().toLowerCase()}`;
+    }
+    if(safeType === 'dossier_delete'){
+      return [
+        safeType,
+        Number(data?.clientId) || 0,
+        String(data?.clientName || '').trim().toLowerCase(),
+        String(data?.dossier?.referenceClient || data?.dossier?.debiteur || '').trim().toLowerCase()
+      ].join('::');
+    }
+    if(safeType === 'all_clients_delete'){
+      return safeType;
+    }
+    return '';
+  };
+  const nextSignature = buildRecycleEntrySignature(normalizedType, safePayload);
+  if(nextSignature){
+    AppState.recycleBin = AppState.recycleBin.filter(entry=>{
+      const entryPayload = entry?.payload && typeof entry.payload === 'object' ? entry.payload : {};
+      return buildRecycleEntrySignature(entry?.type, entryPayload) !== nextSignature;
+    });
+  }
   AppState.recycleBin.push({
-    type: String(type || 'unknown'),
+    type: normalizedType,
     at: new Date().toISOString(),
     by: String(currentUser?.username || '-'),
     byRole: String(currentUser?.role || ''),
-    payload: payload && typeof payload === 'object' ? payload : {}
+    payload: safePayload
   });
   if(AppState.recycleBin.length > RECYCLE_BIN_MAX_ENTRIES){
     AppState.recycleBin = AppState.recycleBin.slice(-RECYCLE_BIN_MAX_ENTRIES);
@@ -3446,6 +3677,15 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 
 function ensureManagerUser(users){
   const validUsers = Array.isArray(users) ? users.filter(Boolean).map(u=>({ ...u })) : [];
+  const existingUsernames = new Set(
+    validUsers.map(u=>String(u?.username || '').trim().toLowerCase()).filter(Boolean)
+  );
+  buildSeedUsers().forEach(seedUser=>{
+    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
+    if(!usernameKey || existingUsernames.has(usernameKey)) return;
+    validUsers.push({ ...seedUser });
+    existingUsernames.add(usernameKey);
+  });
   const defaultManagerIdx = validUsers.findIndex(
     u=>String(u.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
   );
@@ -3496,6 +3736,21 @@ function buildAppStatePayload(){
     recycleBin: Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [],
     recycleArchive: Array.isArray(AppState.recycleArchive) ? AppState.recycleArchive : []
   };
+}
+
+function updateRemoteStateMetadata(source){
+  const versionNum = Number(source?.version);
+  remoteStateVersion = Number.isFinite(versionNum) && versionNum >= 0 ? versionNum : 0;
+  remoteStateUpdatedAt = String(source?.updatedAt || '');
+}
+
+function getRemoteRefreshBlocker(){
+  if(typeof document !== 'undefined' && document.hidden) return 'hidden';
+  if(editingDossier) return 'editing';
+  if(importInProgress) return 'import';
+  if(persistTimer) return 'persist';
+  if(Object.keys(audienceDraft || {}).length) return 'draft';
+  return '';
 }
 
 function makeClientMatchKey(value){
@@ -3871,7 +4126,7 @@ async function importAppsavocatPayload(rawPayload){
 
     await persistAppStateNow();
     renderClients();
-    renderDashboard();
+    renderDashboard({ force: true, immediate: true });
     updateClientDropdown();
     renderSuivi();
     renderAudience();
@@ -4171,9 +4426,8 @@ function queueDesktopStateFilePersist(){
   }, DESKTOP_STATE_SAVE_DEBOUNCE_MS);
 }
 
-async function persistAppStateNow(){
-  flushAllDossierHistoryPendingEntries();
-  const payload = buildAppStatePayload();
+async function persistLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+  const source = String(options?.source || 'persist');
   const nextSignature = buildStateSignature(
     payload.clients,
     payload.salleAssignments,
@@ -4185,20 +4439,66 @@ async function persistAppStateNow(){
   lastPersistedStateSignature = nextSignature;
   await writeStateToIndexedDb(payload);
   writeStateToLocalStorage(payload);
-  await createAutoBackupSnapshot(payload, { source: 'persist' });
+  await createAutoBackupSnapshot(payload, { source });
   queueDesktopStateFilePersist();
+  return payload;
+}
+
+function queueDeferredLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+  const source = String(options?.source || 'persist');
+  const nextSignature = buildStateSignature(
+    payload.clients,
+    payload.salleAssignments,
+    payload.users,
+    payload.audienceDraft,
+    payload.recycleBin,
+    payload.recycleArchive
+  );
+  lastPersistedStateSignature = nextSignature;
+  deferredLocalSnapshotPayload = payload;
+  deferredLocalSnapshotSource = source;
+  if(deferredLocalSnapshotTimer) return payload;
+  deferredLocalSnapshotTimer = setTimeout(()=>{
+    const pendingPayload = deferredLocalSnapshotPayload;
+    const pendingSource = deferredLocalSnapshotSource;
+    deferredLocalSnapshotTimer = null;
+    deferredLocalSnapshotPayload = null;
+    deferredLocalSnapshotSource = 'persist';
+    if(!pendingPayload) return;
+    persistLocalStateSnapshot(pendingPayload, { source: pendingSource }).catch((err)=>{
+      console.warn('Impossible de sauvegarder le snapshot local différé', err);
+    });
+  }, 0);
+  return payload;
+}
+
+async function persistRemoteRequestNow(pathname, body){
   if(LOCAL_ONLY_MODE){
     setSyncStatus('error', 'Mode local (offline)');
     return true;
   }
   setSyncStatus('syncing');
   try{
-    const res = await fetchWithTimeout(`${API_BASE}/state`, {
+    const res = await fetchWithTimeout(`${API_BASE}${pathname}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        ...body,
+        _sourceId: APP_INSTANCE_ID,
+        _baseVersion: remoteStateVersion
+      })
     }, API_STATE_SAVE_TIMEOUT_MS);
+    if(res.status === 409){
+      const conflictPayload = await res.json().catch(()=>({}));
+      updateRemoteStateMetadata(conflictPayload);
+      remoteRefreshPending = true;
+      setSyncStatus('conflict', 'Conflit: serveur plus recent, rechargement...');
+      queueRemoteStateRefresh(0);
+      return false;
+    }
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const saveResult = await res.json().catch(()=>({}));
+    updateRemoteStateMetadata(saveResult);
     setSyncStatus('ok');
     return true;
   }catch(err){
@@ -4206,6 +4506,34 @@ async function persistAppStateNow(){
     console.warn('Impossible de sauvegarder sur le serveur', err);
     return false;
   }
+}
+
+async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
+  const payload = buildAppStatePayload();
+  await persistLocalStateSnapshot(payload, { source: options.source || sliceKey });
+  const routeBySlice = {
+    audienceDraft: '/state/audience-draft',
+    users: '/state/users',
+    salleAssignments: '/state/salle-assignments'
+  };
+  const pathname = routeBySlice[sliceKey];
+  if(!pathname){
+    return persistRemoteRequestNow('/state', payload);
+  }
+  return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue });
+}
+
+async function persistDossierPatchNow(patch, options = {}){
+  const payload = buildAppStatePayload();
+  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'dossier' });
+  return persistRemoteRequestNow('/state/dossiers', patch);
+}
+
+async function persistAppStateNow(){
+  flushAllDossierHistoryPendingEntries();
+  const payload = buildAppStatePayload();
+  await persistLocalStateSnapshot(payload, { source: 'persist' });
+  return persistRemoteRequestNow('/state', payload);
 }
 
 function queuePersistAppState(){
@@ -4230,6 +4558,7 @@ async function loadPersistedState(){
       const res = await fetchWithTimeout(`${API_BASE}/state`, { cache: 'no-store' }, API_STATE_LOAD_TIMEOUT_MS);
       if(res.ok){
         const parsed = await res.json();
+        updateRemoteStateMetadata(parsed);
         const loadedClients = Array.isArray(parsed?.clients)
           ? parsed.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
           : [];
@@ -4456,21 +4785,41 @@ async function loadPersistedState(){
 async function refreshRemoteState(){
   if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
-  if(typeof document !== 'undefined' && document.hidden) return;
-  if(editingDossier) return;
-  if(importInProgress) return;
-  if(persistTimer) return;
-  if(Object.keys(audienceDraft || {}).length) return;
-  const hasChanged = await loadPersistedState();
-  if(!hasChanged) return;
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderSalle();
-  renderEquipe();
+  if(remoteRefreshInFlight){
+    remoteRefreshPending = true;
+    return;
+  }
+  const blocker = getRemoteRefreshBlocker();
+  if(blocker){
+    remoteRefreshPending = true;
+    queueRemoteStateRefresh(REMOTE_SYNC_BLOCKED_RETRY_MS);
+    return;
+  }
+  remoteRefreshInFlight = true;
+  try{
+    const hasChanged = await loadPersistedState();
+    if(hasChanged){
+      markDeferredRenderDirty(
+        'dashboard',
+        'clients',
+        'creation',
+        'suivi',
+        'audience',
+        'diligence',
+        'salle',
+        'equipe',
+        'recycle',
+        'clientDropdown'
+      );
+      refreshVisibleSectionsAfterRemoteSync();
+    }
+  }finally{
+    remoteRefreshInFlight = false;
+    if(remoteRefreshPending){
+      remoteRefreshPending = false;
+      queueRemoteStateRefresh(0);
+    }
+  }
 }
 
 function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
@@ -4483,17 +4832,21 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 
 function startRemoteSync(){
   if(LOCAL_ONLY_MODE){
+    updateRemoteStateMetadata({ version: 0, updatedAt: '' });
     setSyncStatus('error', 'Mode local (offline)');
     return;
   }
   if(remoteSyncTimer) return;
   startRemoteSyncStream();
   refreshServerConnectionStatus().catch(()=>{});
-  queueRemoteStateRefresh(0);
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     if(remoteSyncHealthTick === 0){
       refreshServerConnectionStatus().catch(()=>{});
+    }
+    if(remoteRefreshPending){
+      queueRemoteStateRefresh(0);
+      return;
     }
     if(!remoteSyncStreamConnected){
       queueRemoteStateRefresh(0);
@@ -4540,20 +4893,39 @@ function startRemoteSyncStream(){
       remoteSyncStreamConnected = true;
       setSyncStatus('ok', 'Connecte au serveur (actif)');
     };
-    stream.addEventListener('state', (event)=>{
+    stream.addEventListener('state-updated', (event)=>{
       try{
         const payload = JSON.parse(String(event?.data || '{}'));
+        const previousVersion = remoteStateVersion;
+        const previousUpdatedAt = remoteStateUpdatedAt;
+        updateRemoteStateMetadata(payload);
         if(payload?.updatedAt) setLiveDelayMetricFromIso(payload.updatedAt);
+        if(String(payload?.sourceId || '') === APP_INSTANCE_ID) return;
+        if(payload?.patchKind === 'dossier' && applyRemoteDossierPatchLocally(payload.patch)){
+          const patchHasAudienceImpact = String(payload?.patch?.action || '').trim().toLowerCase() === 'create'
+            ? dossierHasAudienceImpact(payload?.patch?.dossier || {})
+            : true;
+          finalizeRemoteStateUpdateLocally({ audience: patchHasAudienceImpact });
+          remoteRefreshPending = false;
+          return;
+        }
+        if(applyRemoteSlicePatchLocally(payload?.patchKind, payload?.patch)){
+          finalizeRemoteStateUpdateLocally();
+          remoteRefreshPending = false;
+          return;
+        }
+        if(
+          Number(payload?.version) > 0
+          && Number(previousVersion) > 0
+          && Number(payload.version) === Number(previousVersion)
+          && String(payload?.updatedAt || '') === String(previousUpdatedAt || '')
+        ){
+          remoteRefreshPending = false;
+          return;
+        }
       }catch(err){}
-      queueRemoteStateRefresh();
+      queueRemoteStateRefresh(0);
     });
-    stream.onmessage = (event)=>{
-      try{
-        const payload = JSON.parse(String(event?.data || '{}'));
-        if(payload?.updatedAt) setLiveDelayMetricFromIso(payload.updatedAt);
-      }catch(err){}
-      queueRemoteStateRefresh();
-    };
     stream.onerror = ()=>{
       remoteSyncStreamConnected = false;
       if(remoteSyncStream){
@@ -6159,8 +6531,7 @@ async function initApplication(){
   );
   warmupExcelLibrariesOnIdle();
   startRemoteSync();
-  showView('dashboard');
-  scheduleBackgroundDataWarmup(1800);
+  showView('dashboard', { warmup: false });
 }
 
 // ================== EVENTS ==================
@@ -6224,7 +6595,8 @@ function setupEvents(){
     if(!file) return;
     handleExcelImportFile(file, {
       importDossiers: true,
-      importAudiences: false
+      importAudiences: false,
+      clearAudienceOnDossierOnly: true
     }).catch(err=>console.error(err));
     e.target.value = '';
   });
@@ -6488,7 +6860,7 @@ function setSelectedAudienceColor(color, syncFilter){
 }
 
 // ================== NAV ==================
-function showView(v){
+function showView(v, options = {}){
   const setVisible = (id, visible)=>{
     const el = $(id);
     if(!el) return;
@@ -6523,7 +6895,7 @@ function showView(v){
   if(v === 'salle') renderSalle({ force: true });
   if(v === 'equipe') renderEquipe({ force: true });
   if(v === 'recycle') renderRecycleBin({ force: true });
-  if(v === 'dashboard') scheduleBackgroundDataWarmup(1800);
+  if(v === 'dashboard' && options.warmup !== false) scheduleBackgroundDataWarmup(1800);
   if(isMobileViewport()){
     setSidebarCollapsed(true);
   }
@@ -6596,10 +6968,9 @@ function login(){
     'recycle',
     'clientDropdown'
   );
-  safeRun('applyRoleUI', applyRoleUI);
-  safeRun('showView(dashboard)', ()=>showView('dashboard'));
-  safeRun('renderSidebarSalleSessions', renderSidebarSalleSessions);
-  scheduleBackgroundDataWarmup(1800);
+  safeRun('applyRoleUI', ()=>applyRoleUI({ skipNavigation: true }));
+  safeRun('renderDashboard(immediate)', ()=>renderDashboard({ force: true, immediate: true, deferHeavy: true, includeAudienceMetrics: false }));
+  safeRun('queueSidebarSalleSessionsRender', ()=>queueSidebarSalleSessionsRender(2800));
 
   const hasVisibleSection = [
     'dashboardSection',
@@ -6651,7 +7022,8 @@ function logout(){
   setSyncStatus('pending');
 }
 
-function applyRoleUI(){
+function applyRoleUI(options = {}){
+  const skipNavigation = options.skipNavigation === true;
   const viewer = isViewer();
   const manager = isManager();
   const canCreateClient = canEditData();
@@ -6668,8 +7040,9 @@ function applyRoleUI(){
   document.querySelectorAll('.color-btn').forEach(btn=> btn.disabled = !audienceEditable);
   if($('saveAudienceBtn')) $('saveAudienceBtn').style.display = audienceEditable ? '' : 'none';
 
+  if(skipNavigation) return;
+
   if(!manager){
-    if($('recycleSection')?.style.display !== 'none') showView('dashboard');
     showView('dashboard');
   }else if(viewer && $('creationSection')?.style.display !== 'none'){
     showView('dashboard');
@@ -6943,6 +7316,7 @@ async function addDossier(){
     dossier.history = [];
     console.log('[ADD DOSSIER]', JSON.stringify(dossier, null, 2));
 
+    let dossierPatch = null;
     if(editingDossier){
       const prevClient = AppState.clients.find(c=>c.id == editingDossier.clientId);
       const previousDossier = prevClient?.dossiers?.[editingDossier.index];
@@ -6956,12 +7330,38 @@ async function addDossier(){
         if(prevClient) prevClient.dossiers.splice(editingDossier.index, 1);
         client.dossiers.push(dossier);
       }
+      dossierPatch = {
+        action: 'update',
+        clientId: Number(editingDossier.clientId),
+        dossierIndex: Number(editingDossier.index),
+        targetClientId: Number(client.id),
+        dossier
+      };
     }else{
       dossier.history = [];
       client.dossiers.push(dossier);
+      dossierPatch = {
+        action: 'create',
+        clientId: Number(client.id),
+        dossier
+      };
     }
-    reconcileAudienceOrphanDossiers();
-    queuePersistAppState();
+    const previousAudienceImpact = editingDossier
+      ? dossierHasAudienceImpact(
+        AppState.clients.find(c=>c.id == editingDossier.clientId)?.dossiers?.[editingDossier.index] || {}
+      )
+      : false;
+    const dossierRequiresAudienceRefresh = previousAudienceImpact || dossierHasAudienceImpact(dossier);
+    if(dossierRequiresAudienceRefresh){
+      reconcileAudienceOrphanDossiers();
+    }else{
+      markNonAudienceDossierCachesDirty();
+    }
+    if(dossierPatch){
+      await persistDossierPatchNow(dossierPatch, { source: 'dossier' });
+    }else{
+      queuePersistAppState();
+    }
 
     renderSuivi();
     renderDashboard();
@@ -7553,7 +7953,11 @@ function deleteDossier(clientId, index){
     dossier: JSON.parse(JSON.stringify(dossier || {}))
   });
   client.dossiers.splice(index, 1);
-  queuePersistAppState();
+  persistDossierPatchNow({
+    action: 'delete',
+    clientId: Number(client.id),
+    dossierIndex: Number(index)
+  }, { source: 'dossier-delete' }).catch(()=>{});
   closeDossierModal();
   renderClients();
   renderDashboard();
@@ -7703,6 +8107,24 @@ function getDossierByIds(clientId, index){
   return { client, dossier };
 }
 
+function getDossierIndexByReference(clientId, dossierRef){
+  const client = AppState.clients.find(c=>c.id == clientId);
+  if(!client || !Array.isArray(client.dossiers)) return -1;
+  return client.dossiers.indexOf(dossierRef);
+}
+
+function persistDossierReferenceNow(clientId, dossierRef, options = {}){
+  const dossierIndex = getDossierIndexByReference(clientId, dossierRef);
+  if(dossierIndex === -1) return Promise.resolve(false);
+  return persistDossierPatchNow({
+    action: 'update',
+    clientId: Number(clientId),
+    dossierIndex,
+    targetClientId: Number(clientId),
+    dossier: dossierRef
+  }, options);
+}
+
 function viewDossierFile(clientId, index, fileIndex){
   const data = getDossierByIds(clientId, index);
   if(!data) return;
@@ -7778,14 +8200,33 @@ function updateDiligenceCheckedCount(){
   node.innerText = `Cochés: ${diligencePrintSelection.size}`;
 }
 
+function queueDiligenceCheckedCountRender(){
+  if(diligenceCheckedCountRenderQueued) return;
+  diligenceCheckedCountRenderQueued = true;
+  const render = ()=>{
+    diligenceCheckedCountRenderQueued = false;
+    updateDiligenceCheckedCount();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(render);
+    return;
+  }
+  setTimeout(render, 0);
+}
+
 function toggleDiligencePrintSelection(clientId, dossierIndex, procedure, checked){
   const key = makeDiligencePrintKey(clientId, dossierIndex, procedure);
   if(checked){
+    const sizeBefore = diligencePrintSelection.size;
     diligencePrintSelection.add(key);
+    if(diligencePrintSelection.size !== sizeBefore){
+      queueDiligenceCheckedCountRender();
+    }
   }else{
-    diligencePrintSelection.delete(key);
+    if(diligencePrintSelection.delete(key)){
+      queueDiligenceCheckedCountRender();
+    }
   }
-  updateDiligenceCheckedCount();
 }
 
 function toggleDiligencePrintSelectionEncoded(clientId, dossierIndex, procedureEncoded, checked){
@@ -7794,8 +8235,14 @@ function toggleDiligencePrintSelectionEncoded(clientId, dossierIndex, procedureE
 
 function syncDiligencePrintSelection(allRows){
   const allowed = new Set((allRows || []).map(row=>makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure)));
-  diligencePrintSelection = new Set([...diligencePrintSelection].filter(key=>allowed.has(key)));
-  updateDiligenceCheckedCount();
+  const next = new Set([...diligencePrintSelection].filter(key=>allowed.has(key)));
+  const changed = next.size !== diligencePrintSelection.size;
+  diligencePrintSelection = next;
+  if(changed){
+    queueDiligenceCheckedCountRender();
+  }else{
+    updateDiligenceCheckedCount();
+  }
 }
 
 function setAllVisibleDiligenceRowsForPrint(checked){
@@ -7804,7 +8251,15 @@ function setAllVisibleDiligenceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
-  rows.forEach(row=>toggleDiligencePrintSelection(row.clientId, row.dossierIndex, row.procedure, checked));
+  rows.forEach(row=>{
+    const key = makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure);
+    if(checked){
+      diligencePrintSelection.add(key);
+    }else{
+      diligencePrintSelection.delete(key);
+    }
+  });
+  queueDiligenceCheckedCountRender();
   renderDiligence();
 }
 
@@ -8244,7 +8699,7 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
     before: previousValue,
     after: nextValue
   });
-  queuePersistAppState();
+  persistDossierReferenceNow(clientId, dossier, { source: 'diligence' }).catch(()=>{});
 }
 
 function updateDiligenceFieldEncoded(clientId, dossierIndex, procKeyEncoded, field, value){
@@ -8443,10 +8898,10 @@ function updateTeamClientCount(){
 }
 
 function updateTeamClientSelectorState(){
-  const role = $('teamRole')?.value || 'viewer';
+  const role = normalizeUserRole($('teamRole')?.value || 'client');
   const wrap = $('teamClientsWrap');
   if(!wrap) return;
-  const disabled = role !== 'viewer';
+  const disabled = role !== 'client';
   wrap.style.opacity = disabled ? '0.6' : '1';
   wrap.querySelectorAll('input[type="checkbox"]').forEach(i=> i.disabled = disabled);
   const search = $('teamClientSearchInput');
@@ -8461,7 +8916,7 @@ function resetTeamForm(){
   editingTeamUserId = null;
   if($('teamUsername')) $('teamUsername').value = '';
   if($('teamPassword')) $('teamPassword').value = '';
-  if($('teamRole')) $('teamRole').value = 'viewer';
+  if($('teamRole')) $('teamRole').value = 'client';
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes([]);
   updateTeamClientSelectorState();
@@ -8472,13 +8927,13 @@ async function saveTeamUser(){
   if(!canManageTeam()) return alert('Accès refusé');
   const username = $('teamUsername')?.value?.trim() || '';
   const password = $('teamPassword')?.value?.trim() || '';
-  const role = $('teamRole')?.value || 'viewer';
+  const role = normalizeUserRole($('teamRole')?.value || 'client');
   if(!username) return alert('Username obligatoire');
   if(!editingTeamUserId && !password) return alert('Mot de passe obligatoire');
 
   const selectedClientIds = role === 'manager' ? [] : getSelectedTeamClientIds();
-  const finalClientIds = role === 'viewer' ? selectedClientIds : [];
-  if(role === 'viewer' && finalClientIds.length === 0){
+  const finalClientIds = role === 'client' ? selectedClientIds : [];
+  if(role === 'client' && finalClientIds.length === 0){
     return alert('Choisir au moins un client pour ce compte client');
   }
 
@@ -8511,7 +8966,7 @@ async function saveTeamUser(){
       clientIds: finalClientIds
     });
   }
-  await persistAppStateNow();
+  await persistStateSliceNow('users', USERS, { source: 'team' });
   renderEquipe();
   resetTeamForm();
 }
@@ -8523,7 +8978,7 @@ function editTeamUser(userId){
   editingTeamUserId = userId;
   if($('teamUsername')) $('teamUsername').value = user.username;
   if($('teamPassword')) $('teamPassword').value = '';
-  if($('teamRole')) $('teamRole').value = user.role;
+  if($('teamRole')) $('teamRole').value = normalizeUserRole(user.role);
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes(Array.isArray(user.clientIds) ? user.clientIds : []);
   updateTeamClientSelectorState();
@@ -8545,7 +9000,7 @@ function deleteTeamUser(userId){
     return alert('Impossible de supprimer l’utilisateur connecté');
   }
   USERS = USERS.filter(u=>u.id !== userId);
-  queuePersistAppState();
+  persistStateSliceNow('users', USERS, { source: 'team' }).catch(()=>{});
   renderEquipe();
   if(editingTeamUserId === userId) resetTeamForm();
 }
@@ -8572,7 +9027,7 @@ function renderEquipe(options = {}){
   }
 
   body.innerHTML = USERS.map(u=>{
-    const roleLabel = u.role === 'viewer' ? 'client' : u.role;
+    const roleLabel = getRoleLabel(u.role);
     const clients = (Array.isArray(u.clientIds) ? u.clientIds : [])
       .map(getClientNameById)
       .join(', ') || '-';
@@ -8623,7 +9078,7 @@ function addSalleJudge(){
     day
   });
   AppState.salleAssignments = normalizeSalleAssignments(AppState.salleAssignments);
-  queuePersistAppState();
+  persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   if(jugeInput) jugeInput.value = '';
   renderSalle();
 }
@@ -8631,7 +9086,7 @@ function addSalleJudge(){
 function deleteSalleJudge(id){
   if(!canEditData()) return alert('Accès refusé');
   AppState.salleAssignments = AppState.salleAssignments.filter(row=>Number(row.id) !== Number(id));
-  queuePersistAppState();
+  persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   renderSalle();
 }
 
@@ -8676,7 +9131,7 @@ function renderSalle(options = {}){
 
   if(!salles.length){
     body.innerHTML = `<tr><td colspan="3" class="diligence-empty">Aucune salle configurée pour ${escapeHtml(getSalleWeekdayLabel(selectedDay))}.</td></tr>`;
-    renderSidebarSalleSessions();
+    queueSidebarSalleSessionsRender();
     return;
   }
 
@@ -8717,7 +9172,7 @@ function renderSalle(options = {}){
     const known = getKnownJudges();
     datalist.innerHTML = known.map(v=>`<option value="${escapeAttr(v)}"></option>`).join('');
   }
-  renderSidebarSalleSessions();
+  queueSidebarSalleSessionsRender();
 }
 
 function normalizeProcedures(d){
@@ -8825,27 +9280,15 @@ function toAgeDays(value){
   return days >= 0 ? days : 0;
 }
 
-function getDashboardAttSortRows(){
-  const rows = [];
-  AppState.clients.forEach((c, ci)=>{
-    if(!canViewClient(c)) return;
-    c.dossiers.forEach((d, di)=>{
-      const procKeys = normalizeProcedures(d);
-      procKeys.forEach(procKey=>{
-        if(!isAudienceProcedure(procKey)) return;
-        const p = getAudienceProcedure(ci, di, procKey);
-        if(String(p?.color || '') !== 'blue') return;
-        const audienceDate = String(p?.audience || '').trim() || '-';
-        rows.push({
-          client: c.name || '-',
-          debiteur: d.debiteur || '-',
-          procedure: procKey || '-',
-          audienceDate
-        });
-      });
-    });
+function getDashboardAttSortCount(){
+  let count = 0;
+  const audienceRows = getAudienceRowsForSidebar();
+  audienceRows.forEach(row=>{
+    if(String(row?.p?.color || '').trim() === 'blue'){
+      count += 1;
+    }
   });
-  return rows;
+  return count;
 }
 
 function getDashboardSnapshot(){
@@ -8869,14 +9312,31 @@ function getDashboardSnapshot(){
   const snapshot = {
     totalClients: visibleClients.length,
     enCours,
-    clotureCount,
-    attSortRows: getDashboardAttSortRows(),
-    audienceErrors: getAudienceErrorDossierCount()
+    clotureCount
   };
   dashboardSnapshotCache = snapshot;
   dashboardSnapshotCacheVersion = audienceRowsRawDataVersion;
   dashboardSnapshotCacheUserKey = userKey;
   return snapshot;
+}
+
+function getDashboardAudienceMetrics(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    dashboardAudienceMetricsCache
+    && dashboardAudienceMetricsCacheVersion === audienceRowsRawDataVersion
+    && dashboardAudienceMetricsCacheUserKey === userKey
+  ){
+    return dashboardAudienceMetricsCache;
+  }
+  const metrics = {
+    attSortCount: getDashboardAttSortCount(),
+    audienceErrors: getAudienceErrorDossierCount()
+  };
+  dashboardAudienceMetricsCache = metrics;
+  dashboardAudienceMetricsCacheVersion = audienceRowsRawDataVersion;
+  dashboardAudienceMetricsCacheUserKey = userKey;
+  return metrics;
 }
 
 function getDashboardCalendarEvents(){
@@ -8889,26 +9349,19 @@ function getDashboardCalendarEvents(){
     return dashboardCalendarEventsCache;
   }
   const byDate = {};
-  AppState.clients.forEach((c, ci)=>{
-    if(!canViewClient(c)) return;
-    c.dossiers.forEach((d, di)=>{
-      const procKeys = normalizeProcedures(d);
-      procKeys.forEach(procKey=>{
-        if(!isAudienceProcedure(procKey)) return;
-        const p = getAudienceProcedure(ci, di, procKey);
-        const dt = parseDateForAge(p?.audience || '');
-        if(!dt) return;
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth() + 1).padStart(2, '0');
-        const day = String(dt.getDate()).padStart(2, '0');
-        const key = `${y}-${m}-${day}`;
-        if(!byDate[key]) byDate[key] = [];
-        byDate[key].push({
-          client: c.name || '-',
-          procedure: procKey || '-',
-          debiteur: d.debiteur || '-'
-        });
-      });
+  const audienceRows = getAudienceRowsForSidebar();
+  audienceRows.forEach(row=>{
+    const dt = parseDateForAge(row?.draft?.dateAudience || row?.p?.audience || '');
+    if(!dt) return;
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const key = `${y}-${m}-${day}`;
+    if(!byDate[key]) byDate[key] = [];
+    byDate[key].push({
+      client: row?.c?.name || '-',
+      procedure: row?.procKey || '-',
+      debiteur: row?.d?.debiteur || '-'
     });
   });
   dashboardCalendarEventsCache = byDate;
@@ -8969,17 +9422,34 @@ function queueDashboardCalendarRender(){
   dashboardCalendarRenderTimer = setTimeout(render, 120);
 }
 
-function queueDashboardHeavyRender(){
+function queueDashboardHeavyRender(options = {}){
   if(dashboardHeavyRenderTimer) return;
   const render = ()=>{
     dashboardHeavyRenderTimer = null;
     const snapshot = getDashboardSnapshot();
+    const audienceMetrics = options.includeAudienceMetrics === false
+      ? null
+      : getDashboardAudienceMetrics();
     animateDashboardMetric('dossiersEnCours', snapshot.enCours);
     animateDashboardMetric('dossiersTermines', snapshot.clotureCount);
-    if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', snapshot.attSortRows.length);
-    if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', snapshot.audienceErrors);
-    queueDashboardCalendarRender();
+    if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', audienceMetrics ? audienceMetrics.attSortCount : 0);
+    if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', audienceMetrics ? audienceMetrics.audienceErrors : 0);
+    if(options.includeAudienceMetrics !== false){
+      queueDashboardCalendarRender();
+    }
   };
+  const delayMs = Math.max(0, Number(options?.delayMs) || 0);
+  if(delayMs > 0){
+    dashboardHeavyRenderTimer = setTimeout(()=>{
+      dashboardHeavyRenderTimer = null;
+      if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+        dashboardHeavyRenderTimer = window.requestIdleCallback(render, { timeout: 2000 });
+        return;
+      }
+      render();
+    }, delayMs);
+    return;
+  }
   if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
     dashboardHeavyRenderTimer = window.requestIdleCallback(render, { timeout: 1500 });
     return;
@@ -8990,11 +9460,14 @@ function queueDashboardHeavyRender(){
 // ================== DASHBOARD ==================
 function renderDashboard(options = {}){
   if(!shouldRenderDeferredSection('dashboard', options)) return;
-  animateDashboardMetric('totalClients', getVisibleClients().length);
-  queueDashboardHeavyRender();
+  animateDashboardMetric('totalClients', getVisibleClients().length, options);
+  queueDashboardHeavyRender({
+    delayMs: options.deferHeavy ? 1800 : 0,
+    includeAudienceMetrics: options.includeAudienceMetrics
+  });
 }
 
-function animateDashboardMetric(id, nextValue){
+function animateDashboardMetric(id, nextValue, options = {}){
   const el = $(id);
   if(!el) return;
   const safeNext = Number.isFinite(Number(nextValue)) ? Math.max(0, Math.round(Number(nextValue))) : 0;
@@ -9006,7 +9479,7 @@ function animateDashboardMetric(id, nextValue){
   const shouldReduceMotion = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(shouldReduceMotion || prevValue === safeNext){
+  if(options.immediate === true || shouldReduceMotion || prevValue === safeNext){
     el.textContent = String(safeNext);
     return;
   }
@@ -9047,10 +9520,33 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  const sourceRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
-  return sourceRows
-    .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
-    .length;
+  return audiencePrintSelection.size;
+}
+
+function queueAudienceCheckedCountRender(){
+  if(audienceCheckedCountRenderQueued) return;
+  audienceCheckedCountRenderQueued = true;
+  const render = ()=>{
+    audienceCheckedCountRenderQueued = false;
+    updateAudienceCheckedCount();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(render);
+    return;
+  }
+  setTimeout(render, 0);
+}
+
+function pruneAudiencePrintSelection(rows = null){
+  const sourceRows = Array.isArray(rows) ? rows : getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  const validKeys = new Set(sourceRows.map(row=>makeAudiencePrintKey(row.ci, row.di, row.procKey)));
+  let changed = false;
+  audiencePrintSelection.forEach(key=>{
+    if(validKeys.has(key)) return;
+    audiencePrintSelection.delete(key);
+    changed = true;
+  });
+  return changed;
 }
 
 function updateAudienceCheckedCount(){
@@ -9063,12 +9559,14 @@ function updateAudienceCheckedCount(){
 function toggleAudiencePrintSelection(ci, di, procKey, checked){
   const key = makeAudiencePrintKey(ci, di, procKey);
   if(checked){
+    const sizeBefore = audiencePrintSelection.size;
     audiencePrintSelection.add(key);
-    updateAudienceCheckedCount();
+    if(audiencePrintSelection.size !== sizeBefore) queueAudienceCheckedCountRender();
     return;
   }
-  audiencePrintSelection.delete(key);
-  updateAudienceCheckedCount();
+  if(audiencePrintSelection.delete(key)){
+    queueAudienceCheckedCountRender();
+  }
 }
 
 function toggleAudiencePrintSelectionEncoded(ci, di, procKeyEncoded, checked){
@@ -9174,7 +9672,7 @@ function getFilteredAudienceRows(allRows = null){
     const matched = [];
     const others = [];
     rows.forEach(row=>{
-      if(String(row?.p?.color || '') === priorityColor){
+      if(String(row?.p?.color || '').trim() === priorityColor){
         matched.push(row);
       }else{
         others.push(row);
@@ -9204,7 +9702,7 @@ function getFilteredAudienceRows(allRows = null){
   const decorated = filtered.map(row=>{
     const bucket = getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet);
     const colorMatch = (!filterAudienceErrorsOnly && priorityColor && priorityColor !== 'all')
-      ? (String(row?.p?.color || '') === priorityColor ? 1 : 0)
+      ? (String(row?.p?.color || '').trim() === priorityColor ? 1 : 0)
       : 0;
     const sortMeta = buildAudienceSortMeta(row);
     return { row, bucket, colorMatch, sortMeta };
@@ -9227,9 +9725,16 @@ function setAllVisibleAudienceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
-  rows.forEach(row=>{
-    toggleAudiencePrintSelection(row.ci, row.di, row.procKey, checked);
-  });
+  if(checked){
+    rows.forEach(row=>{
+      audiencePrintSelection.add(makeAudiencePrintKey(row.ci, row.di, row.procKey));
+    });
+  }else{
+    rows.forEach(row=>{
+      audiencePrintSelection.delete(makeAudiencePrintKey(row.ci, row.di, row.procKey));
+    });
+  }
+  queueAudienceCheckedCountRender();
   renderAudience();
 }
 
@@ -9266,6 +9771,7 @@ function renderAudience(options = {}){
   }
 
   const allRows = getAudienceRows();
+  const selectionPruned = pruneAudiencePrintSelection(allRows);
   syncAudienceFilterOptions(allRows);
   const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
   const rows = getFilteredAudienceRows(allRows);
@@ -9283,7 +9789,11 @@ function renderAudience(options = {}){
     body.innerHTML = pageData.rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
   }
   renderPagination('audience', pageData);
-  updateAudienceCheckedCount();
+  if(selectionPruned){
+    queueAudienceCheckedCountRender();
+  }else{
+    updateAudienceCheckedCount();
+  }
   queueSidebarSalleSessionsRender();
 }
 
@@ -9485,12 +9995,19 @@ function getAudienceDuplicateKeySet(rows){
   return duplicates;
 }
 
-function queueSidebarSalleSessionsRender(){
-  if(sidebarSalleRenderTimer) return;
+function queueSidebarSalleSessionsRender(delayMs = 80){
+  if(sidebarSalleRenderTimer){
+    clearTimeout(sidebarSalleRenderTimer);
+    sidebarSalleRenderTimer = null;
+  }
   sidebarSalleRenderTimer = setTimeout(()=>{
     sidebarSalleRenderTimer = null;
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(()=>renderSidebarSalleSessions(), { timeout: 1800 });
+      return;
+    }
     renderSidebarSalleSessions();
-  }, 80);
+  }, Math.max(0, Number(delayMs) || 0));
 }
 
 function getAudienceRowContentScore(row){
@@ -9702,7 +10219,6 @@ function getAudienceRowsRawCached(){
           d,
           procKey,
           p,
-          color: p.color || '',
           key,
           draft,
           ci,
@@ -9759,7 +10275,7 @@ function getAudienceRows(options = {}){
     return baseRows;
   }
   const out = baseRows.filter(row=>{
-    if(!ignoreColor && filterAudienceColor !== 'all' && row.color !== filterAudienceColor) return false;
+    if(!ignoreColor && filterAudienceColor !== 'all' && String(row?.p?.color || '').trim() !== filterAudienceColor) return false;
     if(!ignoreSearch && q){
       const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft));
       if(!haystack.includes(q)) return false;
@@ -9898,8 +10414,8 @@ function setAudienceColor(ci, di, procKey, checked){
     if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
       dossier.statut = 'En cours';
     }
-    markAudienceRowsCacheDirty();
-    queueAudienceColorBatchUpdate({ persist: true, dashboard: true, suivi: false });
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: false });
     return;
   }
   if(selectedAudienceColor === 'all' || !allowed.has(selectedAudienceColor)){
@@ -9909,8 +10425,8 @@ function setAudienceColor(ci, di, procKey, checked){
   p.color = selectedAudienceColor;
   if(selectedAudienceColor === 'purple-dark') dossier.statut = 'Soldé';
   if(selectedAudienceColor === 'purple-light') dossier.statut = 'Arrêt définitif';
-  markAudienceRowsCacheDirty();
-  queueAudienceColorBatchUpdate({ persist: true, dashboard: true, suivi: true });
+  markAudienceColorCachesDirty();
+  queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
 }
 
 function setAudienceColorEncoded(ci, di, procKeyEncoded, checked){
@@ -9930,24 +10446,42 @@ function queueAudienceColorBatchUpdate(options = {}){
   if(opts.persist) audienceColorBatchNeedsPersist = true;
   if(opts.dashboard) audienceColorBatchNeedsDashboard = true;
   if(opts.suivi) audienceColorBatchNeedsSuivi = true;
+  if(opts.persistDossier) queueAudienceColorBatchUpdate.lastDossier = opts.persistDossier;
+  if(opts.persistClientId !== undefined) queueAudienceColorBatchUpdate.lastClientId = Number(opts.persistClientId);
   if(audienceColorBatchTimer) return;
   audienceColorBatchTimer = setTimeout(()=>{
     audienceColorBatchTimer = null;
     const doPersist = audienceColorBatchNeedsPersist;
     const doDashboard = audienceColorBatchNeedsDashboard;
     const doSuivi = audienceColorBatchNeedsSuivi;
+    const patchDossier = queueAudienceColorBatchUpdate.lastDossier;
+    const patchClientId = queueAudienceColorBatchUpdate.lastClientId;
     audienceColorBatchNeedsPersist = false;
     audienceColorBatchNeedsDashboard = false;
     audienceColorBatchNeedsSuivi = false;
+    queueAudienceColorBatchUpdate.lastDossier = null;
+    queueAudienceColorBatchUpdate.lastClientId = undefined;
     if(doPersist){
-      queuePersistAppState();
+      if(patchDossier && Number.isFinite(patchClientId)){
+        persistDossierReferenceNow(patchClientId, patchDossier, { source: 'audience-color' }).catch(()=>{});
+      }else{
+        queuePersistAppState();
+      }
     }
     if(doDashboard){
       renderDashboard();
     }
-    renderAudienceKeepingPosition();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
     if(doSuivi){
-      renderSuivi();
+      if(isDeferredRenderSectionVisible('suivi')){
+        renderSuivi();
+      }else{
+        markDeferredRenderDirty('suivi');
+      }
     }
   }, AUDIENCE_COLOR_BATCH_MS);
 }
@@ -9957,8 +10491,14 @@ function queueAudienceLinkedRenders(){
   audienceLinkedRenderTimer = setTimeout(()=>{
     audienceLinkedRenderTimer = null;
     renderDashboard();
-    renderSuivi();
-    renderSidebarSalleSessions();
+    if(isDeferredRenderSectionVisible('suivi')){
+      renderSuivi();
+    }else{
+      markDeferredRenderDirty('suivi');
+    }
+    if(isDeferredRenderSectionVisible('salle')){
+      renderSidebarSalleSessions();
+    }
   }, 180);
 }
 
@@ -10109,11 +10649,7 @@ function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
-    saveAllAudience({
-      clearDraft: false,
-      rerender: false,
-      showAlert: false
-    });
+    persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
 }
 
