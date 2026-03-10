@@ -70,6 +70,7 @@ let filterSalle = 'all';
 let filterSalleTribunal = 'all';
 let filterSalleAudienceDate = '';
 let selectedSalleDay = 'lundi';
+let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
 let customProcedures = [];
@@ -371,6 +372,24 @@ function normalizeHistoryValue(value){
   return String(value).trim();
 }
 
+function isImplicitProcedureDefaultHistoryEntry(entry){
+  if(!entry || typeof entry !== 'object') return false;
+  const source = String(entry.source || '').trim();
+  if(source !== 'form') return false;
+  const before = normalizeHistoryValue(entry.before);
+  const after = normalizeHistoryValue(entry.after);
+  if(before) return false;
+  const field = String(entry.field || '').trim();
+  const procedure = String(entry.procedure || '').trim();
+  if(procedure === 'Injonction' && field === 'procedureDetails.notificationStatus' && after === 'att plie avec tr'){
+    return true;
+  }
+  if(procedure === 'Injonction' && field === 'procedureDetails.certificatNonAppelStatus' && after === 'att certificat non appel'){
+    return true;
+  }
+  return false;
+}
+
 function normalizeDossierHistoryEntries(rawHistory){
   if(!Array.isArray(rawHistory)) return [];
   return rawHistory
@@ -385,7 +404,9 @@ function normalizeDossierHistoryEntries(rawHistory){
       const before = normalizeHistoryValue(entry.before);
       const after = normalizeHistoryValue(entry.after);
       if(before === after) return null;
-      return { at, by, byRole, source, field, procedure, before, after };
+      const normalizedEntry = { at, by, byRole, source, field, procedure, before, after };
+      if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return null;
+      return normalizedEntry;
     })
     .filter(Boolean)
     .slice(-DOSSIER_HISTORY_MAX_ENTRIES);
@@ -442,8 +463,7 @@ function pushDossierHistoryEntry(dossier, entry){
   const before = normalizeHistoryValue(entry.before);
   const after = normalizeHistoryValue(entry.after);
   if(before === after) return false;
-  if(!Array.isArray(dossier.history)) dossier.history = [];
-  dossier.history.push({
+  const normalizedEntry = {
     at: String(entry.at || '').trim() || new Date().toISOString(),
     by: String(entry.by || '').trim() || String(currentUser?.username || '-'),
     byRole: String(entry.byRole || '').trim() || String(currentUser?.role || ''),
@@ -452,7 +472,10 @@ function pushDossierHistoryEntry(dossier, entry){
     procedure: String(entry.procedure || '').trim(),
     before,
     after
-  });
+  };
+  if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return false;
+  if(!Array.isArray(dossier.history)) dossier.history = [];
+  dossier.history.push(normalizedEntry);
   if(dossier.history.length > DOSSIER_HISTORY_MAX_ENTRIES){
     dossier.history = dossier.history.slice(-DOSSIER_HISTORY_MAX_ENTRIES);
   }
@@ -498,6 +521,7 @@ function queueDossierHistoryEntry(dossier, entry, options = {}){
     before,
     after
   };
+  if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return;
   if(options.immediate){
     pushDossierHistoryEntry(dossier, normalizedEntry);
     return;
@@ -586,13 +610,15 @@ function collectDossierDiffEntries(prevDossier, nextDossier){
       const before = beforeProc[field];
       const after = afterProc[field];
       if(normalizeHistoryValue(before) === normalizeHistoryValue(after)) return;
-      entries.push({
+      const entry = {
         source: 'form',
         field: `procedureDetails.${field}`,
         procedure: procKey,
         before,
         after
-      });
+      };
+      if(isImplicitProcedureDefaultHistoryEntry(entry)) return;
+      entries.push(entry);
     });
   });
   return entries;
@@ -6158,7 +6184,11 @@ function setupEvents(){
   });
   $('dashboardLink').onclick = ()=>showView('dashboard');
   $('clientsLink').onclick = ()=>showView('clients');
-  $('creationLink').onclick = ()=>showView('creation');
+  $('creationLink').onclick = ()=>{
+    creationPinnedClientId = '';
+    resetCreationForm();
+    showView('creation');
+  };
   $('suiviLink').onclick = ()=>showView('suivi');
   $('audienceLink').onclick = ()=>showView('audience');
   $('diligenceLink').onclick = ()=>showView('diligence');
@@ -6666,7 +6696,8 @@ function addClient(name){
     goToCreation(existing.id);
     return;
   }
-  AppState.clients.push({ id: Date.now(), name, dossiers: [] });
+  const newClient = { id: Date.now(), name, dossiers: [] };
+  AppState.clients.push(newClient);
   queuePersistAppState();
   $('clientName').value='';
   renderClients();
@@ -6674,16 +6705,22 @@ function addClient(name){
   renderDashboard();
   renderAudience();
   renderEquipe();
+  goToCreation(newClient.id);
 }
 
 function updateClientDropdown(options = {}){
   if(!shouldRenderClientDropdown(options)) return;
   const selectClient = $('selectClient');
   if(!selectClient) return;
+  const currentValue = creationPinnedClientId
+    ? String(creationPinnedClientId)
+    : String(selectClient.value || '');
   const optionsHtml = getEditableClients()
     .map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`)
     .join('');
   selectClient.innerHTML = `<option value="">Client</option>${optionsHtml}`;
+  if(currentValue) selectClient.value = currentValue;
+  selectClient.disabled = !!creationPinnedClientId;
 }
 
 function renderClients(options = {}){
@@ -6829,6 +6866,7 @@ function deleteAllClients(){
 function goToCreation(clientId){
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client || !canEditClient(client)) return alert('Accès refusé');
+  creationPinnedClientId = String(clientId || '');
   resetCreationForm(clientId);
   showView('creation');
 }
@@ -7511,7 +7549,9 @@ function resetCreationForm(clientId = ''){
 
   const selectClient = $('selectClient');
   if(selectClient){
-    selectClient.value = clientId ? String(clientId) : '';
+    const selectedClientId = clientId ? String(clientId) : String(creationPinnedClientId || '');
+    selectClient.value = selectedClientId;
+    selectClient.disabled = !!creationPinnedClientId;
   }
   const addBtn = $('addDossierBtn');
   if(addBtn) addBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Créer le Dossier';
