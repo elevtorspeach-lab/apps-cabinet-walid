@@ -29,8 +29,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const keyEncoded = encodeURIComponent(String(key));
   const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
-  const audienceDateValueRaw = String(draft.dateAudience || p.audience || '');
-  const audienceDateValue = normalizeDateDDMMYYYY(audienceDateValueRaw) || audienceDateValueRaw;
+  const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
   return `
     <tr class="color-${rowColor}">
       <td data-label="Sélection">
@@ -104,8 +103,16 @@ function renderAudienceVirtualWindow(force = false){
 
 function renderSuiviRowHtml(row){
   const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
+  const isChecked = isSuiviSelectedForPrint(row);
   return `
     <tr>
+      <td data-label="Sélection">
+        <input
+          type="checkbox"
+          class="audience-print-check"
+          ${isChecked ? 'checked' : ''}
+          onchange="toggleSuiviPrintSelection(${row.c.id}, ${row.index}, this.checked)">
+      </td>
       <td data-label="Client">${escapeHtml(row.c.name)}</td>
       <td data-label="Date d’affectation">${escapeHtml(displayDateAffectation)}</td>
       <td data-label="Référence Client">${escapeHtml(row.d.referenceClient || '-')}</td>
@@ -135,7 +142,7 @@ function renderSuiviVirtualWindow(force = false){
   const rows = Array.isArray(suiviVirtualRows) ? suiviVirtualRows : [];
   if(!rows.length){
     suiviVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
     return;
   }
   const { start, end } = getVirtualWindowByContainer('suiviTableContainer', rows.length);
@@ -145,10 +152,10 @@ function renderSuiviVirtualWindow(force = false){
   const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="9" style="height:${topHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="10" style="height:${topHeight}px"></td></tr>`
     : '';
   const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="9" style="height:${bottomHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="10" style="height:${bottomHeight}px"></td></tr>`
     : '';
   const rowsHtml = rows.slice(start, end).map(renderSuiviRowHtml).join('');
   body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
@@ -173,7 +180,7 @@ function renderSuivi(options = {}){
   if(!isManager() && getVisibleClients().length === 0){
     suiviVirtualRows = [];
     suiviVirtualLastRange = { start: -1, end: -1 };
-    suiviBody.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    suiviBody.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
     renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     return;
   }
@@ -222,18 +229,20 @@ function renderSuivi(options = {}){
     suiviFilteredRowsCacheKey = suiviFilterKey;
     suiviFilteredRowsCacheOutput = sortedRows;
   }
+  syncSuiviPrintSelection(sortedRows);
   const pageData = paginateRows(sortedRows, 'suivi');
   const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
   suiviVirtualRows = pageData.rows;
   suiviVirtualLastRange = { start: -1, end: -1 };
   if(!pageData.rows.length){
-    suiviBody.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
+    suiviBody.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
   }else if(useVirtual){
     renderSuiviVirtualWindow(true);
   }else{
     suiviBody.innerHTML = pageData.rows.map(renderSuiviRowHtml).join('');
   }
   renderPagination('suivi', pageData);
+  updateSuiviCheckedCount();
 
   syncSuiviFilterOptions(base.rowsMeta);
 }

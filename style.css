@@ -553,6 +553,7 @@ tr:hover{background:#f1f5f9}
   display:flex;
   align-items:center;
   gap:8px;
+  position:relative;
 }
 .table-pagination-actions .btn-primary{
   padding:6px 10px;
@@ -561,6 +562,140 @@ tr:hover{background:#f1f5f9}
   color:#1e3a8a;
   font-weight:700;
   font-size:13px;
+  white-space:nowrap;
+}
+.table-pagination-chooser{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 12px;
+  border-radius:18px;
+  background:linear-gradient(135deg, rgba(37,99,235,0.1), rgba(59,130,246,0.18));
+  border:1px solid rgba(59,130,246,0.18);
+  box-shadow:0 12px 28px rgba(37,99,235,0.12);
+  transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.table-pagination-chooser:hover,
+.table-pagination-chooser:focus-within{
+  transform:translateY(-1px);
+  box-shadow:0 16px 34px rgba(37,99,235,0.18);
+  border-color:rgba(37,99,235,0.28);
+}
+.table-pagination-rail{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.table-pagination-chip,
+.table-pagination-flyout-chip{
+  border:none;
+  cursor:pointer;
+  font:inherit;
+  transition:transform .16s ease, background-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.table-pagination-chip{
+  min-width:34px;
+  height:34px;
+  padding:0 10px;
+  border-radius:999px;
+  background:#fff;
+  color:#1d4ed8;
+  box-shadow:inset 0 0 0 1px rgba(37,99,235,0.12);
+  font-weight:800;
+}
+.table-pagination-chip:hover,
+.table-pagination-flyout-chip:hover{
+  transform:translateY(-1px) scale(1.04);
+}
+.table-pagination-chip.is-active,
+.table-pagination-flyout-chip.is-active{
+  background:#2563eb;
+  color:#fff;
+  box-shadow:0 10px 22px rgba(37,99,235,0.26);
+}
+.table-pagination-gap{
+  color:#64748b;
+  font-weight:800;
+  letter-spacing:.08em;
+}
+.table-pagination-flyout{
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 10px);
+  transform:translate(-50%, 8px);
+  min-width:min(420px, 78vw);
+  padding:12px;
+  border-radius:20px;
+  background:rgba(255,255,255,0.97);
+  border:1px solid rgba(148,163,184,0.22);
+  box-shadow:0 22px 50px rgba(15,23,42,0.18);
+  opacity:0;
+  pointer-events:none;
+  visibility:hidden;
+  transition:opacity .18s ease, transform .18s ease, visibility .18s ease;
+  backdrop-filter:blur(14px);
+  z-index:20;
+}
+.table-pagination-flyout::after{
+  content:"";
+  position:absolute;
+  left:50%;
+  bottom:-8px;
+  width:16px;
+  height:16px;
+  background:rgba(255,255,255,0.97);
+  border-right:1px solid rgba(148,163,184,0.22);
+  border-bottom:1px solid rgba(148,163,184,0.22);
+  transform:translateX(-50%) rotate(45deg);
+}
+.table-pagination-chooser:hover .table-pagination-flyout,
+.table-pagination-chooser:focus-within .table-pagination-flyout{
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+  transform:translate(-50%, 0);
+}
+.table-pagination-flyout-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(44px, 1fr));
+  gap:8px;
+  max-height:220px;
+  overflow:auto;
+}
+.table-pagination-flyout-chip{
+  min-height:40px;
+  border-radius:14px;
+  background:#eff6ff;
+  color:#1e3a8a;
+  font-weight:800;
+}
+@media (max-width: 720px){
+  .table-pagination-actions{
+    width:100%;
+    justify-content:space-between;
+    flex-wrap:wrap;
+  }
+  .table-pagination-chooser{
+    order:3;
+    width:100%;
+    justify-content:space-between;
+  }
+  .table-pagination-flyout{
+    left:0;
+    right:0;
+    min-width:0;
+    transform:translateY(8px);
+  }
+  .table-pagination-flyout::after{
+    left:auto;
+    right:24px;
+    transform:rotate(45deg);
+  }
+  .table-pagination-chooser:hover .table-pagination-flyout,
+  .table-pagination-chooser:focus-within .table-pagination-flyout{
+    transform:translateY(0);
+  }
 }
 .recycle-toolbar{
   align-items:center;
@@ -1517,6 +1652,20 @@ tr:hover{background:#f1f5f9}
 
 .suivi-toolbar .audience-color-filter{
   min-width:180px;
+}
+
+#suiviSection #suiviCheckedCount{
+  margin-left:auto;
+}
+
+#suiviSection tbody td[data-label="Sélection"]{
+  width:52px;
+  text-align:center;
+}
+
+#suiviSection tbody td[data-label="Sélection"] input[type="checkbox"]{
+  width:22px;
+  height:22px;
 }
 
 .salle-toolbar{

@@ -58,6 +58,7 @@ let audiencePrintSelection = new Set();
 let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
 let suiviTribunalAliasMap = new Map();
+let suiviPrintSelection = new Set();
 let filterDiligenceProcedure = 'SFDC';
 let filterDiligenceSort = 'all';
 let filterDiligenceDelegation = 'all';
@@ -262,7 +263,8 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.montantRecupere': 'Montant récupéré',
   'procedureDetails.instruction': 'Instruction',
   'procedureDetails.certificatNonAppelStatus': 'Statut certificat non appel',
-  'procedureDetails.notificationStatus': 'Statut notification'
+  'procedureDetails.notificationStatus': 'Statut notification',
+  'procedureDetails.notificationSort': 'Sort notification'
 };
 const DOSSIER_HISTORY_SOURCE_LABELS = {
   form: 'Modifier dossier',
@@ -1270,6 +1272,35 @@ function renderPagination(section, pagination){
     el.innerHTML = '';
     return;
   }
+  const buildCompactPages = ()=>{
+    if(meta.totalPages <= 7){
+      return Array.from({ length: meta.totalPages }, (_, idx)=>idx + 1);
+    }
+    const around = new Set([1, meta.totalPages, meta.page - 1, meta.page, meta.page + 1]);
+    return [...around]
+      .filter(page=>page >= 1 && page <= meta.totalPages)
+      .sort((a, b)=>a - b);
+  };
+  const compactPages = buildCompactPages();
+  const compactPageHtml = compactPages.map((page, idx)=>{
+    const prevPage = compactPages[idx - 1];
+    const needsGap = idx > 0 && page - prevPage > 1;
+    const gapHtml = needsGap ? '<span class="table-pagination-gap">...</span>' : '';
+    const activeClass = page === meta.page ? ' is-active' : '';
+    return `${gapHtml}
+      <button type="button" class="table-pagination-chip${activeClass}" onclick="setPaginationPage('${section}', ${page})">
+        <span>${page}</span>
+      </button>`;
+  }).join('');
+  const fullPageHtml = Array.from({ length: meta.totalPages }, (_, idx)=>{
+    const page = idx + 1;
+    const activeClass = page === meta.page ? ' is-active' : '';
+    return `
+      <button type="button" class="table-pagination-flyout-chip${activeClass}" onclick="setPaginationPage('${section}', ${page})">
+        <span>${page}</span>
+      </button>
+    `;
+  }).join('');
   const prevDisabled = meta.page <= 1 ? 'disabled' : '';
   const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
   el.innerHTML = `
@@ -1280,7 +1311,17 @@ function renderPagination(section, pagination){
       <button type="button" class="btn-primary" ${prevDisabled} onclick="changePaginationPage('${section}', -1)">
         <i class="fa-solid fa-chevron-left"></i> Préc
       </button>
-      <span class="table-pagination-page">Page ${meta.page}/${meta.totalPages}</span>
+      <div class="table-pagination-chooser" tabindex="0" aria-label="Pagination ${section}">
+        <div class="table-pagination-page">Page ${meta.page}/${meta.totalPages}</div>
+        <div class="table-pagination-rail">
+          ${compactPageHtml}
+        </div>
+        <div class="table-pagination-flyout">
+          <div class="table-pagination-flyout-grid">
+            ${fullPageHtml}
+          </div>
+        </div>
+      </div>
       <button type="button" class="btn-primary" ${nextDisabled} onclick="changePaginationPage('${section}', 1)">
         Suiv <i class="fa-solid fa-chevron-right"></i>
       </button>
@@ -1298,6 +1339,118 @@ function changePaginationPage(section, delta){
   if(container) container.scrollTop = 0;
   const render = getRenderForSection(key);
   if(typeof render === 'function') render();
+}
+
+function setPaginationPage(section, page){
+  const key = String(section || '').trim();
+  if(!Object.prototype.hasOwnProperty.call(paginationState, key)) return;
+  const nextPage = Number(page);
+  if(!Number.isFinite(nextPage)) return;
+  paginationState[key] = Math.max(1, Math.floor(nextPage));
+  const container = getTableContainerBySection(key);
+  if(container) container.scrollTop = 0;
+  const render = getRenderForSection(key);
+  if(typeof render === 'function') render();
+}
+
+function makeSuiviPrintKey(clientId, dossierIndex){
+  return `${Number(clientId) || 0}::${Number(dossierIndex) || 0}`;
+}
+
+function isSuiviSelectedForPrint(row){
+  return suiviPrintSelection.has(makeSuiviPrintKey(row?.c?.id, row?.index));
+}
+
+function updateSuiviCheckedCount(){
+  const node = $('suiviCheckedCount');
+  if(!node) return;
+  node.innerText = `Cochés: ${suiviPrintSelection.size}`;
+}
+
+function toggleSuiviPrintSelection(clientId, dossierIndex, checked){
+  const key = makeSuiviPrintKey(clientId, dossierIndex);
+  if(checked){
+    suiviPrintSelection.add(key);
+  }else{
+    suiviPrintSelection.delete(key);
+  }
+  updateSuiviCheckedCount();
+}
+
+function syncSuiviPrintSelection(allRows){
+  const allowed = new Set((allRows || []).map(row=>makeSuiviPrintKey(row?.c?.id, row?.index)));
+  suiviPrintSelection = new Set([...suiviPrintSelection].filter(key=>allowed.has(key)));
+  updateSuiviCheckedCount();
+}
+
+function setAllVisibleSuiviRowsForPrint(checked){
+  const rows = getFilteredSuiviRowsForSelection();
+  if(!rows.length){
+    alert('Aucune ligne visible.');
+    return;
+  }
+  rows.forEach(row=>{
+    const key = makeSuiviPrintKey(row?.c?.id, row?.index);
+    if(checked){
+      suiviPrintSelection.add(key);
+    }else{
+      suiviPrintSelection.delete(key);
+    }
+  });
+  updateSuiviCheckedCount();
+  renderSuivi();
+}
+
+function getFilteredSuiviRowsForSelection(){
+  const q = $('filterGlobal')?.value?.toLowerCase() || '';
+  const base = getSuiviBaseRowsCached();
+  const noProcedureFilter = filterSuiviProcedure === 'all';
+  const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noSearchFilter = !q;
+  if(noProcedureFilter && noTribunalFilter && noSearchFilter){
+    return base.sortedDefaultRows;
+  }
+  return base.rawRows.filter(row=>{
+    const tribunalKeys = row.tribunalKeys || [];
+    if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
+    if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+    if(noSearchFilter) return true;
+    const haystack = row.__suiviHaystack
+      || (row.__suiviHaystack = buildSuiviSearchHaystack(
+        row.c.name,
+        row.d,
+        row.procSource,
+        (row.tribunalList && row.tribunalList.length) ? row.tribunalList : row.tribunalLabels
+      ));
+    return haystack.includes(q);
+  });
+}
+
+async function exportSuiviSelectedXLS(){
+  const rows = getFilteredSuiviRowsForSelection().filter(row=>isSuiviSelectedForPrint(row));
+  if(!rows.length){
+    alert('Cochez au moins une ligne pour exporter.');
+    return;
+  }
+  const headers = ['Client', 'Date d’affectation', 'Référence Client', 'Procédure', 'Débiteur', 'Montant', 'Ville', 'Statut'];
+  const tableRows = rows.map(row=>[
+    row.c?.name || '-',
+    normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
+    row.d?.referenceClient || '-',
+    Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
+    row.d?.debiteur || '-',
+    row.d?.montant || '-',
+    row.d?.ville || '-',
+    row.d?.statut || 'En cours'
+  ]);
+  await exportAudienceWorkbookXlsxStyled({
+    headers,
+    rows: tableRows,
+    subtitle: 'Export des dossiers cochés',
+    sheetName: 'Suivi',
+    colWidths: [{ wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 18 }],
+    filename: 'suivi_export.xlsx'
+  });
 }
 
 function getVirtualWindowByContainer(containerId, rowsLength){
@@ -2484,15 +2637,40 @@ function normalizeDateDDMMYYYY(value){
     const a = Number(m[1]);
     const b = Number(m[2]);
     const year = parseYear(m[3]);
-    // Prefer dd/mm/yyyy, fallback to mm/dd/yyyy when needed (e.g. 10/28/25).
     if(isValidDateParts(a, b, year)){
       return formatDateDDMMYYYY(new Date(year, b - 1, a));
     }
-    if(isValidDateParts(b, a, year)){
-      return formatDateDDMMYYYY(new Date(year, a - 1, b));
-    }
     return '';
   }
+}
+
+function looksLikeImportedCity(value){
+  const text = String(value || '').trim();
+  if(!text) return false;
+  if(/\d/.test(text)) return false;
+  if(/[;,]/.test(text)) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= 4 && text.length <= 40;
+}
+
+function looksLikeImportedAddress(value){
+  const text = String(value || '').trim().toLowerCase();
+  if(!text) return false;
+  if(/\d/.test(text)) return true;
+  if(/[;,]/.test(text)) return true;
+  return /\b(rue|avenue|av\.?|bd|boulevard|lot|appt|appartement|imm|immeuble|residence|résidence|quartier|hay|route|km|angle|zone|n°|no)\b/.test(text);
+}
+
+function normalizeImportedAddressVille(adresseValue, villeValue){
+  let adresse = String(adresseValue || '').trim();
+  let ville = String(villeValue || '').trim();
+  if(adresse && ville && looksLikeImportedCity(adresse) && looksLikeImportedAddress(ville)){
+    return { adresse: ville, ville: adresse };
+  }
+  if(!ville && looksLikeImportedCity(adresse) && !looksLikeImportedAddress(adresse)){
+    return { adresse: '', ville: adresse };
+  }
+  return { adresse, ville };
 }
 
 function normalizeReferenceValue(value){
@@ -4590,8 +4768,8 @@ function parseExcelData(rows){
     boiteNo: ['boite n', 'boite no', 'boite n°', 'boîte n', 'boîte no', 'boîte n°'],
     caution: ['caution', 'nom caution', 'nom de caution'],
     marque: ['marque'],
-    adresse: ['adresse'],
-    ville: ['ville'],
+    adresse: ['adresse', 'adress', 'adresse complete', 'adresse complète'],
+    ville: ['ville', 'city', 'commune', 'ville / commune'],
     cautionAdresse: ['adresse de caution', 'adresse caution'],
     cautionVille: ['ville de caution', 'ville caution'],
     cautionCin: ['cin de caution', 'cni de caution', 'cin caution', 'cni caution'],
@@ -4600,8 +4778,11 @@ function parseExcelData(rows){
     refRestitution: ['reference dossier restitution', 'réference dossier restitution', 'référence dossier restitution', 'ref dossier restitution'],
     refSfdc: ['reference dossier sfdc', 'réference dossier sfdc', 'référence dossier sfdc', 'ref dossier sfdc'],
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
-    executionNo: ['execution n', 'execution no', 'execution n°', 'execution numero', 'num execution', 'numero execution', 'numéro execution', 'notification', 'notification n', 'notificat'],
-    sort: ['sort']
+    notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
+    notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
+    executionNo: ['execution n', 'execution no', 'execution n°', 'execution numero', 'num execution', 'numero execution', 'numéro execution'],
+    sort: ['sort'],
+    tribunal: ['tribunal', 'trib', 'tr']
   };
 
   const audienceHeaderKeys = {
@@ -4695,8 +4876,11 @@ function parseExcelData(rows){
       refRestitution: getColIndex(dossierColMap, dossierHeaderKeys.refRestitution),
       refSfdc: getColIndex(dossierColMap, dossierHeaderKeys.refSfdc),
       refInjonction: getColIndex(dossierColMap, dossierHeaderKeys.refInjonction),
+      notificationSort: getColIndex(dossierColMap, dossierHeaderKeys.notificationSort),
+      notificationNo: getColIndex(dossierColMap, dossierHeaderKeys.notificationNo),
       executionNo: getColIndex(dossierColMap, dossierHeaderKeys.executionNo),
-      sort: getColIndex(dossierColMap, dossierHeaderKeys.sort)
+      sort: getColIndex(dossierColMap, dossierHeaderKeys.sort),
+      tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal)
     };
 
     let carriedAffectationDate = '';
@@ -4725,12 +4909,18 @@ function parseExcelData(rows){
       const refRestitution = idx.refRestitution !== -1 ? String(row[idx.refRestitution] || '').trim() : '';
       const refSfdc = idx.refSfdc !== -1 ? String(row[idx.refSfdc] || '').trim() : '';
       const refInjonction = idx.refInjonction !== -1 ? String(row[idx.refInjonction] || '').trim() : '';
+      const notificationSort = idx.notificationSort !== -1 ? String(row[idx.notificationSort] || '').trim() : '';
+      const notificationNo = idx.notificationNo !== -1 ? String(row[idx.notificationNo] || '').trim() : '';
+      const tribunal = idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '';
       const immatriculation = idx.immatriculation !== -1 ? String(row[idx.immatriculation] || '').trim() : '';
       const boiteNo = idx.boiteNo !== -1 ? String(row[idx.boiteNo] || '').trim() : '';
       const caution = idx.caution !== -1 ? String(row[idx.caution] || '').trim() : '';
       const marque = idx.marque !== -1 ? String(row[idx.marque] || '').trim() : '';
-      const adresse = idx.adresse !== -1 ? String(row[idx.adresse] || '').trim() : '';
-      const ville = idx.ville !== -1 ? String(row[idx.ville] || '').trim() : '';
+      const rawAdresse = idx.adresse !== -1 ? String(row[idx.adresse] || '').trim() : '';
+      const rawVille = idx.ville !== -1 ? String(row[idx.ville] || '').trim() : '';
+      const normalizedLocation = normalizeImportedAddressVille(rawAdresse, rawVille);
+      const adresse = normalizedLocation.adresse;
+      const ville = normalizedLocation.ville;
       const cautionAdresse = idx.cautionAdresse !== -1 ? String(row[idx.cautionAdresse] || '').trim() : '';
       const cautionVille = idx.cautionVille !== -1 ? String(row[idx.cautionVille] || '').trim() : '';
       const cautionCin = idx.cautionCin !== -1 ? String(row[idx.cautionCin] || '').trim() : '';
@@ -4791,8 +4981,11 @@ function parseExcelData(rows){
         refRestitution,
         refSfdc,
         refInjonction,
+        notificationSort,
+        notificationNo,
         executionNo,
-        sort
+        sort,
+        tribunal
       });
       carriedAffectationDate = '';
       carriedMontant = '';
@@ -4832,7 +5025,7 @@ function parseExcelData(rows){
         debiteur,
         refDossier,
         procedureText: idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '',
-        audience: idx.audience !== -1 ? String(row[idx.audience] || '').trim() : '',
+        audience: idx.audience !== -1 ? parseExcelDateValue(row[idx.audience]) : '',
         juge: idx.juge !== -1 ? String(row[idx.juge] || '').trim() : '',
         sort: idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '',
         tribunal: idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '',
@@ -4918,6 +5111,13 @@ function buildExcelImportIssueMessage(issues){
     lines.push(`... +${issues.length - maxIssues} autres lignes ignorées`);
   }
   return lines.join('\n');
+}
+
+function isExcelImportDisplayError(issue){
+  const normalized = String(issue || '').trim().toLowerCase();
+  if(!normalized) return false;
+  if(normalized.startsWith('rapprochement automatique:')) return false;
+  return true;
 }
 
 function renderExcelImportIssues(issuesText, container){
@@ -5474,12 +5674,18 @@ async function applyExcelImport(payload, options = {}){
     setProcRef('SFDC', row.refSfdc);
     setProcRef('Injonction', row.refInjonction);
     const executionNoValue = String(row.executionNo || '').trim();
+    const notificationSortValue = String(row.notificationSort || '').trim();
+    const notificationNoValue = String(row.notificationNo || '').trim();
     const sortValue = String(row.sort || '').trim();
+    const tribunalValue = String(row.tribunal || '').trim();
     const assignProcedureMeta = (proc, refValue)=>{
-      if(!(executionNoValue || sortValue) || !String(refValue || '').trim()) return;
+      if(!(executionNoValue || sortValue || tribunalValue || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))) || !String(refValue || '').trim()) return;
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
       if(executionNoValue) dossier.procedureDetails[proc].executionNo = executionNoValue;
       if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
+      if(tribunalValue) dossier.procedureDetails[proc].tribunal = tribunalValue;
+      if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
+      if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
     };
     assignProcedureMeta('SFDC', row.refSfdc);
     assignProcedureMeta('Injonction', row.refInjonction);
@@ -5718,7 +5924,7 @@ async function applyExcelImport(payload, options = {}){
       p.referenceClient = ref;
       dossierAudienceRefsCache.delete(dossier);
     }
-    if(row.audience) p.audience = row.audience;
+    if(normalizedAudienceDate) p.audience = normalizedAudienceDate;
     if(row.juge) p.juge = row.juge;
     if(row.sort) p.sort = row.sort;
     if(row.tribunal) p.tribunal = row.tribunal;
@@ -5745,7 +5951,8 @@ async function applyExcelImport(payload, options = {}){
   handleDossierDataChange({ audience: true });
   await persistAppStateNow();
   refreshPrimaryViews();
-  const issuesText = buildExcelImportIssueMessage(importIgnoredRows);
+  const importDisplayErrors = importIgnoredRows.filter(isExcelImportDisplayError);
+  const issuesText = buildExcelImportIssueMessage(importDisplayErrors);
   const summaryLines = [
     `Import terminé.`,
     `Dossiers détectés: ${dossiers.length}`,
@@ -5753,7 +5960,7 @@ async function applyExcelImport(payload, options = {}){
     `Audience hors global rapprochée: ${reconciledOrphans}`,
     `Audiences détectées: ${audiences.length}`,
     `Audiences liées: ${linkedAudiencesCount}`,
-    `Erreurs ignorées (non bloquantes): ${importIgnoredRows.length}`
+    `Erreurs ignorées (non bloquantes): ${importDisplayErrors.length}`
   ];
   if(!importDossiers && importAudiences){
     summaryLines.push('Mode Audience: création de nouveaux dossiers globaux désactivée.');
@@ -5781,7 +5988,7 @@ async function handleExcelImportFile(file, options = {}){
     const buffer = await file.arrayBuffer();
     updateImportProgress('Analyse de la feuille...', 1, 3);
     setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
-    const workbook = XLSX.read(buffer, { type: 'array' });
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     if(!sheetName){
       throw new Error('Le fichier Excel ne contient aucune feuille.');
@@ -5793,7 +6000,7 @@ async function handleExcelImportFile(file, options = {}){
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       defval: '',
-      raw: false,
+      raw: true,
       dateNF: 'dd/mm/yyyy'
     });
     if(!Array.isArray(rows)){
@@ -6332,6 +6539,9 @@ function setupEvents(){
     filterSuiviTribunal = e.target.value === 'all' ? 'all' : resolveSuiviTribunalFilterKey(e.target.value);
     renderSuivi();
   });
+  $('selectAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(true));
+  $('clearAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(false));
+  $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
   $('audienceErrorsBtn')?.addEventListener('click', ()=>{
     filterAudienceErrorsOnly = !filterAudienceErrorsOnly;
@@ -7349,6 +7559,36 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
     .join(' ');
 }
 
+function getDiligenceSearchValues(row){
+  if(!row || typeof row !== 'object') return [];
+  const details = row.details || {};
+  const values = [
+    row.clientName,
+    row.procedure,
+    row.tribunal,
+    row.sort,
+    row.delegation,
+    row.ordonnance,
+    row.dossier?.debiteur,
+    row.dossier?.boiteNo,
+    row.dossier?.referenceClient,
+    row.dossier?.ville,
+    details.referenceClient,
+    details.dateDepot,
+    details.depotLe,
+    details.notificationNo,
+    details.notificationStatus,
+    details.notificationSort,
+    details.dateNotification,
+    details.certificatNonAppelStatus,
+    details.executionNo,
+    details.huissier
+  ];
+  return values
+    .map(value=>String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData, draftData){
   const fileNames = Array.isArray(dossier?.files)
     ? dossier.files.map(f=>String(f?.name || '').trim()).filter(Boolean)
@@ -8192,13 +8432,8 @@ function getFilteredDiligenceRows(allRows){
     if(filterDiligenceOrdonnance !== 'all' && row.ordonnance !== filterDiligenceOrdonnance) return false;
     if(filterDiligenceTribunal !== 'all' && row.tribunal !== filterDiligenceTribunal) return false;
     if(!q) return true;
-    const haystack = row.__diligenceHaystack || (row.__diligenceHaystack = buildSuiviSearchHaystack(
-      row.clientName,
-      row.dossier,
-      [row.procedure],
-      row.tribunal ? [row.tribunal] : []
-    ));
-    return haystack.includes(q);
+    const searchValues = row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row));
+    return searchValues.some(value=>value === q);
   });
   diligenceFilteredRowsCacheInput = allRows;
   diligenceFilteredRowsCacheKey = filterKey;
@@ -8228,6 +8463,7 @@ function exportDiligenceXLS(){
     'Ordonnance',
     'Notification N°',
     'Statut notification',
+    'Sort notification',
     'Date notification',
     'Certificat non appel',
     'Exécution N°',
@@ -8246,6 +8482,7 @@ function exportDiligenceXLS(){
     normalizeDiligenceAttOk(row.details?.attOrdOrOrdOk || '') || 'att',
     row.details?.notificationNo || '-',
     row.details?.notificationStatus || '-',
+    row.details?.notificationSort || '-',
     row.details?.dateNotification || '-',
     row.details?.certificatNonAppelStatus || '-',
     row.details?.executionNo || '-',
@@ -8924,10 +9161,20 @@ function getActiveAudiencePriorityColor(){
 }
 
 function getAudienceRowDateValue(row){
-  const raw = String(row?.draft?.dateAudience || row?.p?.audience || '').trim();
-  if(!raw) return '';
-  const normalized = normalizeDateDDMMYYYY(raw);
-  return normalized || raw;
+  return formatAudienceDateDisplayValue(row?.draft?.dateAudience || row?.p?.audience || '');
+}
+
+function formatAudienceDateDisplayValue(value){
+  if(value === null || value === undefined) return '';
+  const normalized = normalizeDateDDMMYYYY(value);
+  if(normalized) return normalized;
+  const text = String(value || '').trim();
+  if(!text) return '';
+  const parsed = new Date(text);
+  if(!Number.isNaN(parsed.getTime())){
+    return formatDateDDMMYYYY(parsed);
+  }
+  return text;
 }
 
 function normalizeIsoDateToDDMMYYYY(value){
@@ -10102,6 +10349,7 @@ function renderProcedureDetails(forceList, forceDraft){
         <input type="text" data-field="depotLe" placeholder="Dépôt le">
         <input type="text" data-field="referenceClient" placeholder="Référence dossier">
         <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
+        <input type="text" data-field="notificationSort" placeholder="Sort notification">
         <input type="text" data-field="notificationNo" placeholder="Notification N°">
         <select data-field="notificationStatus">
           <option value="att plie avec tr">att plie avec tr</option>

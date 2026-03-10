@@ -3,6 +3,7 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
   const isChecked = isDiligenceSelectedForPrint(row);
   const refValue = row.details?.referenceClient || '';
   const ordValue = row.details?.attOrdOrOrdOk || '';
+  const notificationSortValue = row.details?.notificationSort || '';
   const notificationNoValue = row.details?.notificationNo || '';
   const notificationStatusValue = row.details?.notificationStatus || '';
   const dateNotificationValue = row.details?.dateNotification || '';
@@ -32,6 +33,7 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
       <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationStatus', notificationStatusValue)}</td>
+      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationSort', notificationSortValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'dateNotification', dateNotificationValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
@@ -145,6 +147,7 @@ function renderDiligence(options = {}){
         <th>Ordonnance</th>
         <th>Notification N°</th>
         <th>Statut notification</th>
+        <th>Sort notification</th>
         <th>Date notification</th>
         <th>Certificat non appel</th>
         <th>Execution N°</th>
@@ -185,7 +188,7 @@ function renderDiligence(options = {}){
   if(!rows.length){
     diligenceVirtualRows = [];
     diligenceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 15 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 16 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
     renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     return;
   }

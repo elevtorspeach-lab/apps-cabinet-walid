@@ -2504,15 +2504,40 @@ function normalizeDateDDMMYYYY(value){
     const a = Number(m[1]);
     const b = Number(m[2]);
     const year = parseYear(m[3]);
-    // Prefer dd/mm/yyyy, fallback to mm/dd/yyyy when needed (e.g. 10/28/25).
     if(isValidDateParts(a, b, year)){
       return formatDateDDMMYYYY(new Date(year, b - 1, a));
     }
-    if(isValidDateParts(b, a, year)){
-      return formatDateDDMMYYYY(new Date(year, a - 1, b));
-    }
     return '';
   }
+}
+
+function looksLikeImportedCity(value){
+  const text = String(value || '').trim();
+  if(!text) return false;
+  if(/\d/.test(text)) return false;
+  if(/[;,]/.test(text)) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= 4 && text.length <= 40;
+}
+
+function looksLikeImportedAddress(value){
+  const text = String(value || '').trim().toLowerCase();
+  if(!text) return false;
+  if(/\d/.test(text)) return true;
+  if(/[;,]/.test(text)) return true;
+  return /\b(rue|avenue|av\.?|bd|boulevard|lot|appt|appartement|imm|immeuble|residence|résidence|quartier|hay|route|km|angle|zone|n°|no)\b/.test(text);
+}
+
+function normalizeImportedAddressVille(adresseValue, villeValue){
+  let adresse = String(adresseValue || '').trim();
+  let ville = String(villeValue || '').trim();
+  if(adresse && ville && looksLikeImportedCity(adresse) && looksLikeImportedAddress(ville)){
+    return { adresse: ville, ville: adresse };
+  }
+  if(!ville && looksLikeImportedCity(adresse) && !looksLikeImportedAddress(adresse)){
+    return { adresse: '', ville: adresse };
+  }
+  return { adresse, ville };
 }
 
 function normalizeReferenceValue(value){
@@ -4580,8 +4605,8 @@ function parseExcelData(rows){
     boiteNo: ['boite n', 'boite no', 'boite n°', 'boîte n', 'boîte no', 'boîte n°'],
     caution: ['caution', 'nom caution', 'nom de caution'],
     marque: ['marque'],
-    adresse: ['adresse'],
-    ville: ['ville'],
+    adresse: ['adresse', 'adress', 'adresse complete', 'adresse complète'],
+    ville: ['ville', 'city', 'commune', 'ville / commune'],
     cautionAdresse: ['adresse de caution', 'adresse caution'],
     cautionVille: ['ville de caution', 'ville caution'],
     cautionCin: ['cin de caution', 'cni de caution', 'cin caution', 'cni caution'],
@@ -4719,8 +4744,11 @@ function parseExcelData(rows){
       const boiteNo = idx.boiteNo !== -1 ? String(row[idx.boiteNo] || '').trim() : '';
       const caution = idx.caution !== -1 ? String(row[idx.caution] || '').trim() : '';
       const marque = idx.marque !== -1 ? String(row[idx.marque] || '').trim() : '';
-      const adresse = idx.adresse !== -1 ? String(row[idx.adresse] || '').trim() : '';
-      const ville = idx.ville !== -1 ? String(row[idx.ville] || '').trim() : '';
+      const rawAdresse = idx.adresse !== -1 ? String(row[idx.adresse] || '').trim() : '';
+      const rawVille = idx.ville !== -1 ? String(row[idx.ville] || '').trim() : '';
+      const normalizedLocation = normalizeImportedAddressVille(rawAdresse, rawVille);
+      const adresse = normalizedLocation.adresse;
+      const ville = normalizedLocation.ville;
       const cautionAdresse = idx.cautionAdresse !== -1 ? String(row[idx.cautionAdresse] || '').trim() : '';
       const cautionVille = idx.cautionVille !== -1 ? String(row[idx.cautionVille] || '').trim() : '';
       const cautionCin = idx.cautionCin !== -1 ? String(row[idx.cautionCin] || '').trim() : '';

@@ -306,6 +306,7 @@
                   <th>Date dépôt</th>
                   <th>Référence dossier</th>
                   <th>Ordonnance</th>
+                  <th>Sort notification</th>
                   <th>Notification N°</th>
                   <th>Statut notification</th>
                   <th>Date notification</th>
@@ -660,6 +661,16 @@
             <option value="all">Tous</option>
           </select>
         </div>
+        <div id="suiviCheckedCount" class="audience-checked-count">Cochés: 0</div>
+        <button id="selectAllSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-check"></i> Tout cocher
+        </button>
+        <button id="clearAllSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-regular fa-square-xmark"></i> Tout décocher
+        </button>
+        <button id="exportSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-file-export"></i> Exporter
+        </button>
       </div>
       
 
@@ -667,6 +678,7 @@
         <table>
           <thead>
             <tr>
+              <th>Sélection</th>
               <th>Client</th>
               <th>Date d’affectation</th>
               <th>Référence Client</th>
