@@ -209,6 +209,7 @@ function renderDiligence(options = {}){
   };
 
   if(diligenceQuery && allRows.length >= 1200 && !!getDiligenceFilterWorker()){
+    const executionOnlyQuery = isDiligenceExecutionOnlyQuery(diligenceQuery);
     const narrowedRows = allRows.filter(row=>{
       if(filterDiligenceProcedure !== 'all' && row.procedure !== filterDiligenceProcedure) return false;
       if(filterDiligenceSort !== 'all' && row.sort !== filterDiligenceSort) return false;
@@ -222,10 +223,12 @@ function renderDiligence(options = {}){
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,
-        values: row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row))
+        values: row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row)),
+        executionNo: String(row?.details?.executionNo || '').trim()
       })),
       diligenceQuery,
-      requestId
+      requestId,
+      { executionOnlyQuery }
     )
       .then((filteredIndexes)=>{
         const currentStateKey = [

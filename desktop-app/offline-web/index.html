@@ -199,9 +199,16 @@
 
       <div class="audience-color-filter">
         <label for="filterAudienceTribunal">Tribunal</label>
-        <select id="filterAudienceTribunal">
-          <option value="all">Tous</option>
-        </select>
+        <input
+          type="text"
+          id="filterAudienceTribunal"
+          list="filterAudienceTribunalOptions"
+          placeholder="Tous"
+          autocomplete="off"
+        />
+        <datalist id="filterAudienceTribunalOptions">
+          <option value="Tous"></option>
+        </datalist>
       </div>
     </div>
 
