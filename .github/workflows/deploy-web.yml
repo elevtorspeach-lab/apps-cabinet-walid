@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - cabinetlasttttupdat
+      - cabinet-araqi-offline-update
   workflow_dispatch:
 
 permissions:
