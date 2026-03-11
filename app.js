@@ -55,6 +55,7 @@ let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle
 let paginationFilterState = { clients: '', audience: '', suivi: '', diligence: '', recycle: '' };
 let audienceTribunalAliasMap = new Map();
 let audiencePrintSelection = new Set();
+let audiencePrintSelectionVersion = 0;
 let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
 let suiviTribunalAliasMap = new Map();
@@ -65,6 +66,7 @@ let filterDiligenceDelegation = 'all';
 let filterDiligenceOrdonnance = 'all';
 let filterDiligenceTribunal = 'all';
 let diligencePrintSelection = new Set();
+let diligencePrintSelectionVersion = 0;
 let audienceCheckedCountRenderQueued = false;
 let diligenceCheckedCountRenderQueued = false;
 let filterSalle = 'all';
@@ -92,6 +94,9 @@ const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
 let API_BASE = 'http://127.0.0.1:3000/api';
 let API_BASE_RESOLVED = false;
 let persistTimer = null;
+let queuedPersistPayload = null;
+let dossierPatchPersistTimer = null;
+let queuedDossierPatchEntries = new Map();
 let desktopStatePersistTimer = null;
 let audienceAutoSaveTimer = null;
 let audienceColorBatchTimer = null;
@@ -106,6 +111,9 @@ let remoteSyncStreamRetryTimer = null;
 let remoteSyncHealthTick = 0;
 let remoteSyncStreamConnected = false;
 let lastPersistedStateSignature = '';
+let lastLocalSnapshotSignature = '';
+let lastRemoteStateLoadVersion = 0;
+let lastRemoteStateLoadUpdatedAt = '';
 let remoteStateVersion = 0;
 let remoteStateUpdatedAt = '';
 let remoteRefreshPending = false;
@@ -113,6 +121,7 @@ let remoteRefreshInFlight = false;
 let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
+let deferredLocalSnapshotSignature = '';
 let audienceLinkedRenderTimer = null;
 let dossierLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
@@ -143,6 +152,13 @@ let audienceFilterOptionsRowsRef = null;
 const audienceFilterOptionsMetaCache = new WeakMap();
 let audienceDuplicateKeySetCacheInput = null;
 let audienceDuplicateKeySetCacheOutput = new Set();
+let audienceMismatchRefClientSetCacheInput = null;
+let audienceMismatchRefClientSetCacheOutput = new Set();
+let audienceErrorRowsCacheInput = null;
+let audienceErrorRowsCacheOutput = [];
+let audienceSelectedExportRowsCacheInput = null;
+let audienceSelectedExportRowsCacheVersion = -1;
+let audienceSelectedExportRowsCacheOutput = [];
 let sidebarSalleRenderTimer = null;
 let indexedDbOpenPromise = null;
 let suiviVirtualRows = [];
@@ -170,9 +186,18 @@ let diligenceFilterTribunalRowsRef = null;
 let diligenceFilterSortRowsRef = null;
 let diligenceFilterDelegationRowsRef = null;
 let diligenceFilterOrdonnanceRowsRef = null;
+let diligenceSelectedExportRowsCacheInput = null;
+let diligenceSelectedExportRowsCacheVersion = -1;
+let diligenceSelectedExportRowsCacheOutput = [];
 let audienceColorButtons = [];
 let backgroundDataWarmupTimer = null;
 let backgroundDataWarmupVersion = -1;
+let audienceSearchWarmupTimer = null;
+let audienceSearchWarmupToken = 0;
+let suiviSearchWarmupTimer = null;
+let suiviSearchWarmupToken = 0;
+let diligenceSearchWarmupTimer = null;
+let diligenceSearchWarmupToken = 0;
 let visibleClientsCache = null;
 let visibleClientsCacheVersion = -1;
 let visibleClientsCacheUserKey = '';
@@ -197,9 +222,12 @@ let audienceErrorCountCacheVersion = -1;
 let audienceErrorCountCacheValue = 0;
 let knownJudgesCache = null;
 let knownJudgesCacheVersion = -1;
+let salleAssignmentsVersion = 0;
 let salleAudienceMapCache = null;
 let salleAudienceMapCacheVersion = -1;
+let salleAudienceMapAssignmentsVersion = -1;
 let salleAudienceMapCacheUserKey = '';
+let loginPostBootTimer = null;
 const dashboardMetricState = new Map();
 const DEFERRED_RENDER_SECTION_IDS = {
   dashboard: 'dashboardSection',
@@ -228,6 +256,7 @@ const DOSSIER_HISTORY_MAX_ENTRIES = 400;
 const DOSSIER_HISTORY_DEBOUNCE_MS = 900;
 const RECYCLE_BIN_MAX_ENTRIES = 600;
 const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
+const DOSSIER_PATCH_DEBOUNCE_MS = 220;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
   boiteNo: 'Boîte N°',
@@ -303,6 +332,7 @@ const SUIVI_VIRTUAL_MIN_ROWS = 40;
 const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
 const DILIGENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_COLOR_BATCH_MS = 80;
+const SEARCH_CACHE_WARMUP_CHUNK_SIZE = 240;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
 const LOCAL_ONLY_MODE = (() => {
   if(typeof window === 'undefined') return false;
@@ -335,11 +365,23 @@ const EXCELJS_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/exceljs.min.js' : '/
 const XLSX_CDN_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 const EXCELJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 const CLIENT_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/client-filter.worker.js' : '/workers/client-filter.worker.js';
+const AUDIENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/audience-filter.worker.js' : '/workers/audience-filter.worker.js';
+const SUIVI_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/suivi-filter.worker.js' : '/workers/suivi-filter.worker.js';
+const DILIGENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/diligence-filter.worker.js' : '/workers/diligence-filter.worker.js';
 let xlsxLoadPromise = null;
 let excelJsLoadPromise = null;
 let clientFilterWorker = null;
 let clientFilterWorkerFailed = false;
 let clientFilterRequestSeq = 0;
+let audienceFilterWorker = null;
+let audienceFilterWorkerFailed = false;
+let audienceFilterRequestSeq = 0;
+let suiviFilterWorker = null;
+let suiviFilterWorkerFailed = false;
+let suiviFilterRequestSeq = 0;
+let diligenceFilterWorker = null;
+let diligenceFilterWorkerFailed = false;
+let diligenceFilterRequestSeq = 0;
 const SALLE_WEEKDAY_OPTIONS = [
   { key: 'lundi', label: 'Lundi' },
   { key: 'mardi', label: 'Mardi' },
@@ -707,10 +749,20 @@ function invalidateDerivedCaches(options = {}){
   audienceFilterOptionsRowsRef = null;
   audienceDuplicateKeySetCacheInput = null;
   audienceDuplicateKeySetCacheOutput = new Set();
+  audienceMismatchRefClientSetCacheInput = null;
+  audienceMismatchRefClientSetCacheOutput = new Set();
 }
 
 function markAudienceRowsCacheDirty(){
   invalidateDerivedCaches({ audience: true });
+  audienceErrorRowsCacheInput = null;
+  audienceErrorRowsCacheOutput = [];
+  audienceSelectedExportRowsCacheInput = null;
+  audienceSelectedExportRowsCacheVersion = -1;
+  audienceSelectedExportRowsCacheOutput = [];
+  diligenceSelectedExportRowsCacheInput = null;
+  diligenceSelectedExportRowsCacheVersion = -1;
+  diligenceSelectedExportRowsCacheOutput = [];
 }
 
 function markAudienceColorCachesDirty(){
@@ -728,6 +780,17 @@ function markAudienceColorCachesDirty(){
 
 function markNonAudienceDossierCachesDirty(){
   invalidateDerivedCaches({ audience: false });
+  diligenceSelectedExportRowsCacheInput = null;
+  diligenceSelectedExportRowsCacheVersion = -1;
+  diligenceSelectedExportRowsCacheOutput = [];
+}
+
+function invalidateSalleAssignmentsCaches(){
+  salleAssignmentsVersion += 1;
+  salleAudienceMapCache = null;
+  salleAudienceMapCacheVersion = -1;
+  salleAudienceMapAssignmentsVersion = -1;
+  salleAudienceMapCacheUserKey = '';
 }
 
 function dossierHasAudienceImpact(dossier){
@@ -950,6 +1013,7 @@ function applyRemoteSlicePatchLocally(patchKind, patch){
   }
   if(patchKind === 'salle-assignments'){
     AppState.salleAssignments = normalizeSalleAssignments(patch.salleAssignments);
+    invalidateSalleAssignmentsCaches();
     return true;
   }
   if(patchKind === 'audience-draft'){
@@ -966,6 +1030,8 @@ function finalizeRemoteStateUpdateLocally(options = {}){
   // Avoid expensive full-state signature recomputation on every live patch.
   // A later full reload can rebuild the signature if needed.
   lastPersistedStateSignature = '';
+  lastRemoteStateLoadVersion = remoteStateVersion;
+  lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
   syncCurrentUserFromUsers();
   markDeferredRenderDirty(
     'dashboard',
@@ -1097,6 +1163,162 @@ function runClientFilterInWorker(items, query, requestId){
     worker.addEventListener('error', handleError);
     worker.postMessage({
       type: 'client-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getAudienceFilterWorker(){
+  if(audienceFilterWorkerFailed) return null;
+  if(audienceFilterWorker) return audienceFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    audienceFilterWorker = new Worker(AUDIENCE_FILTER_WORKER_URL);
+    return audienceFilterWorker;
+  }catch(err){
+    console.warn('Audience filter worker indisponible', err);
+    audienceFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runAudienceFilterInWorker(items, query, requestId){
+  const worker = getAudienceFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'audience-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Audience filter worker error', err);
+      cleanup();
+      audienceFilterWorkerFailed = true;
+      if(audienceFilterWorker){
+        try{ audienceFilterWorker.terminate(); }catch(_){}
+      }
+      audienceFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'audience-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getSuiviFilterWorker(){
+  if(suiviFilterWorkerFailed) return null;
+  if(suiviFilterWorker) return suiviFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    suiviFilterWorker = new Worker(SUIVI_FILTER_WORKER_URL);
+    return suiviFilterWorker;
+  }catch(err){
+    console.warn('Suivi filter worker indisponible', err);
+    suiviFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runSuiviFilterInWorker(items, query, requestId){
+  const worker = getSuiviFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'suivi-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Suivi filter worker error', err);
+      cleanup();
+      suiviFilterWorkerFailed = true;
+      if(suiviFilterWorker){
+        try{ suiviFilterWorker.terminate(); }catch(_){}
+      }
+      suiviFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'suivi-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getDiligenceFilterWorker(){
+  if(diligenceFilterWorkerFailed) return null;
+  if(diligenceFilterWorker) return diligenceFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    diligenceFilterWorker = new Worker(DILIGENCE_FILTER_WORKER_URL);
+    return diligenceFilterWorker;
+  }catch(err){
+    console.warn('Diligence filter worker indisponible', err);
+    diligenceFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runDiligenceFilterInWorker(items, query, requestId){
+  const worker = getDiligenceFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'diligence-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Diligence filter worker error', err);
+      cleanup();
+      diligenceFilterWorkerFailed = true;
+      if(diligenceFilterWorker){
+        try{ diligenceFilterWorker.terminate(); }catch(_){}
+      }
+      diligenceFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'diligence-filter',
       requestId,
       query: String(query || ''),
       items
@@ -1404,9 +1626,13 @@ function setAllVisibleSuiviRowsForPrint(checked){
 function getFilteredSuiviRowsForSelection(){
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
   const base = getSuiviBaseRowsCached();
+  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
   const noSearchFilter = !q;
+  if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
+    return suiviFilteredRowsCacheOutput;
+  }
   if(noProcedureFilter && noTribunalFilter && noSearchFilter){
     return base.sortedDefaultRows;
   }
@@ -1542,6 +1768,79 @@ function warmupExcelLibrariesOnIdle(){
   setTimeout(warmup, 900);
 }
 
+function clearScheduledWarmupTimer(timerId){
+  if(!timerId) return null;
+  if(typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function' && typeof timerId === 'number'){
+    try{
+      window.cancelIdleCallback(timerId);
+      return null;
+    }catch(_){}
+  }
+  clearTimeout(timerId);
+  return null;
+}
+
+function scheduleChunkedSearchWarmup(kind, rows, stepFn){
+  if(typeof stepFn !== 'function') return;
+  const list = Array.isArray(rows) ? rows : [];
+  const stateMap = {
+    audience: {
+      get timer(){ return audienceSearchWarmupTimer; },
+      set timer(value){ audienceSearchWarmupTimer = value; },
+      get token(){ return audienceSearchWarmupToken; },
+      set token(value){ audienceSearchWarmupToken = value; }
+    },
+    suivi: {
+      get timer(){ return suiviSearchWarmupTimer; },
+      set timer(value){ suiviSearchWarmupTimer = value; },
+      get token(){ return suiviSearchWarmupToken; },
+      set token(value){ suiviSearchWarmupToken = value; }
+    },
+    diligence: {
+      get timer(){ return diligenceSearchWarmupTimer; },
+      set timer(value){ diligenceSearchWarmupTimer = value; },
+      get token(){ return diligenceSearchWarmupToken; },
+      set token(value){ diligenceSearchWarmupToken = value; }
+    }
+  };
+  const state = stateMap[kind];
+  if(!state) return;
+  state.timer = clearScheduledWarmupTimer(state.timer);
+  if(!list.length) return;
+  state.token += 1;
+  const token = state.token;
+  let index = 0;
+  const schedule = ()=>{
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      state.timer = window.requestIdleCallback(run, { timeout: 1500 });
+      return;
+    }
+    state.timer = setTimeout(()=>run(null), 16);
+  };
+  const run = (deadline)=>{
+    if(token !== state.token) return;
+    state.timer = null;
+    let processed = 0;
+    while(index < list.length && processed < SEARCH_CACHE_WARMUP_CHUNK_SIZE){
+      if(
+        deadline
+        && typeof deadline.timeRemaining === 'function'
+        && processed > 0
+        && deadline.timeRemaining() <= 3
+      ){
+        break;
+      }
+      stepFn(list[index], index);
+      index += 1;
+      processed += 1;
+    }
+    if(index < list.length){
+      schedule();
+    }
+  };
+  schedule();
+}
+
 function scheduleBackgroundDataWarmup(delayMs = 1500){
   if(typeof window === 'undefined' || !currentUser) return;
   const targetVersion = audienceRowsRawDataVersion;
@@ -1558,7 +1857,7 @@ function scheduleBackgroundDataWarmup(delayMs = 1500){
       getClientListSummaries();
       getDashboardSnapshot();
       getDashboardCalendarEvents();
-      getSuiviBaseRowsCached();
+      const suiviBase = getSuiviBaseRowsCached();
       const audienceRows = getAudienceRows();
       const prevAudienceColor = selectedAudienceColor;
       const prevErrorsOnly = filterAudienceErrorsOnly;
@@ -1569,7 +1868,34 @@ function scheduleBackgroundDataWarmup(delayMs = 1500){
       getFilteredAudienceRows(audienceRows);
       selectedAudienceColor = prevAudienceColor;
       filterAudienceErrorsOnly = prevErrorsOnly;
-      getDiligenceRows();
+      const audienceSearchRows = getAudienceRowsDedupedCached();
+      const diligenceRows = getDiligenceRows();
+      scheduleChunkedSearchWarmup('audience', audienceSearchRows, (row)=>{
+        if(!row) return;
+        if(!row.__haystack){
+          row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft);
+        }
+        if(!row.__audienceDateDisplay){
+          row.__audienceDateDisplay = getAudienceRowDateValue(row);
+        }
+      });
+      scheduleChunkedSearchWarmup('suivi', suiviBase?.rawRows || [], (row)=>{
+        if(!row) return;
+        if(!row.__suiviHaystack){
+          row.__suiviHaystack = buildSuiviSearchHaystack(
+            row.c?.name,
+            row.d,
+            row.procSource,
+            (row.tribunalList && row.tribunalList.length) ? row.tribunalList : row.tribunalLabels
+          );
+        }
+      });
+      scheduleChunkedSearchWarmup('diligence', diligenceRows, (row)=>{
+        if(!row) return;
+        if(!row.__diligenceSearchValues){
+          row.__diligenceSearchValues = getDiligenceSearchValues(row);
+        }
+      });
       backgroundDataWarmupVersion = audienceRowsRawDataVersion;
     }catch(err){
       console.warn('Préchargement des caches impossible', err);
@@ -3208,24 +3534,37 @@ function refreshAfterRecycleRestore(){
   refreshPrimaryViews({ includeSalle: true, includeRecycle: true });
 }
 
+function refreshDeferredSectionIfNeeded(key, renderFn, options = {}){
+  if(typeof renderFn !== 'function') return;
+  const force = options.force === true;
+  const include = options.include === true;
+  if(force || include || isDeferredRenderSectionVisible(key)){
+    renderFn(force ? { force: true } : {});
+    return;
+  }
+  markDeferredRenderDirty(key);
+}
+
 function refreshPrimaryViews(options = {}){
-  renderClients();
-  updateClientDropdown();
-  if(options.dashboardOptions){
-    renderDashboard(options.dashboardOptions);
+  refreshDeferredSectionIfNeeded('clients', renderClients, { force: options.force === true });
+  if(options.force === true || isDeferredRenderSectionVisible('creation')){
+    updateClientDropdown(options.force === true ? { force: true } : {});
   }else{
-    renderDashboard();
+    markDeferredRenderDirty('clientDropdown');
   }
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  if(options.includeSalle){
-    renderSalle();
+  if(options.dashboardOptions){
+    refreshDeferredSectionIfNeeded('dashboard', (renderOptions)=>renderDashboard({ ...renderOptions, ...options.dashboardOptions }), {
+      force: options.force === true
+    });
+  }else{
+    refreshDeferredSectionIfNeeded('dashboard', renderDashboard, { force: options.force === true });
   }
-  if(options.includeRecycle){
-    renderRecycleBin();
-  }
+  refreshDeferredSectionIfNeeded('suivi', renderSuivi, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('audience', renderAudience, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('diligence', renderDiligence, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('equipe', renderEquipe, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('salle', renderSalle, { force: options.force === true, include: options.includeSalle === true });
+  refreshDeferredSectionIfNeeded('recycle', renderRecycleBin, { force: options.force === true, include: options.includeRecycle === true });
   if(options.resetCreationForm){
     resetCreationForm();
   }
@@ -3419,12 +3758,15 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
   if(
     salleAudienceMapCache
     && salleAudienceMapCacheVersion === audienceRowsRawDataVersion
+    && salleAudienceMapAssignmentsVersion === salleAssignmentsVersion
     && salleAudienceMapCacheUserKey === userKey
   ){
     return salleAudienceMapCache;
   }
   const salleToJudges = new Map();
-  normalizeSalleAssignments(AppState.salleAssignments).forEach(row=>{
+  const normalizedAssignments = normalizeSalleAssignments(AppState.salleAssignments);
+  const judgeTargets = [];
+  normalizedAssignments.forEach(row=>{
     if(normalizeSalleWeekday(row?.day) !== targetDay) return;
     const salleLabel = normalizeSalleName(row?.salle || '');
     const judge = normalizeJudgeName(row?.juge || '');
@@ -3436,7 +3778,17 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
   const bySalleAndJudge = new Map();
   salleToJudges.forEach((judges, salleLabel)=>{
     const judgeMap = new Map();
-    [...judges].forEach(j=>judgeMap.set(j, []));
+    [...judges].forEach(j=>{
+      const sessions = [];
+      judgeMap.set(j, sessions);
+      const judgeKey = makeJudgeMatchKey(j);
+      if(judgeKey){
+        judgeTargets.push({
+          judgeKey,
+          sessions
+        });
+      }
+    });
     bySalleAndJudge.set(salleLabel, judgeMap);
   });
 
@@ -3467,23 +3819,21 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
       instruction: instructionValue || '-',
       sort: sortValue || '-'
     };
-    bySalleAndJudge.forEach((judgeMap)=>{
-      judgeMap.forEach((sessions, judgeName)=>{
-        const targetJudgeKey = makeJudgeMatchKey(judgeName);
-        if(!targetJudgeKey) return;
-        const matched = candidateKeys.some(candidateKey=>
-          candidateKey === targetJudgeKey
-          || candidateKey.includes(targetJudgeKey)
-          || targetJudgeKey.includes(candidateKey)
-        );
-        if(!matched) return;
-        sessions.push(session);
-      });
+    judgeTargets.forEach(target=>{
+      const targetJudgeKey = target.judgeKey;
+      const matched = candidateKeys.some(candidateKey=>
+        candidateKey === targetJudgeKey
+        || candidateKey.includes(targetJudgeKey)
+        || targetJudgeKey.includes(candidateKey)
+      );
+      if(!matched) return;
+      target.sessions.push(session);
     });
   });
 
   salleAudienceMapCache = bySalleAndJudge;
   salleAudienceMapCacheVersion = audienceRowsRawDataVersion;
+  salleAudienceMapAssignmentsVersion = salleAssignmentsVersion;
   salleAudienceMapCacheUserKey = userKey;
   return bySalleAndJudge;
 }
@@ -3695,6 +4045,18 @@ function buildStateSignature(clients, salleAssignments, users, draft, recycleBin
   }catch(err){
     return '';
   }
+}
+
+function getStateSignatureFromPayload(payload){
+  if(!payload || typeof payload !== 'object') return '';
+  return buildStateSignature(
+    payload.clients,
+    payload.salleAssignments,
+    payload.users,
+    payload.audienceDraft,
+    payload.recycleBin,
+    payload.recycleArchive
+  );
 }
 
 function buildAppStatePayload(){
@@ -4088,6 +4450,7 @@ async function importAppsavocatPayload(rawPayload){
       ...(Array.isArray(AppState.salleAssignments) ? AppState.salleAssignments : []),
       ...importedSalleAssignments
     ]);
+    invalidateSalleAssignmentsCaches();
 
     // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
     audienceDraft = {};
@@ -4304,14 +4667,9 @@ async function createAutoBackupSnapshot(payload, options = {}){
     ? payload
     : buildAppStatePayload();
   const force = options.force === true;
-  const signature = buildStateSignature(
-    safePayload.clients,
-    safePayload.salleAssignments,
-    safePayload.users,
-    safePayload.audienceDraft,
-    safePayload.recycleBin,
-    safePayload.recycleArchive
-  );
+  const signature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(safePayload);
   const now = Date.now();
   if(!force){
     if(signature && signature === lastAutoBackupSignature) return false;
@@ -4383,55 +4741,56 @@ async function persistDesktopStateFileNow(payload = buildAppStatePayload()){
   }
 }
 
-function queueDesktopStateFilePersist(){
+function queueDesktopStateFilePersist(payload = null){
   if(!hasDesktopStateBridge()) return;
   if(desktopStatePersistTimer) clearTimeout(desktopStatePersistTimer);
   desktopStatePersistTimer = setTimeout(()=>{
+    const pendingPayload = payload && typeof payload === 'object'
+      ? payload
+      : buildAppStatePayload();
     desktopStatePersistTimer = null;
-    persistDesktopStateFileNow().catch(()=>{});
+    persistDesktopStateFileNow(pendingPayload).catch(()=>{});
   }, DESKTOP_STATE_SAVE_DEBOUNCE_MS);
 }
 
 async function persistLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
   const source = String(options?.source || 'persist');
-  const nextSignature = buildStateSignature(
-    payload.clients,
-    payload.salleAssignments,
-    payload.users,
-    payload.audienceDraft,
-    payload.recycleBin,
-    payload.recycleArchive
-  );
+  const nextSignature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(payload);
+  if(!options.force && nextSignature && nextSignature === lastLocalSnapshotSignature){
+    queueDesktopStateFilePersist(payload);
+    return payload;
+  }
   lastPersistedStateSignature = nextSignature;
+  lastLocalSnapshotSignature = nextSignature;
   await writeStateToIndexedDb(payload);
   writeStateToLocalStorage(payload);
-  await createAutoBackupSnapshot(payload, { source });
-  queueDesktopStateFilePersist();
+  await createAutoBackupSnapshot(payload, { source, signature: nextSignature });
+  queueDesktopStateFilePersist(payload);
   return payload;
 }
 
 function queueDeferredLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
   const source = String(options?.source || 'persist');
-  const nextSignature = buildStateSignature(
-    payload.clients,
-    payload.salleAssignments,
-    payload.users,
-    payload.audienceDraft,
-    payload.recycleBin,
-    payload.recycleArchive
-  );
+  const nextSignature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(payload);
   lastPersistedStateSignature = nextSignature;
   deferredLocalSnapshotPayload = payload;
   deferredLocalSnapshotSource = source;
+  deferredLocalSnapshotSignature = nextSignature;
   if(deferredLocalSnapshotTimer) return payload;
   deferredLocalSnapshotTimer = setTimeout(()=>{
     const pendingPayload = deferredLocalSnapshotPayload;
     const pendingSource = deferredLocalSnapshotSource;
+    const pendingSignature = deferredLocalSnapshotSignature;
     deferredLocalSnapshotTimer = null;
     deferredLocalSnapshotPayload = null;
     deferredLocalSnapshotSource = 'persist';
+    deferredLocalSnapshotSignature = '';
     if(!pendingPayload) return;
-    persistLocalStateSnapshot(pendingPayload, { source: pendingSource }).catch((err)=>{
+    persistLocalStateSnapshot(pendingPayload, { source: pendingSource, signature: pendingSignature }).catch((err)=>{
       console.warn('Impossible de sauvegarder le snapshot local différé', err);
     });
   }, 0);
@@ -4476,7 +4835,8 @@ async function persistRemoteRequestNow(pathname, body){
 
 async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
   const payload = buildAppStatePayload();
-  await persistLocalStateSnapshot(payload, { source: options.source || sliceKey });
+  const signature = getStateSignatureFromPayload(payload);
+  await persistLocalStateSnapshot(payload, { source: options.source || sliceKey, signature });
   const routeBySlice = {
     audienceDraft: '/state/audience-draft',
     users: '/state/users',
@@ -4489,30 +4849,97 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
   return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue });
 }
 
-async function persistDossierPatchNow(patch, options = {}){
-  const payload = buildAppStatePayload();
-  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'dossier' });
-  return persistRemoteRequestNow('/state/dossiers', patch);
+function getDossierPatchQueueKey(patch){
+  if(!patch || typeof patch !== 'object') return '';
+  const action = String(patch.action || '').trim().toLowerCase();
+  if(action !== 'update') return '';
+  const clientId = Number(patch.clientId);
+  const dossierIndex = Number(patch.dossierIndex);
+  const targetClientId = Number(patch.targetClientId);
+  if(!Number.isFinite(clientId) || !Number.isFinite(dossierIndex)) return '';
+  return `${action}:${clientId}:${dossierIndex}:${Number.isFinite(targetClientId) ? targetClientId : clientId}`;
 }
 
-async function persistAppStateNow(){
-  flushAllDossierHistoryPendingEntries();
+async function flushQueuedDossierPatchesNow(){
+  if(dossierPatchPersistTimer){
+    clearTimeout(dossierPatchPersistTimer);
+    dossierPatchPersistTimer = null;
+  }
+  if(!(queuedDossierPatchEntries instanceof Map) || !queuedDossierPatchEntries.size){
+    return [];
+  }
+  const entries = [...queuedDossierPatchEntries.values()];
+  queuedDossierPatchEntries = new Map();
+  const results = [];
+  for(const entry of entries){
+    try{
+      const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
+      entry.resolvers.forEach(resolve=>resolve(result));
+      results.push(result);
+    }catch(err){
+      entry.rejecters.forEach(reject=>reject(err));
+      throw err;
+    }
+  }
+  return results;
+}
+
+async function persistDossierPatchNow(patch, options = {}){
   const payload = buildAppStatePayload();
-  await persistLocalStateSnapshot(payload, { source: 'persist' });
-  return persistRemoteRequestNow('/state', payload);
+  const signature = getStateSignatureFromPayload(payload);
+  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'dossier', signature });
+  const queueKey = getDossierPatchQueueKey(patch);
+  if(!queueKey){
+    await flushQueuedDossierPatchesNow();
+    return persistRemoteRequestNow('/state/dossiers', patch);
+  }
+  return new Promise((resolve, reject)=>{
+    const existing = queuedDossierPatchEntries.get(queueKey);
+    if(existing){
+      existing.patch = patch;
+      existing.resolvers.push(resolve);
+      existing.rejecters.push(reject);
+    }else{
+      queuedDossierPatchEntries.set(queueKey, {
+        patch,
+        resolvers: [resolve],
+        rejecters: [reject]
+      });
+    }
+    setSyncStatus('syncing');
+    if(dossierPatchPersistTimer) clearTimeout(dossierPatchPersistTimer);
+    dossierPatchPersistTimer = setTimeout(()=>{
+      flushQueuedDossierPatchesNow().catch((err)=>{
+        console.warn('Impossible de sauvegarder les modifications dossier', err);
+      });
+    }, DOSSIER_PATCH_DEBOUNCE_MS);
+  });
+}
+
+async function persistAppStateNow(payload = null){
+  flushAllDossierHistoryPendingEntries();
+  const nextPayload = payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(nextPayload);
+  queuedPersistPayload = null;
+  await persistLocalStateSnapshot(nextPayload, { source: 'persist', signature });
+  return persistRemoteRequestNow('/state', nextPayload);
 }
 
 function queuePersistAppState(){
   markAudienceRowsCacheDirty();
-  const payload = buildAppStatePayload();
-  writeStateToLocalStorage(payload);
-  writeStateToIndexedDb(payload).catch(()=>{});
-  queueDesktopStateFilePersist();
+  queuedPersistPayload = buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(queuedPersistPayload);
   setSyncStatus('syncing');
   if(persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(()=>{
     persistTimer = null;
-    persistAppStateNow();
+    persistLocalStateSnapshot(queuedPersistPayload, { source: 'persist', signature })
+      .then(()=>persistRemoteRequestNow('/state', queuedPersistPayload))
+      .catch((err)=>{
+      console.warn('Impossible de sauvegarder l’état applicatif', err);
+    });
   }, 250);
 }
 
@@ -4528,6 +4955,8 @@ async function loadPersistedState(){
         const normalizedState = normalizePersistedStateSource(parsed);
         if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
           loaded = true;
+          lastRemoteStateLoadVersion = remoteStateVersion;
+          lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
           setSyncStatus('ok', 'Etat charge depuis serveur');
           return false;
         }
@@ -4536,6 +4965,8 @@ async function loadPersistedState(){
           writeLocalStorage: true,
           syncStatusMessage: 'Etat charge depuis serveur'
         });
+        lastRemoteStateLoadVersion = remoteStateVersion;
+        lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
         loaded = true;
         changed = true;
       }
@@ -4601,6 +5032,14 @@ async function loadPersistedState(){
 async function refreshRemoteState(){
   if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
+  if(
+    !remoteRefreshPending
+    && Number(remoteStateVersion) > 0
+    && Number(remoteStateVersion) === Number(lastRemoteStateLoadVersion)
+    && String(remoteStateUpdatedAt || '') === String(lastRemoteStateLoadUpdatedAt || '')
+  ){
+    return;
+  }
   if(remoteRefreshInFlight){
     remoteRefreshPending = true;
     return;
@@ -6801,6 +7240,19 @@ function login(){
     }
   };
 
+  const queueLoginPostBoot = ()=>{
+    if(loginPostBootTimer){
+      clearTimeout(loginPostBootTimer);
+      loginPostBootTimer = null;
+    }
+    loginPostBootTimer = setTimeout(()=>{
+      loginPostBootTimer = null;
+      safeRun('renderDashboard(immediate)', ()=>renderDashboard({ force: true, immediate: true, deferHeavy: true, includeAudienceMetrics: false }));
+      safeRun('queueSidebarSalleSessionsRender', ()=>queueSidebarSalleSessionsRender(2800));
+      safeRun('scheduleBackgroundDataWarmup', ()=>scheduleBackgroundDataWarmup(2200));
+    }, 0);
+  };
+
   forceDashboardVisible();
   markDeferredRenderDirty(
     'dashboard',
@@ -6815,8 +7267,8 @@ function login(){
     'clientDropdown'
   );
   safeRun('applyRoleUI', ()=>applyRoleUI({ skipNavigation: true }));
-  safeRun('renderDashboard(immediate)', ()=>renderDashboard({ force: true, immediate: true, deferHeavy: true, includeAudienceMetrics: false }));
-  safeRun('queueSidebarSalleSessionsRender', ()=>queueSidebarSalleSessionsRender(2800));
+  safeRun('primeDashboardTotalClients', ()=>animateDashboardMetric('totalClients', getVisibleClients().length, { immediate: true }));
+  queueLoginPostBoot();
 
   const hasVisibleSection = [
     'dashboardSection',
@@ -6910,11 +7362,7 @@ function addClient(name){
   AppState.clients.push(newClient);
   queuePersistAppState();
   $('clientName').value='';
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderAudience();
-  renderEquipe();
+  refreshPrimaryViews();
   goToCreation(newClient.id);
 }
 
@@ -7023,14 +7471,7 @@ function deleteClient(clientId){
     return { ...user, clientIds: user.clientIds.filter(id => Number(id) !== Number(client.id)) };
   });
   queuePersistAppState();
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeRecycle: true });
 }
 
 function deleteAllClients(){
@@ -7062,15 +7503,7 @@ function deleteAllClients(){
   );
 
   queuePersistAppState();
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderSalle();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeSalle: true, includeRecycle: true });
 }
 
 function goToCreation(clientId){
@@ -7753,18 +8186,14 @@ function deleteDossier(clientId, index){
     dossier: JSON.parse(JSON.stringify(dossier || {}))
   });
   client.dossiers.splice(index, 1);
+  handleDossierDataChange({ audience: dossierHasAudienceImpact(dossier) });
   persistDossierPatchNow({
     action: 'delete',
     clientId: Number(client.id),
     dossierIndex: Number(index)
   }, { source: 'dossier-delete' }).catch(()=>{});
   closeDossierModal();
-  renderClients();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeRecycle: true });
 }
 
 function resetCreationForm(clientId = ''){
@@ -8022,10 +8451,12 @@ function toggleDiligencePrintSelection(clientId, dossierIndex, procedure, checke
     const sizeBefore = diligencePrintSelection.size;
     diligencePrintSelection.add(key);
     if(diligencePrintSelection.size !== sizeBefore){
+      diligencePrintSelectionVersion += 1;
       queueDiligenceCheckedCountRender();
     }
   }else{
     if(diligencePrintSelection.delete(key)){
+      diligencePrintSelectionVersion += 1;
       queueDiligenceCheckedCountRender();
     }
   }
@@ -8041,6 +8472,7 @@ function syncDiligencePrintSelection(allRows){
   const changed = next.size !== diligencePrintSelection.size;
   diligencePrintSelection = next;
   if(changed){
+    diligencePrintSelectionVersion += 1;
     queueDiligenceCheckedCountRender();
   }else{
     updateDiligenceCheckedCount();
@@ -8053,14 +8485,18 @@ function setAllVisibleDiligenceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
+  let changed = false;
   rows.forEach(row=>{
     const key = makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure);
     if(checked){
+      const sizeBefore = diligencePrintSelection.size;
       diligencePrintSelection.add(key);
+      if(diligencePrintSelection.size !== sizeBefore) changed = true;
     }else{
-      diligencePrintSelection.delete(key);
+      if(diligencePrintSelection.delete(key)) changed = true;
     }
   });
+  if(changed) diligencePrintSelectionVersion += 1;
   queueDiligenceCheckedCountRender();
   renderDiligence();
 }
@@ -8449,7 +8885,17 @@ function exportDiligenceXLS(){
   syncDiligenceDelegationFilter(allRows);
   syncDiligenceOrdonnanceFilter(allRows);
   syncDiligenceTribunalFilter(allRows);
-  const rows = allRows.filter(row=>isDiligenceSelectedForPrint(row));
+  const rows = (
+    allRows === diligenceSelectedExportRowsCacheInput
+    && diligenceSelectedExportRowsCacheVersion === diligencePrintSelectionVersion
+  )
+    ? diligenceSelectedExportRowsCacheOutput
+    : allRows.filter(row=>isDiligenceSelectedForPrint(row));
+  if(rows !== diligenceSelectedExportRowsCacheOutput){
+    diligenceSelectedExportRowsCacheInput = allRows;
+    diligenceSelectedExportRowsCacheVersion = diligencePrintSelectionVersion;
+    diligenceSelectedExportRowsCacheOutput = rows;
+  }
   if(!rows.length){
     alert('Cochez au moins une ligne pour exporter.');
     return;
@@ -8781,6 +9227,7 @@ function addSalleJudge(){
     day
   });
   AppState.salleAssignments = normalizeSalleAssignments(AppState.salleAssignments);
+  invalidateSalleAssignmentsCaches();
   persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   if(jugeInput) jugeInput.value = '';
   renderSalle();
@@ -8789,6 +9236,7 @@ function addSalleJudge(){
 function deleteSalleJudge(id){
   if(!canEditData()) return alert('Accès refusé');
   AppState.salleAssignments = AppState.salleAssignments.filter(row=>Number(row.id) !== Number(id));
+  invalidateSalleAssignmentsCaches();
   persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   renderSalle();
 }
@@ -9121,6 +9569,7 @@ function pruneAudiencePrintSelection(rows = null){
     audiencePrintSelection.delete(key);
     changed = true;
   });
+  if(changed) audiencePrintSelectionVersion += 1;
   return changed;
 }
 
@@ -9136,10 +9585,14 @@ function toggleAudiencePrintSelection(ci, di, procKey, checked){
   if(checked){
     const sizeBefore = audiencePrintSelection.size;
     audiencePrintSelection.add(key);
-    if(audiencePrintSelection.size !== sizeBefore) queueAudienceCheckedCountRender();
+    if(audiencePrintSelection.size !== sizeBefore){
+      audiencePrintSelectionVersion += 1;
+      queueAudienceCheckedCountRender();
+    }
     return;
   }
   if(audiencePrintSelection.delete(key)){
+    audiencePrintSelectionVersion += 1;
     queueAudienceCheckedCountRender();
   }
 }
@@ -9192,12 +9645,17 @@ function getAudienceRowRefClientDisplayKey(row){
 }
 
 function buildAudienceMismatchRefClientSet(rows){
+  if(rows === audienceMismatchRefClientSetCacheInput){
+    return audienceMismatchRefClientSetCacheOutput;
+  }
   const set = new Set();
   (rows || []).forEach(row=>{
     if(!row?.p?._refClientMismatch) return;
     const key = getAudienceRowRefClientDisplayKey(row);
     if(key) set.add(key);
   });
+  audienceMismatchRefClientSetCacheInput = rows;
+  audienceMismatchRefClientSetCacheOutput = set;
   return set;
 }
 
@@ -9271,14 +9729,12 @@ function getFilteredAudienceRows(allRows = null){
   }
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
+  const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
   const filtered = rows.filter(row=>{
-    const tribunalKey = resolveAudienceTribunalFilterKey(row.p.tribunal || '');
-    const rowProcFilterKey = getAudienceProcedureFilterKey(row.procKey);
-    if(filterAudienceProcedure !== 'all' && rowProcFilterKey !== filterAudienceProcedure) return false;
-    if(filterAudienceTribunal !== 'all' && tribunalKey !== filterAudienceTribunal) return false;
+    if(filterAudienceProcedure !== 'all' && row.__procFilterKey !== filterAudienceProcedure) return false;
+    if(filterAudienceTribunal !== 'all' && row.__tribunalFilterKey !== filterAudienceTribunal) return false;
     if(filterAudienceDate){
-      const targetDate = normalizeIsoDateToDDMMYYYY(filterAudienceDate);
-      const rowDate = getAudienceRowDateValue(row);
+      const rowDate = row.__audienceDateDisplay || (row.__audienceDateDisplay = getAudienceRowDateValue(row));
       if(targetDate && rowDate !== targetDate) return false;
     }
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
@@ -9310,15 +9766,21 @@ function setAllVisibleAudienceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
+  let changed = false;
   if(checked){
     rows.forEach(row=>{
+      const sizeBefore = audiencePrintSelection.size;
       audiencePrintSelection.add(makeAudiencePrintKey(row.ci, row.di, row.procKey));
+      if(audiencePrintSelection.size !== sizeBefore) changed = true;
     });
   }else{
     rows.forEach(row=>{
-      audiencePrintSelection.delete(makeAudiencePrintKey(row.ci, row.di, row.procKey));
+      if(audiencePrintSelection.delete(makeAudiencePrintKey(row.ci, row.di, row.procKey))){
+        changed = true;
+      }
     });
   }
+  if(changed) audiencePrintSelectionVersion += 1;
   queueAudienceCheckedCountRender();
   renderAudience();
 }
@@ -9344,9 +9806,20 @@ function getAudienceDateDepotDisplayValue(row){
 }
 
 function getSelectedAudienceRowsForExport(){
-  return getAudienceRows({ ignoreSearch: true, ignoreColor: true })
+  const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  if(
+    rows === audienceSelectedExportRowsCacheInput
+    && audienceSelectedExportRowsCacheVersion === audiencePrintSelectionVersion
+  ){
+    return audienceSelectedExportRowsCacheOutput;
+  }
+  const out = rows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .sort(compareAudienceRowsByReferenceProximity);
+  audienceSelectedExportRowsCacheInput = rows;
+  audienceSelectedExportRowsCacheVersion = audiencePrintSelectionVersion;
+  audienceSelectedExportRowsCacheOutput = out;
+  return out;
 }
 
 function getAudienceRowReferenceValue(row){
@@ -9580,8 +10053,14 @@ function isAudienceRowInvalid(row, duplicateKeySet = null){
 
 function getAudienceErrorRows(){
   const rows = getAudienceRows();
+  if(rows === audienceErrorRowsCacheInput){
+    return audienceErrorRowsCacheOutput;
+  }
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
-  return rows.filter(row => isAudienceRowInvalid(row, duplicateKeySet));
+  const out = rows.filter(row => isAudienceRowInvalid(row, duplicateKeySet));
+  audienceErrorRowsCacheInput = rows;
+  audienceErrorRowsCacheOutput = out;
+  return out;
 }
 
 function getAudienceErrorDossierCount(){
@@ -9695,7 +10174,9 @@ function getAudienceRowsRawCached(){
           draft,
           ci,
           di,
-          __dupKey: duplicateKey
+          __dupKey: duplicateKey,
+          __procFilterKey: getAudienceProcedureFilterKey(procKey),
+          __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || '')
         };
         rows.push(row);
       });
@@ -10132,9 +10613,12 @@ function saveAllAudience(options = {}){
   }
   queuePersistAppState();
   if(rerender){
-    renderDashboard();
-    renderAudience();
-    renderSuivi();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
+    queueAudienceLinkedRenders();
   }
 }
 

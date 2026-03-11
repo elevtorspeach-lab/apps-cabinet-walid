@@ -11,16 +11,18 @@ const PORT = 3500;
 const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${PORT}`;
 
-function readCountArg(flag, fallback) {
+function readCountArg(flag, fallback, options = {}) {
   const arg = process.argv.find((value) => value.startsWith(`${flag}=`));
   const rawValue = arg ? arg.slice(flag.length + 1) : process.env[flag.replace(/^--/, '').toUpperCase()];
   const parsed = Number(rawValue);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  if (!Number.isFinite(parsed)) return fallback;
+  if (options.allowZero === true && parsed === 0) return 0;
+  return parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 const ADMIN_COUNT = readCountArg('--admins', 10);
 const GESTIONNAIRE_COUNT = readCountArg('--gestionnaires', 10);
-const CLIENT_COUNT = readCountArg('--clients', 10);
+const CLIENT_COUNT = readCountArg('--clients', 10, { allowZero: true });
 const DOSSIER_COUNT = readCountArg('--dossiers', 12);
 const AUDIENCE_COUNT = readCountArg('--audiences', 6);
 const FIXTURE_CLIENT_COUNT = readCountArg('--fixture-clients', 3);
@@ -71,7 +73,7 @@ function buildUsers() {
 
 async function copyProjectSubset() {
   await fs.mkdir(TEMP_ROOT, { recursive: true });
-  for (const entry of ['app.js', 'index.html', 'style.css', 'vendor', 'workers', 'server']) {
+  for (const entry of ['app.js', 'index.html', 'style.css', 'state-persistence.js', 'render-dashboard.js', 'render-audience-suivi.js', 'render-diligence.js', 'vendor', 'workers', 'server']) {
     await fs.cp(path.join(SOURCE_ROOT, entry), path.join(TEMP_ROOT, entry), { recursive: true });
   }
 }

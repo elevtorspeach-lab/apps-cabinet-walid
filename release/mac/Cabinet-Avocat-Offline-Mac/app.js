@@ -2,9 +2,47 @@
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [] };
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
-let USERS = [
-  { id: 1, username: DEFAULT_MANAGER_USERNAME, password: DEFAULT_MANAGER_PASSWORD, role: 'manager', clientIds: [] }
-];
+const DEFAULT_SEEDED_PASSWORD = '1234';
+
+function buildSeedUsers(){
+  const users = [
+    { id: 1, username: DEFAULT_MANAGER_USERNAME, password: DEFAULT_MANAGER_PASSWORD, role: 'manager', clientIds: [] }
+  ];
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 100 + i,
+      username: `admin${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'admin',
+      clientIds: []
+    });
+  }
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 200 + i,
+      username: `gestionnaire${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'manager',
+      clientIds: []
+    });
+  }
+
+  for(let i = 1; i <= 10; i += 1){
+    users.push({
+      id: 300 + i,
+      username: `client${String(i).padStart(2, '0')}`,
+      password: DEFAULT_SEEDED_PASSWORD,
+      role: 'client',
+      clientIds: []
+    });
+  }
+
+  return users;
+}
+
+let USERS = buildSeedUsers();
 let uploadedFiles = [];
 let audienceDraft = {};
 let selectedAudienceColor = 'all';
@@ -13,23 +51,29 @@ let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
 let filterAudienceErrorsOnly = false;
-let paginationState = { audience: 1, suivi: 1, diligence: 1, recycle: 1 };
-let paginationFilterState = { audience: '', suivi: '', diligence: '', recycle: '' };
+let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1 };
+let paginationFilterState = { clients: '', audience: '', suivi: '', diligence: '', recycle: '' };
 let audienceTribunalAliasMap = new Map();
 let audiencePrintSelection = new Set();
+let audiencePrintSelectionVersion = 0;
 let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
 let suiviTribunalAliasMap = new Map();
+let suiviPrintSelection = new Set();
 let filterDiligenceProcedure = 'SFDC';
 let filterDiligenceSort = 'all';
 let filterDiligenceDelegation = 'all';
 let filterDiligenceOrdonnance = 'all';
 let filterDiligenceTribunal = 'all';
 let diligencePrintSelection = new Set();
+let diligencePrintSelectionVersion = 0;
+let audienceCheckedCountRenderQueued = false;
+let diligenceCheckedCountRenderQueued = false;
 let filterSalle = 'all';
 let filterSalleTribunal = 'all';
 let filterSalleAudienceDate = '';
 let selectedSalleDay = 'lundi';
+let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
 let customProcedures = [];
@@ -40,13 +84,19 @@ let dashboardCalendarCursor = new Date(new Date().getFullYear(), new Date().getM
 let procedureMontantGroups = [];
 const STORAGE_KEY = 'cabinet-avocat-state-v1';
 const INDEXED_DB_NAME = 'cabinet-avocat-db-v1';
-const INDEXED_DB_VERSION = 1;
+const INDEXED_DB_VERSION = 2;
 const INDEXED_DB_STORE = 'state_store';
+const INDEXED_DB_BACKUP_STORE = 'backup_store';
 const INDEXED_DB_STATE_KEY = 'app_state';
 const API_BASE_STORAGE_KEY = 'cabinet-avocat-api-base-v1';
+const APP_INSTANCE_ID = `cabinet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
 let API_BASE = 'http://127.0.0.1:3000/api';
 let API_BASE_RESOLVED = false;
 let persistTimer = null;
+let queuedPersistPayload = null;
+let dossierPatchPersistTimer = null;
+let queuedDossierPatchEntries = new Map();
 let desktopStatePersistTimer = null;
 let audienceAutoSaveTimer = null;
 let audienceColorBatchTimer = null;
@@ -61,11 +111,25 @@ let remoteSyncStreamRetryTimer = null;
 let remoteSyncHealthTick = 0;
 let remoteSyncStreamConnected = false;
 let lastPersistedStateSignature = '';
+let lastLocalSnapshotSignature = '';
+let lastRemoteStateLoadVersion = 0;
+let lastRemoteStateLoadUpdatedAt = '';
+let remoteStateVersion = 0;
+let remoteStateUpdatedAt = '';
+let remoteRefreshPending = false;
+let remoteRefreshInFlight = false;
+let deferredLocalSnapshotTimer = null;
+let deferredLocalSnapshotPayload = null;
+let deferredLocalSnapshotSource = 'persist';
+let deferredLocalSnapshotSignature = '';
 let audienceLinkedRenderTimer = null;
+let dossierLinkedRenderTimer = null;
 let remoteRefreshTimer = null;
 let lastPingMs = null;
 let lastLiveDelayMs = null;
 let syncMetricsRenderQueued = false;
+let lastAutoBackupAt = 0;
+let lastAutoBackupSignature = '';
 let lastAudienceRenderedRows = [];
 let audienceVirtualRows = [];
 let audienceVirtualDuplicateKeySet = new Set();
@@ -88,6 +152,13 @@ let audienceFilterOptionsRowsRef = null;
 const audienceFilterOptionsMetaCache = new WeakMap();
 let audienceDuplicateKeySetCacheInput = null;
 let audienceDuplicateKeySetCacheOutput = new Set();
+let audienceMismatchRefClientSetCacheInput = null;
+let audienceMismatchRefClientSetCacheOutput = new Set();
+let audienceErrorRowsCacheInput = null;
+let audienceErrorRowsCacheOutput = [];
+let audienceSelectedExportRowsCacheInput = null;
+let audienceSelectedExportRowsCacheVersion = -1;
+let audienceSelectedExportRowsCacheOutput = [];
 let sidebarSalleRenderTimer = null;
 let indexedDbOpenPromise = null;
 let suiviVirtualRows = [];
@@ -97,6 +168,9 @@ let suiviBaseRowsCache = null;
 let suiviBaseRowsCacheVersion = 0;
 let suiviBaseRowsCacheViewerKey = '';
 let suiviFilterOptionsRowsMetaRef = null;
+let suiviFilteredRowsCacheSource = null;
+let suiviFilteredRowsCacheKey = '';
+let suiviFilteredRowsCacheOutput = [];
 let diligenceVirtualRows = [];
 let diligenceVirtualLastRange = { start: -1, end: -1 };
 let diligenceVirtualRafId = null;
@@ -112,12 +186,77 @@ let diligenceFilterTribunalRowsRef = null;
 let diligenceFilterSortRowsRef = null;
 let diligenceFilterDelegationRowsRef = null;
 let diligenceFilterOrdonnanceRowsRef = null;
+let diligenceSelectedExportRowsCacheInput = null;
+let diligenceSelectedExportRowsCacheVersion = -1;
+let diligenceSelectedExportRowsCacheOutput = [];
 let audienceColorButtons = [];
+let backgroundDataWarmupTimer = null;
+let backgroundDataWarmupVersion = -1;
+let audienceSearchWarmupTimer = null;
+let audienceSearchWarmupToken = 0;
+let suiviSearchWarmupTimer = null;
+let suiviSearchWarmupToken = 0;
+let diligenceSearchWarmupTimer = null;
+let diligenceSearchWarmupToken = 0;
+let visibleClientsCache = null;
+let visibleClientsCacheVersion = -1;
+let visibleClientsCacheUserKey = '';
+let editableClientsCache = null;
+let editableClientsCacheVersion = -1;
+let editableClientsCacheUserKey = '';
+let clientListSummaryCache = null;
+let clientListSummaryCacheVersion = -1;
+let clientListSummaryCacheUserKey = '';
+let dashboardSnapshotCache = null;
+let dashboardSnapshotCacheVersion = -1;
+let dashboardSnapshotCacheUserKey = '';
+let dashboardAudienceMetricsCache = null;
+let dashboardAudienceMetricsCacheVersion = -1;
+let dashboardAudienceMetricsCacheUserKey = '';
+let dashboardCalendarEventsCache = null;
+let dashboardCalendarEventsCacheVersion = -1;
+let dashboardCalendarEventsCacheUserKey = '';
+let dashboardCalendarRenderTimer = null;
+let dashboardHeavyRenderTimer = null;
+let audienceErrorCountCacheVersion = -1;
+let audienceErrorCountCacheValue = 0;
+let knownJudgesCache = null;
+let knownJudgesCacheVersion = -1;
+let salleAssignmentsVersion = 0;
+let salleAudienceMapCache = null;
+let salleAudienceMapCacheVersion = -1;
+let salleAudienceMapAssignmentsVersion = -1;
+let salleAudienceMapCacheUserKey = '';
+let loginPostBootTimer = null;
 const dashboardMetricState = new Map();
+const DEFERRED_RENDER_SECTION_IDS = {
+  dashboard: 'dashboardSection',
+  clients: 'clientSection',
+  creation: 'creationSection',
+  suivi: 'suiviSection',
+  audience: 'audienceSection',
+  diligence: 'diligenceSection',
+  salle: 'salleSection',
+  equipe: 'equipeSection',
+  recycle: 'recycleSection'
+};
+const deferredRenderDirtyState = {
+  dashboard: true,
+  clients: true,
+  creation: true,
+  suivi: true,
+  audience: true,
+  diligence: true,
+  salle: true,
+  equipe: true,
+  recycle: true,
+  clientDropdown: true
+};
 const DOSSIER_HISTORY_MAX_ENTRIES = 400;
 const DOSSIER_HISTORY_DEBOUNCE_MS = 900;
 const RECYCLE_BIN_MAX_ENTRIES = 600;
 const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
+const DOSSIER_PATCH_DEBOUNCE_MS = 220;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
   boiteNo: 'Boîte N°',
@@ -153,7 +292,8 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.montantRecupere': 'Montant récupéré',
   'procedureDetails.instruction': 'Instruction',
   'procedureDetails.certificatNonAppelStatus': 'Statut certificat non appel',
-  'procedureDetails.notificationStatus': 'Statut notification'
+  'procedureDetails.notificationStatus': 'Statut notification',
+  'procedureDetails.notificationSort': 'Sort notification'
 };
 const DOSSIER_HISTORY_SOURCE_LABELS = {
   form: 'Modifier dossier',
@@ -168,27 +308,47 @@ const SIDEBAR_COLLAPSED_KEY = 'cabinet-avocat-sidebar-collapsed';
 const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 3;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
+const REMOTE_SYNC_BLOCKED_RETRY_MS = 800;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
+const AUTO_BACKUP_RETENTION_COUNT = 12;
+const AUTO_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
 const CLIENT_IMPORT_ALLOWED_PROCEDURES = new Set(['SFDC', 'S/bien', 'Injonction']);
 const AUDIENCE_ORPHAN_CLIENT_NAME = 'Audience import (hors dossier global)';
 const PAGINATION_PAGE_SIZES = {
+  clients: 50,
   audience: 30,
   suivi: 30,
   diligence: 30,
   recycle: 30
 };
-const IMPORT_CHUNK_SIZE = 80;
-const IMPORT_EXCEL_CHUNK_SIZE = 40;
+const IMPORT_CHUNK_SIZE = 180;
+const IMPORT_EXCEL_CHUNK_SIZE = 120;
 const IMPORT_STATUS_THROTTLE_MS = 120;
 const AUDIENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_VIRTUAL_ROW_HEIGHT = 56;
 const AUDIENCE_VIRTUAL_OVERSCAN = 10;
-const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 15000;
+const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 60000;
 const SUIVI_VIRTUAL_MIN_ROWS = 40;
-const SUIVI_DEFAULT_SORT_MAX_ROWS = 20000;
+const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
 const DILIGENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_COLOR_BATCH_MS = 80;
+const SEARCH_CACHE_WARMUP_CHUNK_SIZE = 240;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+const LOCAL_ONLY_MODE = (() => {
+  if(typeof window === 'undefined') return false;
+  const query = new URLSearchParams(window.location.search);
+  const rawFlag = String(
+    query.get('localOnly')
+    || query.get('offline')
+    || ''
+  ).trim().toLowerCase();
+  if(rawFlag){
+    return !['0', 'false', 'no', 'off'].includes(rawFlag);
+  }
+  if(typeof window.CABINET_LOCAL_ONLY === 'boolean') return window.CABINET_LOCAL_ONLY;
+  if(IS_FILE_PROTOCOL) return true;
+  return !!window.cabinetDesktopState;
+})();
 const IS_REMOTE_WEB_HOST = (() => {
   if(typeof window === 'undefined' || !window.location) return false;
   const hostname = String(window.location.hostname || '').toLowerCase();
@@ -204,8 +364,24 @@ const XLSX_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/xlsx.full.min.js' : '/v
 const EXCELJS_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/exceljs.min.js' : '/vendor/libs/exceljs.min.js';
 const XLSX_CDN_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 const EXCELJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+const CLIENT_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/client-filter.worker.js' : '/workers/client-filter.worker.js';
+const AUDIENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/audience-filter.worker.js' : '/workers/audience-filter.worker.js';
+const SUIVI_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/suivi-filter.worker.js' : '/workers/suivi-filter.worker.js';
+const DILIGENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/diligence-filter.worker.js' : '/workers/diligence-filter.worker.js';
 let xlsxLoadPromise = null;
 let excelJsLoadPromise = null;
+let clientFilterWorker = null;
+let clientFilterWorkerFailed = false;
+let clientFilterRequestSeq = 0;
+let audienceFilterWorker = null;
+let audienceFilterWorkerFailed = false;
+let audienceFilterRequestSeq = 0;
+let suiviFilterWorker = null;
+let suiviFilterWorkerFailed = false;
+let suiviFilterRequestSeq = 0;
+let diligenceFilterWorker = null;
+let diligenceFilterWorkerFailed = false;
+let diligenceFilterRequestSeq = 0;
 const SALLE_WEEKDAY_OPTIONS = [
   { key: 'lundi', label: 'Lundi' },
   { key: 'mardi', label: 'Mardi' },
@@ -240,6 +416,24 @@ function normalizeHistoryValue(value){
   return String(value).trim();
 }
 
+function isImplicitProcedureDefaultHistoryEntry(entry){
+  if(!entry || typeof entry !== 'object') return false;
+  const source = String(entry.source || '').trim();
+  if(source !== 'form') return false;
+  const before = normalizeHistoryValue(entry.before);
+  const after = normalizeHistoryValue(entry.after);
+  if(before) return false;
+  const field = String(entry.field || '').trim();
+  const procedure = String(entry.procedure || '').trim();
+  if(procedure === 'Injonction' && field === 'procedureDetails.notificationStatus' && after === 'att plie avec tr'){
+    return true;
+  }
+  if(procedure === 'Injonction' && field === 'procedureDetails.certificatNonAppelStatus' && after === 'att certificat non appel'){
+    return true;
+  }
+  return false;
+}
+
 function normalizeDossierHistoryEntries(rawHistory){
   if(!Array.isArray(rawHistory)) return [];
   return rawHistory
@@ -254,7 +448,9 @@ function normalizeDossierHistoryEntries(rawHistory){
       const before = normalizeHistoryValue(entry.before);
       const after = normalizeHistoryValue(entry.after);
       if(before === after) return null;
-      return { at, by, byRole, source, field, procedure, before, after };
+      const normalizedEntry = { at, by, byRole, source, field, procedure, before, after };
+      if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return null;
+      return normalizedEntry;
     })
     .filter(Boolean)
     .slice(-DOSSIER_HISTORY_MAX_ENTRIES);
@@ -278,11 +474,19 @@ function getHistorySourceLabel(source){
 }
 
 function getRoleLabel(role){
-  const key = String(role || '').trim().toLowerCase();
+  const key = normalizeUserRole(role);
   if(key === 'manager') return 'Gestionnaire';
   if(key === 'admin') return 'Admin';
-  if(key === 'viewer') return 'Consultation';
+  if(key === 'client') return 'Client';
   return key || '-';
+}
+
+function normalizeUserRole(role){
+  const key = String(role || '').trim().toLowerCase();
+  if(key === 'manager' || key === 'gestionnaire') return 'manager';
+  if(key === 'admin') return 'admin';
+  if(key === 'viewer' || key === 'client' || key === 'consultation') return 'client';
+  return 'client';
 }
 
 function formatHistoryDateTime(iso){
@@ -303,8 +507,7 @@ function pushDossierHistoryEntry(dossier, entry){
   const before = normalizeHistoryValue(entry.before);
   const after = normalizeHistoryValue(entry.after);
   if(before === after) return false;
-  if(!Array.isArray(dossier.history)) dossier.history = [];
-  dossier.history.push({
+  const normalizedEntry = {
     at: String(entry.at || '').trim() || new Date().toISOString(),
     by: String(entry.by || '').trim() || String(currentUser?.username || '-'),
     byRole: String(entry.byRole || '').trim() || String(currentUser?.role || ''),
@@ -313,7 +516,10 @@ function pushDossierHistoryEntry(dossier, entry){
     procedure: String(entry.procedure || '').trim(),
     before,
     after
-  });
+  };
+  if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return false;
+  if(!Array.isArray(dossier.history)) dossier.history = [];
+  dossier.history.push(normalizedEntry);
   if(dossier.history.length > DOSSIER_HISTORY_MAX_ENTRIES){
     dossier.history = dossier.history.slice(-DOSSIER_HISTORY_MAX_ENTRIES);
   }
@@ -359,6 +565,7 @@ function queueDossierHistoryEntry(dossier, entry, options = {}){
     before,
     after
   };
+  if(isImplicitProcedureDefaultHistoryEntry(normalizedEntry)) return;
   if(options.immediate){
     pushDossierHistoryEntry(dossier, normalizedEntry);
     return;
@@ -447,13 +654,15 @@ function collectDossierDiffEntries(prevDossier, nextDossier){
       const before = beforeProc[field];
       const after = afterProc[field];
       if(normalizeHistoryValue(before) === normalizeHistoryValue(after)) return;
-      entries.push({
+      const entry = {
         source: 'form',
         field: `procedureDetails.${field}`,
         procedure: procKey,
         before,
         after
-      });
+      };
+      if(isImplicitProcedureDefaultHistoryEntry(entry)) return;
+      entries.push(entry);
     });
   });
   return entries;
@@ -478,7 +687,7 @@ function normalizeApiBaseCandidate(value){
 
 function getAudienceViewerCacheKey(){
   const user = currentUser || {};
-  const role = String(user.role || '').trim().toLowerCase();
+  const role = normalizeUserRole(user.role);
   const id = Number(user.id) || 0;
   const clientIds = Array.isArray(user.clientIds)
     ? [...user.clientIds].map(v=>Number(v)).filter(v=>Number.isFinite(v)).sort((a, b)=>a - b).join(',')
@@ -486,8 +695,49 @@ function getAudienceViewerCacheKey(){
   return `${id}::${role}::${clientIds}`;
 }
 
-function markAudienceRowsCacheDirty(){
-  audienceRowsRawDataVersion += 1;
+function invalidateDerivedCaches(options = {}){
+  const audience = options.audience !== false;
+  if(audience){
+    audienceRowsRawDataVersion += 1;
+  }
+  backgroundDataWarmupVersion = -1;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
+  dashboardSnapshotCache = null;
+  dashboardSnapshotCacheVersion = -1;
+  dashboardSnapshotCacheUserKey = '';
+  suiviBaseRowsCache = null;
+  suiviFilterOptionsRowsMetaRef = null;
+  suiviFilteredRowsCacheSource = null;
+  suiviFilteredRowsCacheKey = '';
+  suiviFilteredRowsCacheOutput = [];
+  diligenceRowsCache = null;
+  diligenceFilteredRowsCacheInput = null;
+  diligenceFilteredRowsCacheKey = '';
+  diligenceFilteredRowsCacheOutput = [];
+  diligenceFilterProcedureRowsRef = null;
+  diligenceFilterTribunalRowsRef = null;
+  diligenceFilterSortRowsRef = null;
+  diligenceFilterDelegationRowsRef = null;
+  diligenceFilterOrdonnanceRowsRef = null;
+  if(!audience) return;
+  dashboardCalendarEventsCache = null;
+  dashboardCalendarEventsCacheVersion = -1;
+  dashboardCalendarEventsCacheUserKey = '';
+  audienceErrorCountCacheVersion = -1;
+  audienceErrorCountCacheValue = 0;
+  knownJudgesCache = null;
+  knownJudgesCacheVersion = -1;
+  salleAudienceMapCache = null;
+  salleAudienceMapCacheVersion = -1;
+  salleAudienceMapCacheUserKey = '';
   audienceRowsRawCache = null;
   audienceRowsDedupeCache = null;
   audienceRowsViewCacheSource = null;
@@ -499,17 +749,65 @@ function markAudienceRowsCacheDirty(){
   audienceFilterOptionsRowsRef = null;
   audienceDuplicateKeySetCacheInput = null;
   audienceDuplicateKeySetCacheOutput = new Set();
-  suiviBaseRowsCache = null;
-  suiviFilterOptionsRowsMetaRef = null;
-  diligenceRowsCache = null;
-  diligenceFilteredRowsCacheInput = null;
-  diligenceFilteredRowsCacheKey = '';
-  diligenceFilteredRowsCacheOutput = [];
-  diligenceFilterProcedureRowsRef = null;
-  diligenceFilterTribunalRowsRef = null;
-  diligenceFilterSortRowsRef = null;
-  diligenceFilterDelegationRowsRef = null;
-  diligenceFilterOrdonnanceRowsRef = null;
+  audienceMismatchRefClientSetCacheInput = null;
+  audienceMismatchRefClientSetCacheOutput = new Set();
+}
+
+function markAudienceRowsCacheDirty(){
+  invalidateDerivedCaches({ audience: true });
+  audienceErrorRowsCacheInput = null;
+  audienceErrorRowsCacheOutput = [];
+  audienceSelectedExportRowsCacheInput = null;
+  audienceSelectedExportRowsCacheVersion = -1;
+  audienceSelectedExportRowsCacheOutput = [];
+  diligenceSelectedExportRowsCacheInput = null;
+  diligenceSelectedExportRowsCacheVersion = -1;
+  diligenceSelectedExportRowsCacheOutput = [];
+}
+
+function markAudienceColorCachesDirty(){
+  backgroundDataWarmupVersion = -1;
+  dashboardAudienceMetricsCache = null;
+  dashboardAudienceMetricsCacheVersion = -1;
+  dashboardAudienceMetricsCacheUserKey = '';
+  audienceRowsViewCacheSource = null;
+  audienceRowsViewCacheKey = '';
+  audienceRowsViewCacheOutput = [];
+  audienceFilteredRowsCacheInput = null;
+  audienceFilteredRowsCacheKey = '';
+  audienceFilteredRowsCacheOutput = [];
+}
+
+function markNonAudienceDossierCachesDirty(){
+  invalidateDerivedCaches({ audience: false });
+  diligenceSelectedExportRowsCacheInput = null;
+  diligenceSelectedExportRowsCacheVersion = -1;
+  diligenceSelectedExportRowsCacheOutput = [];
+}
+
+function invalidateSalleAssignmentsCaches(){
+  salleAssignmentsVersion += 1;
+  salleAudienceMapCache = null;
+  salleAudienceMapCacheVersion = -1;
+  salleAudienceMapAssignmentsVersion = -1;
+  salleAudienceMapCacheUserKey = '';
+}
+
+function dossierHasAudienceImpact(dossier){
+  return normalizeProcedures(dossier).some(procName=>isAudienceProcedure(procName));
+}
+
+function handleDossierDataChange(options = {}){
+  const hasAudienceImpact = options.audience === true;
+  const rerenderLinked = options.rerenderLinked === true;
+  if(hasAudienceImpact){
+    markAudienceRowsCacheDirty();
+  }else{
+    markNonAudienceDossierCachesDirty();
+  }
+  if(rerenderLinked){
+    queueDossierLinkedRenders();
+  }
 }
 
 function pushApiCandidate(candidates, seen, value){
@@ -546,14 +844,14 @@ function buildApiBaseCandidates(){
   const metaApiBase = document.querySelector('meta[name="api-base"]')?.getAttribute('content');
   appendCandidateVariants(out, seen, metaApiBase);
 
+  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
+    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
+    appendCandidateVariants(out, seen, window.location.origin);
+  }
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   if(isLocalHost){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
-  }
-  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
-    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
-    appendCandidateVariants(out, seen, window.location.origin);
   }
   if(!IS_REMOTE_WEB_HOST){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
@@ -598,18 +896,171 @@ function restoreSidebarState(){
   setSidebarCollapsed(raw === '1');
 }
 
+function markDeferredRenderDirty(...keys){
+  keys.forEach(key=>{
+    if(Object.prototype.hasOwnProperty.call(deferredRenderDirtyState, key)){
+      deferredRenderDirtyState[key] = true;
+    }
+  });
+}
+
+function clearDeferredRenderDirty(key){
+  if(Object.prototype.hasOwnProperty.call(deferredRenderDirtyState, key)){
+    deferredRenderDirtyState[key] = false;
+  }
+}
+
+function isDeferredRenderSectionVisible(key){
+  const id = DEFERRED_RENDER_SECTION_IDS[key];
+  if(!id) return true;
+  const el = $(id);
+  return !!el && el.style.display !== 'none';
+}
+
+function shouldRenderDeferredSection(key, options = {}){
+  if(options.force === true || isDeferredRenderSectionVisible(key)){
+    clearDeferredRenderDirty(key);
+    return true;
+  }
+  markDeferredRenderDirty(key);
+  return false;
+}
+
+function shouldRenderClientDropdown(options = {}){
+  if(options.force === true || isDeferredRenderSectionVisible('creation')){
+    clearDeferredRenderDirty('clientDropdown');
+    return true;
+  }
+  markDeferredRenderDirty('clientDropdown');
+  return false;
+}
+
+function getVisibleDeferredSectionKeys(){
+  return Object.keys(DEFERRED_RENDER_SECTION_IDS).filter(key=>isDeferredRenderSectionVisible(key));
+}
+
+function refreshVisibleSectionsAfterRemoteSync(){
+  const visibleKeys = new Set(getVisibleDeferredSectionKeys());
+  if(visibleKeys.has('dashboard')) renderDashboard();
+  if(visibleKeys.has('clients')) renderClients();
+  if(visibleKeys.has('suivi')) renderSuivi();
+  if(visibleKeys.has('audience')) renderAudience();
+  if(visibleKeys.has('diligence')) renderDiligence();
+  if(visibleKeys.has('salle')) renderSalle();
+  if(visibleKeys.has('equipe')) renderEquipe();
+  if(visibleKeys.has('recycle')) renderRecycleBin();
+  if(visibleKeys.has('creation')) updateClientDropdown();
+}
+
+function applyRemoteDossierPatchLocally(patch){
+  if(!patch || typeof patch !== 'object') return false;
+  const action = String(patch.action || '').trim().toLowerCase();
+  const clientId = Number(patch.clientId);
+  const dossierIndex = Number(patch.dossierIndex);
+  const targetClientId = Number(patch.targetClientId);
+  const dossier = patch.dossier && typeof patch.dossier === 'object'
+    ? JSON.parse(JSON.stringify(patch.dossier))
+    : null;
+  const findClientIndex = (id)=>AppState.clients.findIndex(client=>Number(client?.id) === Number(id));
+
+  if(action === 'create'){
+    const clientIdx = findClientIndex(clientId);
+    if(clientIdx === -1 || !dossier) return false;
+    if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
+    AppState.clients[clientIdx].dossiers.push(dossier);
+    return true;
+  }
+
+  if(action === 'delete'){
+    const clientIdx = findClientIndex(clientId);
+    if(clientIdx === -1 || !Number.isFinite(dossierIndex)) return false;
+    if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
+    if(dossierIndex < 0 || dossierIndex >= AppState.clients[clientIdx].dossiers.length) return false;
+    AppState.clients[clientIdx].dossiers.splice(dossierIndex, 1);
+    return true;
+  }
+
+  if(action === 'update'){
+    const sourceClientIdx = findClientIndex(clientId);
+    if(sourceClientIdx === -1 || !Number.isFinite(dossierIndex) || !dossier) return false;
+    if(!Array.isArray(AppState.clients[sourceClientIdx].dossiers)) AppState.clients[sourceClientIdx].dossiers = [];
+    if(dossierIndex < 0 || dossierIndex >= AppState.clients[sourceClientIdx].dossiers.length) return false;
+    const nextTargetClientId = Number.isFinite(targetClientId) ? targetClientId : clientId;
+    const targetClientIdx = findClientIndex(nextTargetClientId);
+    if(targetClientIdx === -1) return false;
+    if(!Array.isArray(AppState.clients[targetClientIdx].dossiers)) AppState.clients[targetClientIdx].dossiers = [];
+    if(targetClientIdx === sourceClientIdx){
+      AppState.clients[sourceClientIdx].dossiers[dossierIndex] = dossier;
+      return true;
+    }
+    AppState.clients[sourceClientIdx].dossiers.splice(dossierIndex, 1);
+    AppState.clients[targetClientIdx].dossiers.push(dossier);
+    return true;
+  }
+
+  return false;
+}
+
+function applyRemoteSlicePatchLocally(patchKind, patch){
+  if(!patch || typeof patch !== 'object') return false;
+  if(patchKind === 'users'){
+    const nextUsers = Array.isArray(patch.users)
+      ? patch.users.map(normalizeUser).filter(Boolean)
+      : null;
+    if(!nextUsers) return false;
+    USERS = ensureManagerUser(nextUsers);
+    return true;
+  }
+  if(patchKind === 'salle-assignments'){
+    AppState.salleAssignments = normalizeSalleAssignments(patch.salleAssignments);
+    invalidateSalleAssignmentsCaches();
+    return true;
+  }
+  if(patchKind === 'audience-draft'){
+    audienceDraft = patch.audienceDraft && typeof patch.audienceDraft === 'object'
+      ? patch.audienceDraft
+      : {};
+    return true;
+  }
+  return false;
+}
+
+function finalizeRemoteStateUpdateLocally(options = {}){
+  handleDossierDataChange({ audience: options.audience !== false });
+  // Avoid expensive full-state signature recomputation on every live patch.
+  // A later full reload can rebuild the signature if needed.
+  lastPersistedStateSignature = '';
+  lastRemoteStateLoadVersion = remoteStateVersion;
+  lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
+  syncCurrentUserFromUsers();
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
+  refreshVisibleSectionsAfterRemoteSync();
+}
+
 function setSyncStatus(status, message){
   const badge = $('syncStatusBadge');
   const text = $('syncStatusText');
   if(!badge || !text) return;
-  badge.classList.remove('is-ok', 'is-error', 'is-syncing', 'is-pending');
-  const next = ['ok', 'error', 'syncing', 'pending'].includes(status) ? status : 'pending';
+  badge.classList.remove('is-ok', 'is-error', 'is-syncing', 'is-pending', 'is-conflict');
+  const next = ['ok', 'error', 'syncing', 'pending', 'conflict'].includes(status) ? status : 'pending';
   badge.classList.add(`is-${next}`);
   const fallbackText = {
     pending: 'Modification detectee...',
     syncing: 'Synchronisation serveur...',
     ok: 'Connecte au serveur (actif)',
-    error: 'Serveur indisponible (local)'
+    error: 'Serveur indisponible (local)',
+    conflict: 'Conflit detecte, rechargement...'
   };
   text.innerText = String(message || fallbackText[next]);
 }
@@ -667,6 +1118,214 @@ function debounce(fn, wait = 120){
   };
 }
 
+function getClientFilterWorker(){
+  if(clientFilterWorkerFailed) return null;
+  if(clientFilterWorker) return clientFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    clientFilterWorker = new Worker(CLIENT_FILTER_WORKER_URL);
+    return clientFilterWorker;
+  }catch(err){
+    console.warn('Client filter worker indisponible', err);
+    clientFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runClientFilterInWorker(items, query, requestId){
+  const worker = getClientFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'client-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Client filter worker error', err);
+      cleanup();
+      clientFilterWorkerFailed = true;
+      if(clientFilterWorker){
+        try{ clientFilterWorker.terminate(); }catch(_){}
+      }
+      clientFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'client-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getAudienceFilterWorker(){
+  if(audienceFilterWorkerFailed) return null;
+  if(audienceFilterWorker) return audienceFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    audienceFilterWorker = new Worker(AUDIENCE_FILTER_WORKER_URL);
+    return audienceFilterWorker;
+  }catch(err){
+    console.warn('Audience filter worker indisponible', err);
+    audienceFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runAudienceFilterInWorker(items, query, requestId){
+  const worker = getAudienceFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'audience-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Audience filter worker error', err);
+      cleanup();
+      audienceFilterWorkerFailed = true;
+      if(audienceFilterWorker){
+        try{ audienceFilterWorker.terminate(); }catch(_){}
+      }
+      audienceFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'audience-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getSuiviFilterWorker(){
+  if(suiviFilterWorkerFailed) return null;
+  if(suiviFilterWorker) return suiviFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    suiviFilterWorker = new Worker(SUIVI_FILTER_WORKER_URL);
+    return suiviFilterWorker;
+  }catch(err){
+    console.warn('Suivi filter worker indisponible', err);
+    suiviFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runSuiviFilterInWorker(items, query, requestId){
+  const worker = getSuiviFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'suivi-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Suivi filter worker error', err);
+      cleanup();
+      suiviFilterWorkerFailed = true;
+      if(suiviFilterWorker){
+        try{ suiviFilterWorker.terminate(); }catch(_){}
+      }
+      suiviFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'suivi-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
+function getDiligenceFilterWorker(){
+  if(diligenceFilterWorkerFailed) return null;
+  if(diligenceFilterWorker) return diligenceFilterWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    diligenceFilterWorker = new Worker(DILIGENCE_FILTER_WORKER_URL);
+    return diligenceFilterWorker;
+  }catch(err){
+    console.warn('Diligence filter worker indisponible', err);
+    diligenceFilterWorkerFailed = true;
+    return null;
+  }
+}
+
+function runDiligenceFilterInWorker(items, query, requestId){
+  const worker = getDiligenceFilterWorker();
+  if(!worker){
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve)=>{
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'diligence-filter-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(Array.isArray(data.filteredIndexes) ? data.filteredIndexes : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Diligence filter worker error', err);
+      cleanup();
+      diligenceFilterWorkerFailed = true;
+      if(diligenceFilterWorker){
+        try{ diligenceFilterWorker.terminate(); }catch(_){}
+      }
+      diligenceFilterWorker = null;
+      resolve(null);
+    };
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'diligence-filter',
+      requestId,
+      query: String(query || ''),
+      items
+    });
+  });
+}
+
 function captureSyncStatusSnapshot(){
   const text = $('syncStatusText');
   return {
@@ -681,6 +1340,59 @@ function restoreSyncStatusSnapshot(snapshot){
     return;
   }
   setSyncStatus(snapshot.status, snapshot.message || undefined);
+}
+
+function openImportProgressModal(title = 'Import en cours...'){
+  const modal = $('importProgressModal');
+  const titleNode = $('importProgressTitle');
+  const textNode = $('importProgressText');
+  const fill = $('importProgressFill');
+  const percentNode = $('importProgressPercent');
+  if(titleNode) titleNode.innerHTML = `<i class="fa-solid fa-rotate"></i> ${escapeHtml(title)}`;
+  if(textNode) textNode.innerText = 'Préparation...';
+  if(fill) fill.style.width = '0%';
+  const track = document.querySelector('#importProgressModal .import-progress-track');
+  if(track) track.setAttribute('aria-valuenow', '0');
+  if(percentNode) percentNode.innerText = '0%';
+  if(modal) modal.style.display = 'flex';
+}
+
+function updateImportProgress(message, done, total){
+  const textNode = $('importProgressText');
+  const fill = $('importProgressFill');
+  const percentNode = $('importProgressPercent');
+  const safeTotal = Number(total);
+  const safeDone = Number(done);
+  const hasNumbers = Number.isFinite(safeTotal) && safeTotal > 0 && Number.isFinite(safeDone);
+  const percent = hasNumbers ? Math.max(0, Math.min(100, Math.round((safeDone / safeTotal) * 100))) : 0;
+  if(textNode){
+    if(hasNumbers){
+      textNode.innerText = `${String(message || 'Import en cours...')} (${safeDone}/${safeTotal})`;
+    }else{
+      textNode.innerText = String(message || 'Import en cours...');
+    }
+  }
+  if(fill) fill.style.width = `${percent}%`;
+  const track = document.querySelector('#importProgressModal .import-progress-track');
+  if(track) track.setAttribute('aria-valuenow', String(percent));
+  if(percentNode) percentNode.innerText = `${percent}%`;
+}
+
+function closeImportProgressModal(markDone = false){
+  const modal = $('importProgressModal');
+  if(!modal) return;
+  if(markDone){
+    updateImportProgress('Import terminé', 1, 1);
+    modal.dataset.doneUntil = String(Date.now() + 220);
+    setTimeout(()=>{
+      if(modal) modal.style.display = 'none';
+    }, 220);
+    return;
+  }
+  const lockUntil = Number(modal.dataset.doneUntil || '0');
+  if(Number.isFinite(lockUntil) && lockUntil > Date.now()) return;
+  delete modal.dataset.doneUntil;
+  modal.style.display = 'none';
 }
 
 function yieldToMainThread(){
@@ -711,10 +1423,12 @@ function makeProgressReporter(prefix){
     if(done < total && now - lastAt < IMPORT_STATUS_THROTTLE_MS) return;
     lastAt = now;
     setSyncStatus('syncing', `${prefix} ${done}/${total}...`);
+    updateImportProgress(prefix, done, total);
   };
 }
 
 function getRenderForSection(section){
+  if(section === 'clients') return renderClients;
   if(section === 'audience') return renderAudience;
   if(section === 'suivi') return renderSuivi;
   if(section === 'diligence') return renderDiligence;
@@ -780,6 +1494,35 @@ function renderPagination(section, pagination){
     el.innerHTML = '';
     return;
   }
+  const buildCompactPages = ()=>{
+    if(meta.totalPages <= 7){
+      return Array.from({ length: meta.totalPages }, (_, idx)=>idx + 1);
+    }
+    const around = new Set([1, meta.totalPages, meta.page - 1, meta.page, meta.page + 1]);
+    return [...around]
+      .filter(page=>page >= 1 && page <= meta.totalPages)
+      .sort((a, b)=>a - b);
+  };
+  const compactPages = buildCompactPages();
+  const compactPageHtml = compactPages.map((page, idx)=>{
+    const prevPage = compactPages[idx - 1];
+    const needsGap = idx > 0 && page - prevPage > 1;
+    const gapHtml = needsGap ? '<span class="table-pagination-gap">...</span>' : '';
+    const activeClass = page === meta.page ? ' is-active' : '';
+    return `${gapHtml}
+      <button type="button" class="table-pagination-chip${activeClass}" onclick="setPaginationPage('${section}', ${page})">
+        <span>${page}</span>
+      </button>`;
+  }).join('');
+  const fullPageHtml = Array.from({ length: meta.totalPages }, (_, idx)=>{
+    const page = idx + 1;
+    const activeClass = page === meta.page ? ' is-active' : '';
+    return `
+      <button type="button" class="table-pagination-flyout-chip${activeClass}" onclick="setPaginationPage('${section}', ${page})">
+        <span>${page}</span>
+      </button>
+    `;
+  }).join('');
   const prevDisabled = meta.page <= 1 ? 'disabled' : '';
   const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
   el.innerHTML = `
@@ -790,7 +1533,17 @@ function renderPagination(section, pagination){
       <button type="button" class="btn-primary" ${prevDisabled} onclick="changePaginationPage('${section}', -1)">
         <i class="fa-solid fa-chevron-left"></i> Préc
       </button>
-      <span class="table-pagination-page">Page ${meta.page}/${meta.totalPages}</span>
+      <div class="table-pagination-chooser" tabindex="0" aria-label="Pagination ${section}">
+        <div class="table-pagination-page">Page ${meta.page}/${meta.totalPages}</div>
+        <div class="table-pagination-rail">
+          ${compactPageHtml}
+        </div>
+        <div class="table-pagination-flyout">
+          <div class="table-pagination-flyout-grid">
+            ${fullPageHtml}
+          </div>
+        </div>
+      </div>
       <button type="button" class="btn-primary" ${nextDisabled} onclick="changePaginationPage('${section}', 1)">
         Suiv <i class="fa-solid fa-chevron-right"></i>
       </button>
@@ -810,6 +1563,122 @@ function changePaginationPage(section, delta){
   if(typeof render === 'function') render();
 }
 
+function setPaginationPage(section, page){
+  const key = String(section || '').trim();
+  if(!Object.prototype.hasOwnProperty.call(paginationState, key)) return;
+  const nextPage = Number(page);
+  if(!Number.isFinite(nextPage)) return;
+  paginationState[key] = Math.max(1, Math.floor(nextPage));
+  const container = getTableContainerBySection(key);
+  if(container) container.scrollTop = 0;
+  const render = getRenderForSection(key);
+  if(typeof render === 'function') render();
+}
+
+function makeSuiviPrintKey(clientId, dossierIndex){
+  return `${Number(clientId) || 0}::${Number(dossierIndex) || 0}`;
+}
+
+function isSuiviSelectedForPrint(row){
+  return suiviPrintSelection.has(makeSuiviPrintKey(row?.c?.id, row?.index));
+}
+
+function updateSuiviCheckedCount(){
+  const node = $('suiviCheckedCount');
+  if(!node) return;
+  node.innerText = `Cochés: ${suiviPrintSelection.size}`;
+}
+
+function toggleSuiviPrintSelection(clientId, dossierIndex, checked){
+  const key = makeSuiviPrintKey(clientId, dossierIndex);
+  if(checked){
+    suiviPrintSelection.add(key);
+  }else{
+    suiviPrintSelection.delete(key);
+  }
+  updateSuiviCheckedCount();
+}
+
+function syncSuiviPrintSelection(allRows){
+  const allowed = new Set((allRows || []).map(row=>makeSuiviPrintKey(row?.c?.id, row?.index)));
+  suiviPrintSelection = new Set([...suiviPrintSelection].filter(key=>allowed.has(key)));
+  updateSuiviCheckedCount();
+}
+
+function setAllVisibleSuiviRowsForPrint(checked){
+  const rows = getFilteredSuiviRowsForSelection();
+  if(!rows.length){
+    alert('Aucune ligne visible.');
+    return;
+  }
+  rows.forEach(row=>{
+    const key = makeSuiviPrintKey(row?.c?.id, row?.index);
+    if(checked){
+      suiviPrintSelection.add(key);
+    }else{
+      suiviPrintSelection.delete(key);
+    }
+  });
+  updateSuiviCheckedCount();
+  renderSuivi();
+}
+
+function getFilteredSuiviRowsForSelection(){
+  const q = $('filterGlobal')?.value?.toLowerCase() || '';
+  const base = getSuiviBaseRowsCached();
+  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  const noProcedureFilter = filterSuiviProcedure === 'all';
+  const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noSearchFilter = !q;
+  if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
+    return suiviFilteredRowsCacheOutput;
+  }
+  if(noProcedureFilter && noTribunalFilter && noSearchFilter){
+    return base.sortedDefaultRows;
+  }
+  return base.rawRows.filter(row=>{
+    const tribunalKeys = row.tribunalKeys || [];
+    if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
+    if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+    if(noSearchFilter) return true;
+    const haystack = row.__suiviHaystack
+      || (row.__suiviHaystack = buildSuiviSearchHaystack(
+        row.c.name,
+        row.d,
+        row.procSource,
+        (row.tribunalList && row.tribunalList.length) ? row.tribunalList : row.tribunalLabels
+      ));
+    return haystack.includes(q);
+  });
+}
+
+async function exportSuiviSelectedXLS(){
+  const rows = getFilteredSuiviRowsForSelection().filter(row=>isSuiviSelectedForPrint(row));
+  if(!rows.length){
+    alert('Cochez au moins une ligne pour exporter.');
+    return;
+  }
+  const headers = ['Client', 'Date d’affectation', 'Référence Client', 'Procédure', 'Débiteur', 'Montant', 'Ville', 'Statut'];
+  const tableRows = rows.map(row=>[
+    row.c?.name || '-',
+    normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
+    row.d?.referenceClient || '-',
+    Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
+    row.d?.debiteur || '-',
+    row.d?.montant || '-',
+    row.d?.ville || '-',
+    row.d?.statut || 'En cours'
+  ]);
+  await exportAudienceWorkbookXlsxStyled({
+    headers,
+    rows: tableRows,
+    subtitle: 'Export des dossiers cochés',
+    sheetName: 'Suivi',
+    colWidths: [{ wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 18 }],
+    filename: 'suivi_export.xlsx'
+  });
+}
+
 function getVirtualWindowByContainer(containerId, rowsLength){
   const container = $(containerId);
   if(!container){
@@ -822,267 +1691,6 @@ function getVirtualWindowByContainer(containerId, rowsLength){
   const visibleCount = Math.ceil(viewportHeight / AUDIENCE_VIRTUAL_ROW_HEIGHT) + (AUDIENCE_VIRTUAL_OVERSCAN * 2);
   const end = Math.min(total, start + visibleCount);
   return { start, end };
-}
-
-function getAudienceVirtualWindow(rowsLength){
-  return getVirtualWindowByContainer('audienceTableContainer', rowsLength);
-}
-
-function queueAudienceVirtualRender(){
-  if(audienceVirtualRafId) return;
-  audienceVirtualRafId = window.requestAnimationFrame(()=>{
-    audienceVirtualRafId = null;
-    renderAudienceVirtualWindow();
-  });
-}
-
-function renderAudienceRowHtml(row, duplicateKeySet){
-  const { c, d, procKey, p, color, key, draft } = row;
-  const canEdit = canEditClient(c) && canEditData();
-  const safeColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(color) ? color : '';
-  const duplicateKey = buildAudienceDuplicateKey(row);
-  const isDuplicate = !!(duplicateKey && duplicateKeySet.has(duplicateKey));
-  const hasError = isAudienceRowInvalid(row, duplicateKeySet);
-  const isMissingGlobal = !!row?.p?._missingGlobal;
-  const isRefClientMismatch = !!row?.p?._refClientMismatch;
-  const refClientDisplay = isRefClientMismatch
-    ? String(row?.p?._refClientProvided || d.referenceClient || '-')
-    : String(d.referenceClient || '-');
-  const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
-  const procKeyEncoded = encodeURIComponent(String(procKey));
-  const keyEncoded = encodeURIComponent(String(key));
-  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
-  const displayDateDepot = getAudienceDateDepotDisplayValue(row);
-  const audienceDateValueRaw = String(draft.dateAudience || p.audience || '');
-  const audienceDateValue = normalizeDateDDMMYYYY(audienceDateValueRaw) || audienceDateValueRaw;
-  return `
-    <tr class="color-${rowColor}">
-      <td data-label="Sélection">
-        <input type="checkbox" class="audience-print-check"
-          data-ci="${row.ci}"
-          data-di="${row.di}"
-          data-proc-key="${procKeyEncoded}"
-          ${isPrintChecked ? 'checked' : ''}
-          onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
-      </td>
-      <td data-label="Client">${escapeHtml(c.name)}</td>
-      <td data-label="Référence Client" class="${isRefClientMismatch ? 'audience-refclient-mismatch' : ''}">
-        ${escapeHtml(refClientDisplay)}
-        ${isRefClientMismatch ? '<div class="audience-inline-error">Réf client audience différente du global</div>' : ''}
-      </td>
-      <td data-label="Débiteur">${escapeHtml(d.debiteur || '-')}</td>
-      <td data-label="Référence dossier">
-        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(draft.refDossier || p.referenceClient || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)">
-        ${isMissingGlobal ? '<div class="audience-inline-error">Introuvable dans dossier global</div>' : ''}
-      </td>
-      <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)"></td>
-      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)"></td>
-      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)"></td>
-      <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
-      <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
-      <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
-    </tr>
-  `;
-}
-
-function renderAudienceVirtualWindow(force = false){
-  const body = $('audienceBody');
-  if(!body) return;
-  const rows = Array.isArray(audienceVirtualRows) ? audienceVirtualRows : [];
-  if(!rows.length){
-    audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
-    return;
-  }
-
-  const { start, end } = getAudienceVirtualWindow(rows.length);
-  if(!force && start === audienceVirtualLastRange.start && end === audienceVirtualLastRange.end){
-    return;
-  }
-  audienceVirtualLastRange = { start, end };
-
-  const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="11" style="height:${topHeight}px"></td></tr>`
-    : '';
-  const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="11" style="height:${bottomHeight}px"></td></tr>`
-    : '';
-  const rowsHtml = rows
-    .slice(start, end)
-    .map(row=>renderAudienceRowHtml(row, audienceVirtualDuplicateKeySet))
-    .join('');
-  body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
-}
-
-function renderSuiviRowHtml(row){
-  const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
-  return `
-    <tr>
-      <td data-label="Client">${escapeHtml(row.c.name)}</td>
-      <td data-label="Date d’affectation">${escapeHtml(displayDateAffectation)}</td>
-      <td data-label="Référence Client">${escapeHtml(row.d.referenceClient || '-')}</td>
-      <td class="procedure-cell" data-label="Procédure">${renderProcedureBadges(row.procSource)}</td>
-      <td data-label="Débiteur">${escapeHtml(row.d.debiteur || '-')}</td>
-      <td data-label="Montant">${escapeHtml(row.d.montant || '-')}</td>
-      <td data-label="Ville">${escapeHtml(row.d.ville || '-')}</td>
-      <td data-label="Statut">${renderStatusBadge(row.d.statut || 'En cours')}</td>
-      <td data-label="Actions">
-        <button type="button" class="btn-primary" data-action="view" data-client-id="${row.c.id}" data-dossier-index="${row.index}">
-          <i class="fa-solid fa-eye"></i>
-        </button>
-        <button type="button" class="btn-primary" data-action="edit" data-client-id="${row.c.id}" data-dossier-index="${row.index}" ${canEditClient(row.c) ? '' : 'disabled'}>
-          <i class="fa-solid fa-pen"></i>
-        </button>
-        <button type="button" class="btn-danger" data-action="delete" data-client-id="${row.c.id}" data-dossier-index="${row.index}" ${canDeleteData() ? '' : 'disabled'}>
-          <i class="fa-solid fa-trash"></i>
-        </button>
-      </td>
-    </tr>
-  `;
-}
-
-function renderSuiviVirtualWindow(force = false){
-  const body = $('suiviBody');
-  if(!body) return;
-  const rows = Array.isArray(suiviVirtualRows) ? suiviVirtualRows : [];
-  if(!rows.length){
-    suiviVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
-    return;
-  }
-  const { start, end } = getVirtualWindowByContainer('suiviTableContainer', rows.length);
-  if(!force && start === suiviVirtualLastRange.start && end === suiviVirtualLastRange.end) return;
-  suiviVirtualLastRange = { start, end };
-
-  const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="9" style="height:${topHeight}px"></td></tr>`
-    : '';
-  const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="9" style="height:${bottomHeight}px"></td></tr>`
-    : '';
-  const rowsHtml = rows.slice(start, end).map(renderSuiviRowHtml).join('');
-  body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
-}
-
-function queueSuiviVirtualRender(){
-  if(suiviVirtualRafId) return;
-  suiviVirtualRafId = window.requestAnimationFrame(()=>{
-    suiviVirtualRafId = null;
-    renderSuiviVirtualWindow();
-  });
-}
-
-function renderDiligenceRowHtml(row, showInjonctionColumns){
-  const procEncoded = encodeURIComponent(String(row.procedure || ''));
-  const isChecked = isDiligenceSelectedForPrint(row);
-  const refValue = row.details?.referenceClient || '';
-  const ordValue = row.details?.attOrdOrOrdOk || '';
-  const notificationNoValue = row.details?.notificationNo || '';
-  const notificationStatusValue = row.details?.notificationStatus || '';
-  const dateNotificationValue = row.details?.dateNotification || '';
-  const certificatNonAppelValue = row.details?.certificatNonAppelStatus || '';
-  const executionValue = row.details?.executionNo || '';
-  const villeValue = row.dossier?.ville || '';
-  const delegationValue = row.details?.attDelegationOuDelegat || '';
-  const huissierValue = row.details?.huissier || '';
-  const sortValue = row.details?.sort || '';
-  const tribunalValue = row.details?.tribunal || '';
-  if(showInjonctionColumns){
-    return `
-    <tr>
-      <td>
-        <label class="diligence-client-cell">
-          <input
-            type="checkbox"
-            class="diligence-print-check"
-            ${isChecked ? 'checked' : ''}
-            onchange="toggleDiligencePrintSelectionEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}', this.checked)">
-          <span>${escapeHtml(row.clientName || '-')}</span>
-        </label>
-      </td>
-      <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
-      <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationStatus', notificationStatusValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'dateNotification', dateNotificationValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attDelegationOuDelegat', delegationValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'huissier', huissierValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
-    </tr>
-  `;
-  }
-  return `
-    <tr>
-      <td>
-        <label class="diligence-client-cell">
-          <input
-            type="checkbox"
-            class="diligence-print-check"
-            ${isChecked ? 'checked' : ''}
-            onchange="toggleDiligencePrintSelectionEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}', this.checked)">
-          <span>${escapeHtml(row.clientName || '-')}</span>
-        </label>
-      </td>
-      <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
-      <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attDelegationOuDelegat', delegationValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'huissier', huissierValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
-    </tr>
-  `;
-}
-
-function renderDiligenceVirtualWindow(force = false){
-  const body = $('diligenceBody');
-  if(!body) return;
-  const rows = Array.isArray(diligenceVirtualRows) ? diligenceVirtualRows : [];
-  const colCount = diligenceVirtualShowInjonctionColumns ? 15 : 11;
-  if(!rows.length){
-    diligenceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = `<tr><td colspan="${colCount}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
-    return;
-  }
-  const { start, end } = getVirtualWindowByContainer('diligenceTableContainer', rows.length);
-  if(!force && start === diligenceVirtualLastRange.start && end === diligenceVirtualLastRange.end) return;
-  diligenceVirtualLastRange = { start, end };
-
-  const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
-  const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="${colCount}" style="height:${topHeight}px"></td></tr>`
-    : '';
-  const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="${colCount}" style="height:${bottomHeight}px"></td></tr>`
-    : '';
-  const rowsHtml = rows
-    .slice(start, end)
-    .map(row=>renderDiligenceRowHtml(row, diligenceVirtualShowInjonctionColumns))
-    .join('');
-  body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
-  applyDiligenceAutoSizing(body);
-}
-
-function queueDiligenceVirtualRender(){
-  if(diligenceVirtualRafId) return;
-  diligenceVirtualRafId = window.requestAnimationFrame(()=>{
-    diligenceVirtualRafId = null;
-    renderDiligenceVirtualWindow();
-  });
 }
 
 function loadExternalScript(url, key){
@@ -1160,6 +1768,149 @@ function warmupExcelLibrariesOnIdle(){
   setTimeout(warmup, 900);
 }
 
+function clearScheduledWarmupTimer(timerId){
+  if(!timerId) return null;
+  if(typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function' && typeof timerId === 'number'){
+    try{
+      window.cancelIdleCallback(timerId);
+      return null;
+    }catch(_){}
+  }
+  clearTimeout(timerId);
+  return null;
+}
+
+function scheduleChunkedSearchWarmup(kind, rows, stepFn){
+  if(typeof stepFn !== 'function') return;
+  const list = Array.isArray(rows) ? rows : [];
+  const stateMap = {
+    audience: {
+      get timer(){ return audienceSearchWarmupTimer; },
+      set timer(value){ audienceSearchWarmupTimer = value; },
+      get token(){ return audienceSearchWarmupToken; },
+      set token(value){ audienceSearchWarmupToken = value; }
+    },
+    suivi: {
+      get timer(){ return suiviSearchWarmupTimer; },
+      set timer(value){ suiviSearchWarmupTimer = value; },
+      get token(){ return suiviSearchWarmupToken; },
+      set token(value){ suiviSearchWarmupToken = value; }
+    },
+    diligence: {
+      get timer(){ return diligenceSearchWarmupTimer; },
+      set timer(value){ diligenceSearchWarmupTimer = value; },
+      get token(){ return diligenceSearchWarmupToken; },
+      set token(value){ diligenceSearchWarmupToken = value; }
+    }
+  };
+  const state = stateMap[kind];
+  if(!state) return;
+  state.timer = clearScheduledWarmupTimer(state.timer);
+  if(!list.length) return;
+  state.token += 1;
+  const token = state.token;
+  let index = 0;
+  const schedule = ()=>{
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      state.timer = window.requestIdleCallback(run, { timeout: 1500 });
+      return;
+    }
+    state.timer = setTimeout(()=>run(null), 16);
+  };
+  const run = (deadline)=>{
+    if(token !== state.token) return;
+    state.timer = null;
+    let processed = 0;
+    while(index < list.length && processed < SEARCH_CACHE_WARMUP_CHUNK_SIZE){
+      if(
+        deadline
+        && typeof deadline.timeRemaining === 'function'
+        && processed > 0
+        && deadline.timeRemaining() <= 3
+      ){
+        break;
+      }
+      stepFn(list[index], index);
+      index += 1;
+      processed += 1;
+    }
+    if(index < list.length){
+      schedule();
+    }
+  };
+  schedule();
+}
+
+function scheduleBackgroundDataWarmup(delayMs = 1500){
+  if(typeof window === 'undefined' || !currentUser) return;
+  const targetVersion = audienceRowsRawDataVersion;
+  if(backgroundDataWarmupVersion === targetVersion) return;
+  if(backgroundDataWarmupTimer){
+    clearTimeout(backgroundDataWarmupTimer);
+    backgroundDataWarmupTimer = null;
+  }
+  const warmup = ()=>{
+    backgroundDataWarmupTimer = null;
+    if(!currentUser) return;
+    if(backgroundDataWarmupVersion === audienceRowsRawDataVersion) return;
+    try{
+      getClientListSummaries();
+      getDashboardSnapshot();
+      getDashboardCalendarEvents();
+      const suiviBase = getSuiviBaseRowsCached();
+      const audienceRows = getAudienceRows();
+      const prevAudienceColor = selectedAudienceColor;
+      const prevErrorsOnly = filterAudienceErrorsOnly;
+      selectedAudienceColor = 'all';
+      filterAudienceErrorsOnly = false;
+      getFilteredAudienceRows(audienceRows);
+      selectedAudienceColor = 'blue';
+      getFilteredAudienceRows(audienceRows);
+      selectedAudienceColor = prevAudienceColor;
+      filterAudienceErrorsOnly = prevErrorsOnly;
+      const audienceSearchRows = getAudienceRowsDedupedCached();
+      const diligenceRows = getDiligenceRows();
+      scheduleChunkedSearchWarmup('audience', audienceSearchRows, (row)=>{
+        if(!row) return;
+        if(!row.__haystack){
+          row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft);
+        }
+        if(!row.__audienceDateDisplay){
+          row.__audienceDateDisplay = getAudienceRowDateValue(row);
+        }
+      });
+      scheduleChunkedSearchWarmup('suivi', suiviBase?.rawRows || [], (row)=>{
+        if(!row) return;
+        if(!row.__suiviHaystack){
+          row.__suiviHaystack = buildSuiviSearchHaystack(
+            row.c?.name,
+            row.d,
+            row.procSource,
+            (row.tribunalList && row.tribunalList.length) ? row.tribunalList : row.tribunalLabels
+          );
+        }
+      });
+      scheduleChunkedSearchWarmup('diligence', diligenceRows, (row)=>{
+        if(!row) return;
+        if(!row.__diligenceSearchValues){
+          row.__diligenceSearchValues = getDiligenceSearchValues(row);
+        }
+      });
+      backgroundDataWarmupVersion = audienceRowsRawDataVersion;
+    }catch(err){
+      console.warn('Préchargement des caches impossible', err);
+    }
+  };
+  backgroundDataWarmupTimer = setTimeout(()=>{
+    backgroundDataWarmupTimer = null;
+    if(typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(warmup, { timeout: 2500 });
+      return;
+    }
+    warmup();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
 function getCurrentSyncStatus(){
   const badge = $('syncStatusBadge');
   if(!badge) return 'pending';
@@ -1213,6 +1964,10 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
 }
 
 async function resolveApiBase(forceRetry = false){
+  if(LOCAL_ONLY_MODE){
+    API_BASE_RESOLVED = true;
+    return API_BASE;
+  }
   if(API_BASE_RESOLVED && !forceRetry){
     return API_BASE;
   }
@@ -1239,6 +1994,13 @@ async function resolveApiBase(forceRetry = false){
 }
 
 async function refreshServerConnectionStatus(){
+  if(LOCAL_ONLY_MODE){
+    setPingMetric(null);
+    lastLiveDelayMs = null;
+    renderSyncMetrics();
+    setSyncStatus('error', 'Mode local (offline)');
+    return;
+  }
   const currentProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
   if(currentProbe.ok){
     setPingMetric(currentProbe.latencyMs);
@@ -1259,15 +2021,15 @@ async function refreshServerConnectionStatus(){
 }
 
 function isManager(){
-  return currentUser?.role === 'manager';
+  return normalizeUserRole(currentUser?.role) === 'manager';
 }
 
 function isAdmin(){
-  return currentUser?.role === 'admin';
+  return normalizeUserRole(currentUser?.role) === 'admin';
 }
 
 function isViewer(){
-  return currentUser?.role === 'viewer';
+  return normalizeUserRole(currentUser?.role) === 'client';
 }
 
 function isDefaultManagerUser(user){
@@ -1296,6 +2058,30 @@ function canViewClient(client){
 function canEditClient(client){
   if(!canEditData()) return false;
   return canViewClient(client);
+}
+
+function grantCurrentViewerAccessToClient(clientId){
+  if(!isViewer()) return;
+  const idNum = Number(clientId);
+  if(!Number.isFinite(idNum)) return;
+  if(!Array.isArray(currentUser.clientIds)){
+    currentUser.clientIds = [];
+  }
+  if(!currentUser.clientIds.includes(idNum)){
+    currentUser.clientIds.push(idNum);
+  }
+  const userIdx = USERS.findIndex(u=>Number(u?.id) === Number(currentUser?.id));
+  if(userIdx === -1){
+    return;
+  }
+  const user = USERS[userIdx];
+  const nextIds = Array.isArray(user?.clientIds) ? user.clientIds.slice() : [];
+  if(!nextIds.includes(idNum)){
+    nextIds.push(idNum);
+  }
+  USERS[userIdx] = { ...user, clientIds: nextIds };
+  currentUser = USERS[userIdx];
+  persistStateSliceNow('users', USERS, { source: 'client-access' }).catch(()=>{});
 }
 
 function normalizeSalleName(value){
@@ -1391,8 +2177,69 @@ function syncCurrentUserFromUsers(){
   }
 }
 
+function getCurrentClientAccessCacheKey(){
+  const user = currentUser || {};
+  const ids = Array.isArray(user?.clientIds) ? user.clientIds.map(v=>Number(v)).filter(Number.isFinite).sort((a, b)=>a - b) : [];
+  return [
+    String(user?.id || ''),
+    normalizeUserRole(user?.role),
+    ids.join(',')
+  ].join('||');
+}
+
 function getVisibleClients(){
-  return AppState.clients.filter(c=>canViewClient(c));
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    visibleClientsCache
+    && visibleClientsCacheVersion === audienceRowsRawDataVersion
+    && visibleClientsCacheUserKey === userKey
+  ){
+    return visibleClientsCache;
+  }
+  const next = AppState.clients.filter(c=>canViewClient(c));
+  visibleClientsCache = next;
+  visibleClientsCacheVersion = audienceRowsRawDataVersion;
+  visibleClientsCacheUserKey = userKey;
+  return next;
+}
+
+function getEditableClients(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    editableClientsCache
+    && editableClientsCacheVersion === audienceRowsRawDataVersion
+    && editableClientsCacheUserKey === userKey
+  ){
+    return editableClientsCache;
+  }
+  const next = getVisibleClients().filter(c=>canEditClient(c));
+  editableClientsCache = next;
+  editableClientsCacheVersion = audienceRowsRawDataVersion;
+  editableClientsCacheUserKey = userKey;
+  return next;
+}
+
+function getClientListSummaries(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    clientListSummaryCache
+    && clientListSummaryCacheVersion === audienceRowsRawDataVersion
+    && clientListSummaryCacheUserKey === userKey
+  ){
+    return clientListSummaryCache;
+  }
+  const next = getVisibleClients().map(client=>({
+    client,
+    id: client?.id,
+    name: String(client?.name || ''),
+    nameLower: String(client?.name || '').toLowerCase(),
+    dossierCount: Array.isArray(client?.dossiers) ? client.dossiers.length : 0,
+    canEdit: canEditClient(client)
+  }));
+  clientListSummaryCache = next;
+  clientListSummaryCacheVersion = audienceRowsRawDataVersion;
+  clientListSummaryCacheUserKey = userKey;
+  return next;
 }
 
 function collectDeepValues(value, out = []){
@@ -2462,10 +3309,7 @@ function normalizeUser(rawUser){
   const id = Number(rawUser.id);
   const username = String(rawUser.username || '').trim();
   const password = String(rawUser.password || '');
-  const rawRole = String(rawUser.role || '').trim().toLowerCase();
-  const role = rawRole === 'manager' || rawRole === 'admin' || rawRole === 'viewer'
-    ? rawRole
-    : 'viewer';
+  const role = normalizeUserRole(rawUser.role);
   const clientIds = Array.isArray(rawUser.clientIds)
     ? [...new Set(rawUser.clientIds.map(v=>Number(v)).filter(v=>Number.isFinite(v)))]
     : [];
@@ -2473,27 +3317,33 @@ function normalizeUser(rawUser){
   return { id, username, password, role, clientIds };
 }
 
-function normalizeClient(rawClient){
+function normalizeClient(rawClient, options = {}){
   if(!rawClient || typeof rawClient !== 'object') return null;
+  const opts = options && typeof options === 'object' ? options : {};
+  const deepNormalize = opts.deep !== false;
   const id = Number(rawClient.id);
   const name = String(rawClient.name || '').trim();
   const dossiers = Array.isArray(rawClient.dossiers)
-    ? rawClient.dossiers.map(d=>{
-      if(!d || typeof d !== 'object') return d;
-      const normalizedDate = normalizeDateDDMMYYYY(d.dateAffectation || '');
-      const normalizedProcedures = normalizeProcedures(d);
-      return {
-        ...d,
-        dateAffectation: normalizedDate || '',
-        montant: getLowerMontantValue(d.montant || ''),
-        history: normalizeDossierHistoryEntries(d.history),
-        montantByProcedure: normalizeProcedureMontantGroups(
-          d.montantByProcedure,
-          normalizedProcedures,
-          getLowerMontantValue(d.montant || '')
-        )
-      };
-    })
+    ? (
+      deepNormalize
+        ? rawClient.dossiers.map(d=>{
+          if(!d || typeof d !== 'object') return d;
+          const normalizedDate = normalizeDateDDMMYYYY(d.dateAffectation || '');
+          const normalizedProcedures = normalizeProcedures(d);
+          return {
+            ...d,
+            dateAffectation: normalizedDate || '',
+            montant: getLowerMontantValue(d.montant || ''),
+            history: normalizeDossierHistoryEntries(d.history),
+            montantByProcedure: normalizeProcedureMontantGroups(
+              d.montantByProcedure,
+              normalizedProcedures,
+              getLowerMontantValue(d.montant || '')
+            )
+          };
+        })
+        : rawClient.dossiers.filter(d=>!!d && typeof d === 'object')
+    )
     : [];
   if(!Number.isFinite(id) || !name) return null;
   return { id, name, dossiers };
@@ -2538,12 +3388,40 @@ function normalizeRecycleArchiveEntries(rawEntries){
 function pushRecycleBinEntry(type, payload){
   if(!AppState || typeof AppState !== 'object') return;
   if(!Array.isArray(AppState.recycleBin)) AppState.recycleBin = [];
+  const normalizedType = String(type || 'unknown');
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const buildRecycleEntrySignature = (entryType, entryPayload)=>{
+    const safeType = String(entryType || '').trim();
+    const data = entryPayload && typeof entryPayload === 'object' ? entryPayload : {};
+    if(safeType === 'client_delete'){
+      return `${safeType}::${String(data?.client?.name || '').trim().toLowerCase()}`;
+    }
+    if(safeType === 'dossier_delete'){
+      return [
+        safeType,
+        Number(data?.clientId) || 0,
+        String(data?.clientName || '').trim().toLowerCase(),
+        String(data?.dossier?.referenceClient || data?.dossier?.debiteur || '').trim().toLowerCase()
+      ].join('::');
+    }
+    if(safeType === 'all_clients_delete'){
+      return safeType;
+    }
+    return '';
+  };
+  const nextSignature = buildRecycleEntrySignature(normalizedType, safePayload);
+  if(nextSignature){
+    AppState.recycleBin = AppState.recycleBin.filter(entry=>{
+      const entryPayload = entry?.payload && typeof entry.payload === 'object' ? entry.payload : {};
+      return buildRecycleEntrySignature(entry?.type, entryPayload) !== nextSignature;
+    });
+  }
   AppState.recycleBin.push({
-    type: String(type || 'unknown'),
+    type: normalizedType,
     at: new Date().toISOString(),
     by: String(currentUser?.username || '-'),
     byRole: String(currentUser?.role || ''),
-    payload: payload && typeof payload === 'object' ? payload : {}
+    payload: safePayload
   });
   if(AppState.recycleBin.length > RECYCLE_BIN_MAX_ENTRIES){
     AppState.recycleBin = AppState.recycleBin.slice(-RECYCLE_BIN_MAX_ENTRIES);
@@ -2653,15 +3531,46 @@ function getRecycleEntryDetails(entry){
 
 function refreshAfterRecycleRestore(){
   queuePersistAppState();
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderSalle();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeSalle: true, includeRecycle: true });
+}
+
+function refreshDeferredSectionIfNeeded(key, renderFn, options = {}){
+  if(typeof renderFn !== 'function') return;
+  const force = options.force === true;
+  const include = options.include === true;
+  if(force || include || isDeferredRenderSectionVisible(key)){
+    renderFn(force ? { force: true } : {});
+    return;
+  }
+  markDeferredRenderDirty(key);
+}
+
+function refreshPrimaryViews(options = {}){
+  refreshDeferredSectionIfNeeded('clients', renderClients, { force: options.force === true });
+  if(options.force === true || isDeferredRenderSectionVisible('creation')){
+    updateClientDropdown(options.force === true ? { force: true } : {});
+  }else{
+    markDeferredRenderDirty('clientDropdown');
+  }
+  if(options.dashboardOptions){
+    refreshDeferredSectionIfNeeded('dashboard', (renderOptions)=>renderDashboard({ ...renderOptions, ...options.dashboardOptions }), {
+      force: options.force === true
+    });
+  }else{
+    refreshDeferredSectionIfNeeded('dashboard', renderDashboard, { force: options.force === true });
+  }
+  refreshDeferredSectionIfNeeded('suivi', renderSuivi, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('audience', renderAudience, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('diligence', renderDiligence, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('equipe', renderEquipe, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('salle', renderSalle, { force: options.force === true, include: options.includeSalle === true });
+  refreshDeferredSectionIfNeeded('recycle', renderRecycleBin, { force: options.force === true, include: options.includeRecycle === true });
+  if(options.resetCreationForm){
+    resetCreationForm();
+  }
+  if(options.showView){
+    showView(options.showView);
+  }
 }
 
 function restoreRecycleEntryAt(index, options = {}){
@@ -2773,7 +3682,8 @@ function clearRecycleBinToBackup(){
   alert('Corbeille vidée. Backup interne conservé.');
 }
 
-function renderRecycleBin(){
+function renderRecycleBin(options = {}){
+  if(!shouldRenderDeferredSection('recycle', options)) return;
   const body = $('recycleBody');
   if(!body) return;
   const restoreAllBtn = $('restoreAllRecycleBtn');
@@ -2825,6 +3735,9 @@ function renderRecycleBin(){
 }
 
 function getKnownJudges(){
+  if(knownJudgesCache && knownJudgesCacheVersion === audienceRowsRawDataVersion){
+    return knownJudgesCache;
+  }
   const set = new Set();
   AppState.clients.forEach(c=>{
     c.dossiers.forEach(d=>{
@@ -2834,13 +3747,26 @@ function getKnownJudges(){
       });
     });
   });
-  return [...set].sort((a, b)=>a.localeCompare(b, 'fr'));
+  knownJudgesCache = [...set].sort((a, b)=>a.localeCompare(b, 'fr'));
+  knownJudgesCacheVersion = audienceRowsRawDataVersion;
+  return knownJudgesCache;
 }
 
 function buildSalleAudienceMap(dayKey = selectedSalleDay){
   const targetDay = normalizeSalleWeekday(dayKey);
+  const userKey = `${getCurrentClientAccessCacheKey()}||${targetDay}`;
+  if(
+    salleAudienceMapCache
+    && salleAudienceMapCacheVersion === audienceRowsRawDataVersion
+    && salleAudienceMapAssignmentsVersion === salleAssignmentsVersion
+    && salleAudienceMapCacheUserKey === userKey
+  ){
+    return salleAudienceMapCache;
+  }
   const salleToJudges = new Map();
-  normalizeSalleAssignments(AppState.salleAssignments).forEach(row=>{
+  const normalizedAssignments = normalizeSalleAssignments(AppState.salleAssignments);
+  const judgeTargets = [];
+  normalizedAssignments.forEach(row=>{
     if(normalizeSalleWeekday(row?.day) !== targetDay) return;
     const salleLabel = normalizeSalleName(row?.salle || '');
     const judge = normalizeJudgeName(row?.juge || '');
@@ -2852,7 +3778,17 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
   const bySalleAndJudge = new Map();
   salleToJudges.forEach((judges, salleLabel)=>{
     const judgeMap = new Map();
-    [...judges].forEach(j=>judgeMap.set(j, []));
+    [...judges].forEach(j=>{
+      const sessions = [];
+      judgeMap.set(j, sessions);
+      const judgeKey = makeJudgeMatchKey(j);
+      if(judgeKey){
+        judgeTargets.push({
+          judgeKey,
+          sessions
+        });
+      }
+    });
     bySalleAndJudge.set(salleLabel, judgeMap);
   });
 
@@ -2883,21 +3819,22 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
       instruction: instructionValue || '-',
       sort: sortValue || '-'
     };
-    bySalleAndJudge.forEach((judgeMap)=>{
-      judgeMap.forEach((sessions, judgeName)=>{
-        const targetJudgeKey = makeJudgeMatchKey(judgeName);
-        if(!targetJudgeKey) return;
-        const matched = candidateKeys.some(candidateKey=>
-          candidateKey === targetJudgeKey
-          || candidateKey.includes(targetJudgeKey)
-          || targetJudgeKey.includes(candidateKey)
-        );
-        if(!matched) return;
-        sessions.push(session);
-      });
+    judgeTargets.forEach(target=>{
+      const targetJudgeKey = target.judgeKey;
+      const matched = candidateKeys.some(candidateKey=>
+        candidateKey === targetJudgeKey
+        || candidateKey.includes(targetJudgeKey)
+        || targetJudgeKey.includes(candidateKey)
+      );
+      if(!matched) return;
+      target.sessions.push(session);
     });
   });
 
+  salleAudienceMapCache = bySalleAndJudge;
+  salleAudienceMapCacheVersion = audienceRowsRawDataVersion;
+  salleAudienceMapAssignmentsVersion = salleAssignmentsVersion;
+  salleAudienceMapCacheUserKey = userKey;
   return bySalleAndJudge;
 }
 
@@ -3060,6 +3997,15 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 
 function ensureManagerUser(users){
   const validUsers = Array.isArray(users) ? users.filter(Boolean).map(u=>({ ...u })) : [];
+  const existingUsernames = new Set(
+    validUsers.map(u=>String(u?.username || '').trim().toLowerCase()).filter(Boolean)
+  );
+  buildSeedUsers().forEach(seedUser=>{
+    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
+    if(!usernameKey || existingUsernames.has(usernameKey)) return;
+    validUsers.push({ ...seedUser });
+    existingUsernames.add(usernameKey);
+  });
   const defaultManagerIdx = validUsers.findIndex(
     u=>String(u.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
   );
@@ -3101,6 +4047,18 @@ function buildStateSignature(clients, salleAssignments, users, draft, recycleBin
   }
 }
 
+function getStateSignatureFromPayload(payload){
+  if(!payload || typeof payload !== 'object') return '';
+  return buildStateSignature(
+    payload.clients,
+    payload.salleAssignments,
+    payload.users,
+    payload.audienceDraft,
+    payload.recycleBin,
+    payload.recycleArchive
+  );
+}
+
 function buildAppStatePayload(){
   return {
     clients: AppState.clients,
@@ -3110,6 +4068,21 @@ function buildAppStatePayload(){
     recycleBin: Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [],
     recycleArchive: Array.isArray(AppState.recycleArchive) ? AppState.recycleArchive : []
   };
+}
+
+function updateRemoteStateMetadata(source){
+  const versionNum = Number(source?.version);
+  remoteStateVersion = Number.isFinite(versionNum) && versionNum >= 0 ? versionNum : 0;
+  remoteStateUpdatedAt = String(source?.updatedAt || '');
+}
+
+function getRemoteRefreshBlocker(){
+  if(typeof document !== 'undefined' && document.hidden) return 'hidden';
+  if(editingDossier) return 'editing';
+  if(importInProgress) return 'import';
+  if(persistTimer) return 'persist';
+  if(Object.keys(audienceDraft || {}).length) return 'draft';
+  return '';
 }
 
 function makeClientMatchKey(value){
@@ -3363,7 +4336,6 @@ function normalizeImportedPayload(raw){
 }
 
 async function importAppsavocatPayload(rawPayload){
-  const syncSnapshot = captureSyncStatusSnapshot();
   try{
     const payload = normalizeImportedPayload(rawPayload);
     if(!payload){
@@ -3478,20 +4450,18 @@ async function importAppsavocatPayload(rawPayload){
       ...(Array.isArray(AppState.salleAssignments) ? AppState.salleAssignments : []),
       ...importedSalleAssignments
     ]);
+    invalidateSalleAssignmentsCaches();
 
     // audienceDraft keys depend on table indexes; imported draft keys may mismatch after merge.
     audienceDraft = {};
     const reconciliation = reconcileAudienceOrphanDossiers();
+    handleDossierDataChange({ audience: true });
 
-    const serverSaved = await persistAppStateNow();
-    renderClients();
-    renderDashboard();
-    updateClientDropdown();
-    renderSuivi();
-    renderAudience();
-    renderDiligence();
-    renderSalle();
-    renderEquipe();
+    await persistAppStateNow();
+    refreshPrimaryViews({
+      dashboardOptions: { force: true, immediate: true },
+      includeSalle: true
+    });
 
     alert(
       [
@@ -3504,11 +4474,8 @@ async function importAppsavocatPayload(rawPayload){
         `Audience hors global rapprochée: ${reconciliation.matchedDossiers}`
       ].join('\n')
     );
-    if(!serverSaved){
-      alert('Import terminé localement, mais sauvegarde serveur non confirmée. Vérifiez la connexion serveur/API.');
-    }
   }finally{
-    restoreSyncStatusSnapshot(syncSnapshot);
+    // Keep current sync status (persist call already set the right state).
   }
 }
 
@@ -3521,15 +4488,21 @@ async function handleAppsavocatImportFile(file){
   }
   importInProgress = true;
   try{
+    openImportProgressModal('Import appsavocat');
+    updateImportProgress('Lecture du fichier...', 0, 1);
     setSyncStatus('syncing', 'Import appsavocat en cours...');
     const text = await file.text();
+    updateImportProgress('Analyse du fichier...', 1, 3);
     const parsed = JSON.parse(text);
+    updateImportProgress('Fusion des données...', 2, 3);
     await importAppsavocatPayload(parsed);
+    closeImportProgressModal(true);
   }catch(err){
     console.error(err);
     const details = String(err?.message || '').trim();
     alert(`Import appsavocat impossible.${details ? `\nDétail: ${details}` : ''}`);
   }finally{
+    closeImportProgressModal(false);
     importInProgress = false;
   }
 }
@@ -3554,6 +4527,9 @@ function getIndexedDbConnection(){
         const db = req.result;
         if(!db.objectStoreNames.contains(INDEXED_DB_STORE)){
           db.createObjectStore(INDEXED_DB_STORE);
+        }
+        if(!db.objectStoreNames.contains(INDEXED_DB_BACKUP_STORE)){
+          db.createObjectStore(INDEXED_DB_BACKUP_STORE);
         }
       };
       req.onsuccess = ()=>resolve(req.result || null);
@@ -3590,6 +4566,27 @@ async function writeStateToIndexedDb(payload){
   });
 }
 
+async function writeAutoBackupToIndexedDb(entry){
+  const db = await getIndexedDbConnection();
+  if(!db) return false;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(INDEXED_DB_BACKUP_STORE, 'readwrite');
+      const store = tx.objectStore(INDEXED_DB_BACKUP_STORE);
+      store.put(entry, entry.id);
+      tx.oncomplete = ()=>resolve(true);
+      tx.onerror = ()=>{
+        console.warn('Echec sauvegarde backup IndexedDB', tx.error);
+        resolve(false);
+      };
+      tx.onabort = ()=>resolve(false);
+    }catch(err){
+      console.warn('Ecriture backup IndexedDB impossible', err);
+      resolve(false);
+    }
+  });
+}
+
 async function readStateFromIndexedDb(){
   const db = await getIndexedDbConnection();
   if(!db) return null;
@@ -3608,6 +4605,93 @@ async function readStateFromIndexedDb(){
       resolve(null);
     }
   });
+}
+
+function readAutoBackupsFromLocalStorage(){
+  if(typeof localStorage === 'undefined') return [];
+  try{
+    const raw = localStorage.getItem(AUTO_BACKUP_STORAGE_KEY);
+    if(!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(err){
+    console.warn('Lecture auto backup localStorage impossible', err);
+    return [];
+  }
+}
+
+function writeAutoBackupsToLocalStorage(entries){
+  if(typeof localStorage === 'undefined') return false;
+  try{
+    localStorage.setItem(
+      AUTO_BACKUP_STORAGE_KEY,
+      JSON.stringify(Array.isArray(entries) ? entries.slice(0, AUTO_BACKUP_RETENTION_COUNT) : [])
+    );
+    return true;
+  }catch(err){
+    console.warn('Echec auto backup localStorage (quota/accès)', err);
+    return false;
+  }
+}
+
+async function pruneIndexedDbAutoBackups(){
+  const db = await getIndexedDbConnection();
+  if(!db) return;
+  await new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(INDEXED_DB_BACKUP_STORE, 'readwrite');
+      const store = tx.objectStore(INDEXED_DB_BACKUP_STORE);
+      const getAllReq = store.getAll();
+      getAllReq.onsuccess = ()=>{
+        const entries = Array.isArray(getAllReq.result) ? getAllReq.result : [];
+        const extras = entries
+          .sort((a, b)=>String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')))
+          .slice(AUTO_BACKUP_RETENTION_COUNT);
+        extras.forEach(entry=>{
+          if(entry?.id) store.delete(entry.id);
+        });
+      };
+      getAllReq.onerror = ()=>resolve();
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>resolve();
+      tx.onabort = ()=>resolve();
+    }catch(err){
+      console.warn('Nettoyage auto backup IndexedDB impossible', err);
+      resolve();
+    }
+  });
+}
+
+async function createAutoBackupSnapshot(payload, options = {}){
+  const safePayload = payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
+  const force = options.force === true;
+  const signature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(safePayload);
+  const now = Date.now();
+  if(!force){
+    if(signature && signature === lastAutoBackupSignature) return false;
+    if(lastAutoBackupAt && (now - lastAutoBackupAt) < AUTO_BACKUP_MIN_INTERVAL_MS) return false;
+  }
+
+  const createdAt = new Date(now).toISOString();
+  const entry = {
+    id: `backup_${createdAt}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt,
+    source: String(options.source || 'auto'),
+    payload: safePayload
+  };
+
+  await writeAutoBackupToIndexedDb(entry);
+  const localEntries = readAutoBackupsFromLocalStorage();
+  localEntries.unshift(entry);
+  writeAutoBackupsToLocalStorage(localEntries);
+  pruneIndexedDbAutoBackups().catch(()=>{});
+  lastAutoBackupAt = now;
+  lastAutoBackupSignature = signature;
+  return true;
 }
 
 function writeStateToLocalStorage(payload){
@@ -3657,37 +4741,89 @@ async function persistDesktopStateFileNow(payload = buildAppStatePayload()){
   }
 }
 
-function queueDesktopStateFilePersist(){
+function queueDesktopStateFilePersist(payload = null){
   if(!hasDesktopStateBridge()) return;
   if(desktopStatePersistTimer) clearTimeout(desktopStatePersistTimer);
   desktopStatePersistTimer = setTimeout(()=>{
+    const pendingPayload = payload && typeof payload === 'object'
+      ? payload
+      : buildAppStatePayload();
     desktopStatePersistTimer = null;
-    persistDesktopStateFileNow().catch(()=>{});
+    persistDesktopStateFileNow(pendingPayload).catch(()=>{});
   }, DESKTOP_STATE_SAVE_DEBOUNCE_MS);
 }
 
-async function persistAppStateNow(){
-  flushAllDossierHistoryPendingEntries();
-  const payload = buildAppStatePayload();
-  lastPersistedStateSignature = buildStateSignature(
-    payload.clients,
-    payload.salleAssignments,
-    payload.users,
-    payload.audienceDraft,
-    payload.recycleBin,
-    payload.recycleArchive
-  );
+async function persistLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+  const source = String(options?.source || 'persist');
+  const nextSignature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(payload);
+  if(!options.force && nextSignature && nextSignature === lastLocalSnapshotSignature){
+    queueDesktopStateFilePersist(payload);
+    return payload;
+  }
+  lastPersistedStateSignature = nextSignature;
+  lastLocalSnapshotSignature = nextSignature;
   await writeStateToIndexedDb(payload);
   writeStateToLocalStorage(payload);
-  queueDesktopStateFilePersist();
+  await createAutoBackupSnapshot(payload, { source, signature: nextSignature });
+  queueDesktopStateFilePersist(payload);
+  return payload;
+}
+
+function queueDeferredLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+  const source = String(options?.source || 'persist');
+  const nextSignature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(payload);
+  lastPersistedStateSignature = nextSignature;
+  deferredLocalSnapshotPayload = payload;
+  deferredLocalSnapshotSource = source;
+  deferredLocalSnapshotSignature = nextSignature;
+  if(deferredLocalSnapshotTimer) return payload;
+  deferredLocalSnapshotTimer = setTimeout(()=>{
+    const pendingPayload = deferredLocalSnapshotPayload;
+    const pendingSource = deferredLocalSnapshotSource;
+    const pendingSignature = deferredLocalSnapshotSignature;
+    deferredLocalSnapshotTimer = null;
+    deferredLocalSnapshotPayload = null;
+    deferredLocalSnapshotSource = 'persist';
+    deferredLocalSnapshotSignature = '';
+    if(!pendingPayload) return;
+    persistLocalStateSnapshot(pendingPayload, { source: pendingSource, signature: pendingSignature }).catch((err)=>{
+      console.warn('Impossible de sauvegarder le snapshot local différé', err);
+    });
+  }, 0);
+  return payload;
+}
+
+async function persistRemoteRequestNow(pathname, body){
+  if(LOCAL_ONLY_MODE){
+    setSyncStatus('error', 'Mode local (offline)');
+    return true;
+  }
   setSyncStatus('syncing');
   try{
-    const res = await fetchWithTimeout(`${API_BASE}/state`, {
+    const res = await fetchWithTimeout(`${API_BASE}${pathname}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        ...body,
+        _sourceId: APP_INSTANCE_ID,
+        _baseVersion: remoteStateVersion
+      })
     }, API_STATE_SAVE_TIMEOUT_MS);
+    if(res.status === 409){
+      const conflictPayload = await res.json().catch(()=>({}));
+      updateRemoteStateMetadata(conflictPayload);
+      remoteRefreshPending = true;
+      setSyncStatus('conflict', 'Conflit: serveur plus recent, rechargement...');
+      queueRemoteStateRefresh(0);
+      return false;
+    }
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const saveResult = await res.json().catch(()=>({}));
+    updateRemoteStateMetadata(saveResult);
     setSyncStatus('ok');
     return true;
   }catch(err){
@@ -3697,87 +4833,146 @@ async function persistAppStateNow(){
   }
 }
 
+async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
+  const payload = buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(payload);
+  await persistLocalStateSnapshot(payload, { source: options.source || sliceKey, signature });
+  const routeBySlice = {
+    audienceDraft: '/state/audience-draft',
+    users: '/state/users',
+    salleAssignments: '/state/salle-assignments'
+  };
+  const pathname = routeBySlice[sliceKey];
+  if(!pathname){
+    return persistRemoteRequestNow('/state', payload);
+  }
+  return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue });
+}
+
+function getDossierPatchQueueKey(patch){
+  if(!patch || typeof patch !== 'object') return '';
+  const action = String(patch.action || '').trim().toLowerCase();
+  if(action !== 'update') return '';
+  const clientId = Number(patch.clientId);
+  const dossierIndex = Number(patch.dossierIndex);
+  const targetClientId = Number(patch.targetClientId);
+  if(!Number.isFinite(clientId) || !Number.isFinite(dossierIndex)) return '';
+  return `${action}:${clientId}:${dossierIndex}:${Number.isFinite(targetClientId) ? targetClientId : clientId}`;
+}
+
+async function flushQueuedDossierPatchesNow(){
+  if(dossierPatchPersistTimer){
+    clearTimeout(dossierPatchPersistTimer);
+    dossierPatchPersistTimer = null;
+  }
+  if(!(queuedDossierPatchEntries instanceof Map) || !queuedDossierPatchEntries.size){
+    return [];
+  }
+  const entries = [...queuedDossierPatchEntries.values()];
+  queuedDossierPatchEntries = new Map();
+  const results = [];
+  for(const entry of entries){
+    try{
+      const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
+      entry.resolvers.forEach(resolve=>resolve(result));
+      results.push(result);
+    }catch(err){
+      entry.rejecters.forEach(reject=>reject(err));
+      throw err;
+    }
+  }
+  return results;
+}
+
+async function persistDossierPatchNow(patch, options = {}){
+  const payload = buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(payload);
+  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'dossier', signature });
+  const queueKey = getDossierPatchQueueKey(patch);
+  if(!queueKey){
+    await flushQueuedDossierPatchesNow();
+    return persistRemoteRequestNow('/state/dossiers', patch);
+  }
+  return new Promise((resolve, reject)=>{
+    const existing = queuedDossierPatchEntries.get(queueKey);
+    if(existing){
+      existing.patch = patch;
+      existing.resolvers.push(resolve);
+      existing.rejecters.push(reject);
+    }else{
+      queuedDossierPatchEntries.set(queueKey, {
+        patch,
+        resolvers: [resolve],
+        rejecters: [reject]
+      });
+    }
+    setSyncStatus('syncing');
+    if(dossierPatchPersistTimer) clearTimeout(dossierPatchPersistTimer);
+    dossierPatchPersistTimer = setTimeout(()=>{
+      flushQueuedDossierPatchesNow().catch((err)=>{
+        console.warn('Impossible de sauvegarder les modifications dossier', err);
+      });
+    }, DOSSIER_PATCH_DEBOUNCE_MS);
+  });
+}
+
+async function persistAppStateNow(payload = null){
+  flushAllDossierHistoryPendingEntries();
+  const nextPayload = payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(nextPayload);
+  queuedPersistPayload = null;
+  await persistLocalStateSnapshot(nextPayload, { source: 'persist', signature });
+  return persistRemoteRequestNow('/state', nextPayload);
+}
+
 function queuePersistAppState(){
   markAudienceRowsCacheDirty();
-  const payload = buildAppStatePayload();
-  writeStateToLocalStorage(payload);
-  writeStateToIndexedDb(payload).catch(()=>{});
-  queueDesktopStateFilePersist();
+  queuedPersistPayload = buildAppStatePayload();
+  const signature = getStateSignatureFromPayload(queuedPersistPayload);
   setSyncStatus('syncing');
   if(persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(()=>{
     persistTimer = null;
-    persistAppStateNow();
+    persistLocalStateSnapshot(queuedPersistPayload, { source: 'persist', signature })
+      .then(()=>persistRemoteRequestNow('/state', queuedPersistPayload))
+      .catch((err)=>{
+      console.warn('Impossible de sauvegarder l’état applicatif', err);
+    });
   }, 250);
 }
 
 async function loadPersistedState(){
   let loaded = false;
   let changed = false;
-  try{
-    const res = await fetchWithTimeout(`${API_BASE}/state`, { cache: 'no-store' }, API_STATE_LOAD_TIMEOUT_MS);
-    if(res.ok){
-      const parsed = await res.json();
-      const loadedClients = Array.isArray(parsed?.clients)
-        ? parsed.clients.map(normalizeClient).filter(Boolean)
-        : [];
-      const loadedUsers = Array.isArray(parsed?.users)
-        ? parsed.users.map(normalizeUser).filter(Boolean)
-        : [];
-      const loadedSalleAssignments = normalizeSalleAssignments(parsed?.salleAssignments);
-      const loadedDraft = parsed?.audienceDraft && typeof parsed.audienceDraft === 'object'
-        ? parsed.audienceDraft
-        : {};
-      const loadedRecycleBin = normalizeRecycleBinEntries(parsed?.recycleBin);
-      const loadedRecycleArchive = normalizeRecycleArchiveEntries(parsed?.recycleArchive);
-      const nextUsers = ensureManagerUser(loadedUsers);
-      const nextSignature = buildStateSignature(
-        loadedClients,
-        loadedSalleAssignments,
-        nextUsers,
-        loadedDraft,
-        loadedRecycleBin,
-        loadedRecycleArchive
-      );
-
-      if(nextSignature && nextSignature === lastPersistedStateSignature){
+  if(!LOCAL_ONLY_MODE){
+    try{
+      const res = await fetchWithTimeout(`${API_BASE}/state`, { cache: 'no-store' }, API_STATE_LOAD_TIMEOUT_MS);
+      if(res.ok){
+        const parsed = await res.json();
+        updateRemoteStateMetadata(parsed);
+        const normalizedState = normalizePersistedStateSource(parsed);
+        if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
+          loaded = true;
+          lastRemoteStateLoadVersion = remoteStateVersion;
+          lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
+          setSyncStatus('ok', 'Etat charge depuis serveur');
+          return false;
+        }
+        await applyPersistedStateSource(normalizedState, {
+          writeIndexedDb: true,
+          writeLocalStorage: true,
+          syncStatusMessage: 'Etat charge depuis serveur'
+        });
+        lastRemoteStateLoadVersion = remoteStateVersion;
+        lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
         loaded = true;
-        setSyncStatus('ok', 'Etat charge depuis serveur');
-        return false;
+        changed = true;
       }
-
-      AppState.clients = loadedClients;
-      AppState.salleAssignments = loadedSalleAssignments;
-      USERS = nextUsers;
-      markAudienceRowsCacheDirty();
-      audienceDraft = loadedDraft;
-      AppState.recycleBin = loadedRecycleBin;
-      AppState.recycleArchive = loadedRecycleArchive;
-      lastPersistedStateSignature = buildStateSignature(
-        AppState.clients,
-        AppState.salleAssignments,
-        USERS,
-        audienceDraft,
-        AppState.recycleBin,
-        AppState.recycleArchive
-      );
-      syncCurrentUserFromUsers();
-      loaded = true;
-      changed = true;
-      setSyncStatus('ok', 'Etat charge depuis serveur');
-      const snapshot = {
-        clients: AppState.clients,
-        salleAssignments: AppState.salleAssignments,
-        users: USERS,
-        audienceDraft: audienceDraft,
-        recycleBin: AppState.recycleBin,
-        recycleArchive: AppState.recycleArchive
-      };
-      await writeStateToIndexedDb(snapshot);
-      writeStateToLocalStorage(snapshot);
+    }catch(err){
+      console.warn('Impossible de charger depuis le serveur', err);
     }
-  }catch(err){
-    console.warn('Impossible de charger depuis le serveur', err);
   }
 
   if(loaded) return changed;
@@ -3789,100 +4984,30 @@ async function loadPersistedState(){
       const desktopResult = await window.cabinetDesktopState.readState();
       const parsed = desktopResult?.data;
       if(parsed && typeof parsed === 'object'){
-        const loadedClients = Array.isArray(parsed?.clients)
-          ? parsed.clients.map(normalizeClient).filter(Boolean)
-          : [];
-        const loadedUsers = Array.isArray(parsed?.users)
-          ? parsed.users.map(normalizeUser).filter(Boolean)
-          : [];
-        const loadedSalleAssignments = normalizeSalleAssignments(parsed?.salleAssignments);
-        const loadedDraft = parsed?.audienceDraft && typeof parsed.audienceDraft === 'object'
-          ? parsed.audienceDraft
-          : {};
-        const loadedRecycleBin = normalizeRecycleBinEntries(parsed?.recycleBin);
-        const loadedRecycleArchive = normalizeRecycleArchiveEntries(parsed?.recycleArchive);
-        const nextUsers = ensureManagerUser(loadedUsers);
-        const nextSignature = buildStateSignature(
-          loadedClients,
-          loadedSalleAssignments,
-          nextUsers,
-          loadedDraft,
-          loadedRecycleBin,
-          loadedRecycleArchive
-        );
-        if(nextSignature && nextSignature === lastPersistedStateSignature){
+        const normalizedState = normalizePersistedStateSource(parsed);
+        if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
           return false;
         }
-
-        AppState.clients = loadedClients;
-        AppState.salleAssignments = loadedSalleAssignments;
-        USERS = nextUsers;
-        markAudienceRowsCacheDirty();
-        audienceDraft = loadedDraft;
-        AppState.recycleBin = loadedRecycleBin;
-        AppState.recycleArchive = loadedRecycleArchive;
-        lastPersistedStateSignature = buildStateSignature(
-          AppState.clients,
-          AppState.salleAssignments,
-          USERS,
-          audienceDraft,
-          AppState.recycleBin,
-          AppState.recycleArchive
-        );
-        syncCurrentUserFromUsers();
-        const snapshot = buildAppStatePayload();
-        await writeStateToIndexedDb(snapshot);
-        writeStateToLocalStorage(snapshot);
-        setSyncStatus('ok', 'Etat charge depuis appsavocat.json');
+        await applyPersistedStateSource(normalizedState, {
+          writeIndexedDb: true,
+          writeLocalStorage: true,
+          syncStatusMessage: 'Etat charge depuis appsavocat.json'
+        });
         return true;
       }
-  }catch(err){
-    console.warn('Impossible de charger appsavocat.json', err);
-  }
+    }catch(err){
+      console.warn('Impossible de charger appsavocat.json', err);
+    }
   }
 
   const indexedState = await readStateFromIndexedDb();
   if(indexedState && typeof indexedState === 'object'){
-    const loadedClients = Array.isArray(indexedState?.clients)
-      ? indexedState.clients.map(normalizeClient).filter(Boolean)
-      : [];
-    const loadedUsers = Array.isArray(indexedState?.users)
-      ? indexedState.users.map(normalizeUser).filter(Boolean)
-      : [];
-    const loadedSalleAssignments = normalizeSalleAssignments(indexedState?.salleAssignments);
-    const loadedDraft = indexedState?.audienceDraft && typeof indexedState.audienceDraft === 'object'
-      ? indexedState.audienceDraft
-      : {};
-    const loadedRecycleBin = normalizeRecycleBinEntries(indexedState?.recycleBin);
-    const loadedRecycleArchive = normalizeRecycleArchiveEntries(indexedState?.recycleArchive);
-    const nextUsers = ensureManagerUser(loadedUsers);
-    const nextSignature = buildStateSignature(
-      loadedClients,
-      loadedSalleAssignments,
-      nextUsers,
-      loadedDraft,
-      loadedRecycleBin,
-      loadedRecycleArchive
-    );
-    if(nextSignature && nextSignature !== lastPersistedStateSignature){
-      AppState.clients = loadedClients;
-      AppState.salleAssignments = loadedSalleAssignments;
-      USERS = nextUsers;
-      markAudienceRowsCacheDirty();
-      audienceDraft = loadedDraft;
-      AppState.recycleBin = loadedRecycleBin;
-      AppState.recycleArchive = loadedRecycleArchive;
-      lastPersistedStateSignature = buildStateSignature(
-        AppState.clients,
-        AppState.salleAssignments,
-        USERS,
-        audienceDraft,
-        AppState.recycleBin,
-        AppState.recycleArchive
-      );
-      syncCurrentUserFromUsers();
-      writeStateToLocalStorage(buildAppStatePayload());
-      setSyncStatus('ok', 'Etat charge depuis IndexedDB');
+    const normalizedState = normalizePersistedStateSource(indexedState);
+    if(normalizedState.signature && normalizedState.signature !== lastPersistedStateSignature){
+      await applyPersistedStateSource(normalizedState, {
+        writeLocalStorage: true,
+        syncStatusMessage: 'Etat charge depuis IndexedDB'
+      });
       return true;
     }
   }
@@ -3892,47 +5017,11 @@ async function loadPersistedState(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return false;
     const parsed = JSON.parse(raw);
-    const loadedClients = Array.isArray(parsed?.clients)
-      ? parsed.clients.map(normalizeClient).filter(Boolean)
-      : [];
-    const loadedUsers = Array.isArray(parsed?.users)
-      ? parsed.users.map(normalizeUser).filter(Boolean)
-      : [];
-    const loadedSalleAssignments = normalizeSalleAssignments(parsed?.salleAssignments);
-    const loadedDraft = parsed?.audienceDraft && typeof parsed.audienceDraft === 'object'
-      ? parsed.audienceDraft
-      : {};
-    const loadedRecycleBin = normalizeRecycleBinEntries(parsed?.recycleBin);
-    const loadedRecycleArchive = normalizeRecycleArchiveEntries(parsed?.recycleArchive);
-    const nextUsers = ensureManagerUser(loadedUsers);
-    const nextSignature = buildStateSignature(
-      loadedClients,
-      loadedSalleAssignments,
-      nextUsers,
-      loadedDraft,
-      loadedRecycleBin,
-      loadedRecycleArchive
-    );
-    if(nextSignature && nextSignature === lastPersistedStateSignature){
+    const normalizedState = normalizePersistedStateSource(parsed);
+    if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
       return false;
     }
-
-    AppState.clients = loadedClients;
-    AppState.salleAssignments = loadedSalleAssignments;
-    USERS = nextUsers;
-    markAudienceRowsCacheDirty();
-    audienceDraft = loadedDraft;
-    AppState.recycleBin = loadedRecycleBin;
-    AppState.recycleArchive = loadedRecycleArchive;
-    lastPersistedStateSignature = buildStateSignature(
-      AppState.clients,
-      AppState.salleAssignments,
-      USERS,
-      audienceDraft,
-      AppState.recycleBin,
-      AppState.recycleArchive
-    );
-    syncCurrentUserFromUsers();
+    await applyPersistedStateSource(normalizedState);
     return true;
   }catch(err){
     console.warn('Etat local corrompu, utilisation des valeurs par défaut', err);
@@ -3941,22 +5030,51 @@ async function loadPersistedState(){
 }
 
 async function refreshRemoteState(){
+  if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
-  if(typeof document !== 'undefined' && document.hidden) return;
-  if(editingDossier) return;
-  if(importInProgress) return;
-  if(persistTimer) return;
-  if(Object.keys(audienceDraft || {}).length) return;
-  const hasChanged = await loadPersistedState();
-  if(!hasChanged) return;
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderSalle();
-  renderEquipe();
+  if(
+    !remoteRefreshPending
+    && Number(remoteStateVersion) > 0
+    && Number(remoteStateVersion) === Number(lastRemoteStateLoadVersion)
+    && String(remoteStateUpdatedAt || '') === String(lastRemoteStateLoadUpdatedAt || '')
+  ){
+    return;
+  }
+  if(remoteRefreshInFlight){
+    remoteRefreshPending = true;
+    return;
+  }
+  const blocker = getRemoteRefreshBlocker();
+  if(blocker){
+    remoteRefreshPending = true;
+    queueRemoteStateRefresh(REMOTE_SYNC_BLOCKED_RETRY_MS);
+    return;
+  }
+  remoteRefreshInFlight = true;
+  try{
+    const hasChanged = await loadPersistedState();
+    if(hasChanged){
+      markDeferredRenderDirty(
+        'dashboard',
+        'clients',
+        'creation',
+        'suivi',
+        'audience',
+        'diligence',
+        'salle',
+        'equipe',
+        'recycle',
+        'clientDropdown'
+      );
+      refreshVisibleSectionsAfterRemoteSync();
+    }
+  }finally{
+    remoteRefreshInFlight = false;
+    if(remoteRefreshPending){
+      remoteRefreshPending = false;
+      queueRemoteStateRefresh(0);
+    }
+  }
 }
 
 function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
@@ -3968,14 +5086,22 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 }
 
 function startRemoteSync(){
+  if(LOCAL_ONLY_MODE){
+    updateRemoteStateMetadata({ version: 0, updatedAt: '' });
+    setSyncStatus('error', 'Mode local (offline)');
+    return;
+  }
   if(remoteSyncTimer) return;
   startRemoteSyncStream();
   refreshServerConnectionStatus().catch(()=>{});
-  queueRemoteStateRefresh(0);
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     if(remoteSyncHealthTick === 0){
       refreshServerConnectionStatus().catch(()=>{});
+    }
+    if(remoteRefreshPending){
+      queueRemoteStateRefresh(0);
+      return;
     }
     if(!remoteSyncStreamConnected){
       queueRemoteStateRefresh(0);
@@ -4012,6 +5138,7 @@ function scheduleRemoteSyncStreamRetry(){
 }
 
 function startRemoteSyncStream(){
+  if(LOCAL_ONLY_MODE) return;
   if(typeof EventSource === 'undefined') return;
   if(remoteSyncStream) return;
   try{
@@ -4021,20 +5148,39 @@ function startRemoteSyncStream(){
       remoteSyncStreamConnected = true;
       setSyncStatus('ok', 'Connecte au serveur (actif)');
     };
-    stream.addEventListener('state', (event)=>{
+    stream.addEventListener('state-updated', (event)=>{
       try{
         const payload = JSON.parse(String(event?.data || '{}'));
+        const previousVersion = remoteStateVersion;
+        const previousUpdatedAt = remoteStateUpdatedAt;
+        updateRemoteStateMetadata(payload);
         if(payload?.updatedAt) setLiveDelayMetricFromIso(payload.updatedAt);
+        if(String(payload?.sourceId || '') === APP_INSTANCE_ID) return;
+        if(payload?.patchKind === 'dossier' && applyRemoteDossierPatchLocally(payload.patch)){
+          const patchHasAudienceImpact = String(payload?.patch?.action || '').trim().toLowerCase() === 'create'
+            ? dossierHasAudienceImpact(payload?.patch?.dossier || {})
+            : true;
+          finalizeRemoteStateUpdateLocally({ audience: patchHasAudienceImpact });
+          remoteRefreshPending = false;
+          return;
+        }
+        if(applyRemoteSlicePatchLocally(payload?.patchKind, payload?.patch)){
+          finalizeRemoteStateUpdateLocally();
+          remoteRefreshPending = false;
+          return;
+        }
+        if(
+          Number(payload?.version) > 0
+          && Number(previousVersion) > 0
+          && Number(payload.version) === Number(previousVersion)
+          && String(payload?.updatedAt || '') === String(previousUpdatedAt || '')
+        ){
+          remoteRefreshPending = false;
+          return;
+        }
       }catch(err){}
-      queueRemoteStateRefresh();
+      queueRemoteStateRefresh(0);
     });
-    stream.onmessage = (event)=>{
-      try{
-        const payload = JSON.parse(String(event?.data || '{}'));
-        if(payload?.updatedAt) setLiveDelayMetricFromIso(payload.updatedAt);
-      }catch(err){}
-      queueRemoteStateRefresh();
-    };
     stream.onerror = ()=>{
       remoteSyncStreamConnected = false;
       if(remoteSyncStream){
@@ -4071,8 +5217,11 @@ function parseExcelData(rows){
     refRestitution: ['reference dossier restitution', 'réference dossier restitution', 'référence dossier restitution', 'ref dossier restitution'],
     refSfdc: ['reference dossier sfdc', 'réference dossier sfdc', 'référence dossier sfdc', 'ref dossier sfdc'],
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
-    executionNo: ['execution n', 'execution no', 'execution n°', 'execution numero', 'num execution', 'numero execution', 'numéro execution', 'notification', 'notification n', 'notificat'],
-    sort: ['sort']
+    notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
+    notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
+    executionNo: ['execution n', 'execution no', 'execution n°', 'execution numero', 'num execution', 'numero execution', 'numéro execution'],
+    sort: ['sort'],
+    tribunal: ['tribunal', 'trib', 'tr']
   };
 
   const audienceHeaderKeys = {
@@ -4166,8 +5315,11 @@ function parseExcelData(rows){
       refRestitution: getColIndex(dossierColMap, dossierHeaderKeys.refRestitution),
       refSfdc: getColIndex(dossierColMap, dossierHeaderKeys.refSfdc),
       refInjonction: getColIndex(dossierColMap, dossierHeaderKeys.refInjonction),
+      notificationSort: getColIndex(dossierColMap, dossierHeaderKeys.notificationSort),
+      notificationNo: getColIndex(dossierColMap, dossierHeaderKeys.notificationNo),
       executionNo: getColIndex(dossierColMap, dossierHeaderKeys.executionNo),
-      sort: getColIndex(dossierColMap, dossierHeaderKeys.sort)
+      sort: getColIndex(dossierColMap, dossierHeaderKeys.sort),
+      tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal)
     };
 
     let carriedAffectationDate = '';
@@ -4196,6 +5348,9 @@ function parseExcelData(rows){
       const refRestitution = idx.refRestitution !== -1 ? String(row[idx.refRestitution] || '').trim() : '';
       const refSfdc = idx.refSfdc !== -1 ? String(row[idx.refSfdc] || '').trim() : '';
       const refInjonction = idx.refInjonction !== -1 ? String(row[idx.refInjonction] || '').trim() : '';
+      const notificationSort = idx.notificationSort !== -1 ? String(row[idx.notificationSort] || '').trim() : '';
+      const notificationNo = idx.notificationNo !== -1 ? String(row[idx.notificationNo] || '').trim() : '';
+      const tribunal = idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '';
       const immatriculation = idx.immatriculation !== -1 ? String(row[idx.immatriculation] || '').trim() : '';
       const boiteNo = idx.boiteNo !== -1 ? String(row[idx.boiteNo] || '').trim() : '';
       const caution = idx.caution !== -1 ? String(row[idx.caution] || '').trim() : '';
@@ -4265,8 +5420,11 @@ function parseExcelData(rows){
         refRestitution,
         refSfdc,
         refInjonction,
+        notificationSort,
+        notificationNo,
         executionNo,
-        sort
+        sort,
+        tribunal
       });
       carriedAffectationDate = '';
       carriedMontant = '';
@@ -4306,7 +5464,7 @@ function parseExcelData(rows){
         debiteur,
         refDossier,
         procedureText: idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '',
-        audience: idx.audience !== -1 ? String(row[idx.audience] || '').trim() : '',
+        audience: idx.audience !== -1 ? parseExcelDateValue(row[idx.audience]) : '',
         juge: idx.juge !== -1 ? String(row[idx.juge] || '').trim() : '',
         sort: idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '',
         tribunal: idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '',
@@ -4392,6 +5550,13 @@ function buildExcelImportIssueMessage(issues){
     lines.push(`... +${issues.length - maxIssues} autres lignes ignorées`);
   }
   return lines.join('\n');
+}
+
+function isExcelImportDisplayError(issue){
+  const normalized = String(issue || '').trim().toLowerCase();
+  if(!normalized) return false;
+  if(normalized.startsWith('rapprochement automatique:')) return false;
+  return true;
 }
 
 function renderExcelImportIssues(issuesText, container){
@@ -4507,9 +5672,24 @@ function showExcelImportResult(summary, issuesText){
   modal.style.display = 'flex';
 }
 
+function resetAudienceFiltersUi(){
+  filterAudienceColor = 'all';
+  filterAudienceProcedure = 'all';
+  filterAudienceTribunal = 'all';
+  filterAudienceDate = '';
+  filterAudienceErrorsOnly = false;
+  setSelectedAudienceColor('all', false);
+  if($('filterAudience')) $('filterAudience').value = '';
+  if($('filterAudienceColor')) $('filterAudienceColor').value = 'all';
+  if($('filterAudienceProcedure')) $('filterAudienceProcedure').value = 'all';
+  if($('filterAudienceTribunal')) $('filterAudienceTribunal').value = 'all';
+  if($('filterAudienceDate')) $('filterAudienceDate').value = '';
+  const errBtn = $('audienceErrorsBtn');
+  if(errBtn) errBtn.classList.remove('active');
+}
+
 async function applyExcelImport(payload, options = {}){
   const { dossiers, audiences } = payload;
-  const syncSnapshot = captureSyncStatusSnapshot();
   const referenceHints = payload && typeof payload.referenceHints === 'object'
     ? payload.referenceHints
     : {};
@@ -4596,6 +5776,16 @@ async function applyExcelImport(payload, options = {}){
   const rowRefClientToProcMap = new Map();
   const audienceOrphanDossierMap = new Map();
   const candidateSeenByMap = new WeakMap();
+  const dossierAudienceRefsCache = new WeakMap();
+
+  const getDossierAudienceRefsCached = (dossier)=>{
+    if(!dossier || typeof dossier !== 'object') return new Set();
+    const cached = dossierAudienceRefsCache.get(dossier);
+    if(cached) return cached;
+    const refs = getDossierAudienceReferenceKeys(dossier);
+    dossierAudienceRefsCache.set(dossier, refs);
+    return refs;
+  };
 
   const pushCandidate = (map, key, candidate)=>{
     if(!key) return;
@@ -4643,6 +5833,7 @@ async function applyExcelImport(payload, options = {}){
     };
     AppState.clients.push(client);
     clientMap.set(key, client);
+    grantCurrentViewerAccessToClient(client.id);
     return client;
   };
 
@@ -4821,6 +6012,7 @@ async function applyExcelImport(payload, options = {}){
       AppState.clients.push(client);
       clientMap.set(clientKey, client);
     }
+    grantCurrentViewerAccessToClient(client.id);
 
     const parsedProceduresRaw = parseProcedureList(row.procedureText);
     const parsedKnownProcedures = parsedProceduresRaw.filter(proc=>knownProcedureSet.has(proc));
@@ -4921,12 +6113,18 @@ async function applyExcelImport(payload, options = {}){
     setProcRef('SFDC', row.refSfdc);
     setProcRef('Injonction', row.refInjonction);
     const executionNoValue = String(row.executionNo || '').trim();
+    const notificationSortValue = String(row.notificationSort || '').trim();
+    const notificationNoValue = String(row.notificationNo || '').trim();
     const sortValue = String(row.sort || '').trim();
+    const tribunalValue = String(row.tribunal || '').trim();
     const assignProcedureMeta = (proc, refValue)=>{
-      if(!(executionNoValue || sortValue) || !String(refValue || '').trim()) return;
+      if(!(executionNoValue || sortValue || tribunalValue || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))) || !String(refValue || '').trim()) return;
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
       if(executionNoValue) dossier.procedureDetails[proc].executionNo = executionNoValue;
       if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
+      if(tribunalValue) dossier.procedureDetails[proc].tribunal = tribunalValue;
+      if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
+      if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
     };
     assignProcedureMeta('SFDC', row.refSfdc);
     assignProcedureMeta('Injonction', row.refInjonction);
@@ -5104,7 +6302,7 @@ async function applyExcelImport(payload, options = {}){
         let score = 0;
         if(rowRefClientKeySet.size && rowRefClientKeySet.has(candidate.rowRefClient)) score += 220;
         if(rowDebiteur && candidate.rowDebiteur === rowDebiteur) score += 140;
-        const candidateRefs = getDossierAudienceReferenceKeys(candidate?.dossier || {});
+        const candidateRefs = getDossierAudienceRefsCached(candidate?.dossier || null);
         if(candidateRefs.has(refKey)) score += 90;
         if(rowRefClientKeySet.size && [...rowRefClientKeySet].some(key=>candidateRefs.has(key))) score += 80;
         if(score > bestScore){
@@ -5118,7 +6316,7 @@ async function applyExcelImport(payload, options = {}){
     const { dossier, proc } = match;
     let refClientMismatch = null;
     if(rowRefClientKeySet.size){
-      const matchedDossierRefKeys = getDossierAudienceReferenceKeys(dossier);
+      const matchedDossierRefKeys = getDossierAudienceRefsCached(dossier);
       const hasSameRefClient = [...rowRefClientKeySet].some(key=>matchedDossierRefKeys.has(key));
       const hasKnownRefClientElsewhere = [...rowRefClientKeySet].some(key=>dossierRefClientSet.has(key));
       // Only flag ref client mismatch when the provided ref client is unknown globally.
@@ -5161,8 +6359,11 @@ async function applyExcelImport(payload, options = {}){
     if(!!dossier?.isAudienceOrphanImport){
       p._missingGlobal = true;
     }
-    if(ref) p.referenceClient = ref;
-    if(row.audience) p.audience = row.audience;
+    if(ref){
+      p.referenceClient = ref;
+      dossierAudienceRefsCache.delete(dossier);
+    }
+    if(normalizedAudienceDate) p.audience = normalizedAudienceDate;
     if(row.juge) p.juge = row.juge;
     if(row.sort) p.sort = row.sort;
     if(row.tribunal) p.tribunal = row.tribunal;
@@ -5186,30 +6387,28 @@ async function applyExcelImport(payload, options = {}){
     }
   }
 
-  const serverSaved = await persistAppStateNow();
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  const issuesText = buildExcelImportIssueMessage(importIgnoredRows);
-  const summary = [
+  handleDossierDataChange({ audience: true });
+  await persistAppStateNow();
+  refreshPrimaryViews();
+  const importDisplayErrors = importIgnoredRows.filter(isExcelImportDisplayError);
+  const issuesText = buildExcelImportIssueMessage(importDisplayErrors);
+  const summaryLines = [
     `Import terminé.`,
     `Dossiers détectés: ${dossiers.length}`,
     `Dossiers importés: ${importedDossiersCount}`,
     `Audience hors global rapprochée: ${reconciledOrphans}`,
     `Audiences détectées: ${audiences.length}`,
     `Audiences liées: ${linkedAudiencesCount}`,
-    `Erreurs ignorées (non bloquantes): ${importIgnoredRows.length}`
-  ].join('\n');
-  showExcelImportResult(summary, issuesText);
-  if(!serverSaved){
-    alert('Import terminé localement, mais sauvegarde serveur non confirmée. Vérifiez la connexion serveur/API.');
+    `Erreurs ignorées (non bloquantes): ${importDisplayErrors.length}`
+  ];
+  if(!importDossiers && importAudiences){
+    summaryLines.push('Mode Audience: création de nouveaux dossiers globaux désactivée.');
   }
+  const summary = summaryLines.join('\n');
+  closeImportProgressModal(true);
+  showExcelImportResult(summary, issuesText);
   }finally{
-    restoreSyncStatusSnapshot(syncSnapshot);
+    // Keep current sync status (persist call already set the right state).
   }
 }
 
@@ -5222,10 +6421,13 @@ async function handleExcelImportFile(file, options = {}){
   }
   importInProgress = true;
   try{
+    openImportProgressModal('Import Excel');
+    updateImportProgress('Lecture du fichier...', 0, 1);
     setSyncStatus('syncing', 'Import Excel: lecture du fichier...');
     const buffer = await file.arrayBuffer();
+    updateImportProgress('Analyse de la feuille...', 1, 3);
     setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
-    const workbook = XLSX.read(buffer, { type: 'array' });
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     if(!sheetName){
       throw new Error('Le fichier Excel ne contient aucune feuille.');
@@ -5237,13 +6439,14 @@ async function handleExcelImportFile(file, options = {}){
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       defval: '',
-      raw: false,
+      raw: true,
       dateNF: 'dd/mm/yyyy'
     });
     if(!Array.isArray(rows)){
       throw new Error('Format de feuille non reconnu.');
     }
     const parsed = parseExcelData(rows);
+    updateImportProgress('Fusion des données...', 2, 3);
     setSyncStatus('syncing', 'Import Excel: fusion des données...');
     await applyExcelImport(parsed, options);
   }catch(err){
@@ -5252,16 +6455,20 @@ async function handleExcelImportFile(file, options = {}){
     const extra = details ? `\nDétail: ${details}` : '';
     alert(`Erreur import Excel. Vérifiez le format (xlsx/xls) et les en-têtes.${extra}`);
   }finally{
+    closeImportProgressModal(false);
     importInProgress = false;
   }
 }
 
 async function handleAudienceImportFile(file){
-  return handleExcelImportFile(file, {
+  await handleExcelImportFile(file, {
     importDossiers: false,
     importAudiences: true,
     audienceMode: 'audience-only'
   });
+  resetAudienceFiltersUi();
+  showView('audience');
+  renderAudience();
 }
 
 async function exportBackupExcelImportable(){
@@ -5577,26 +6784,32 @@ async function exportBackupExcelImportable(){
 
 // ================== INIT ==================
 async function initApplication(){
-  setSyncStatus('syncing');
+  setSyncStatus(LOCAL_ONLY_MODE ? 'error' : 'syncing', LOCAL_ONLY_MODE ? 'Mode local (offline)' : undefined);
   renderSyncMetrics();
-  await resolveApiBase();
+  if(!LOCAL_ONLY_MODE){
+    await resolveApiBase();
+  }
   await loadPersistedState();
   await persistDesktopStateFileNow();
   hasLoadedState = true;
   setupEvents();
   restoreSidebarState();
   renderProcedureMontantGroups();
-  renderClients();
-  renderDashboard();
-  updateClientDropdown();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderRecycleBin();
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
   warmupExcelLibrariesOnIdle();
   startRemoteSync();
-  showView('dashboard');
+  showView('dashboard', { warmup: false });
 }
 
 // ================== EVENTS ==================
@@ -5617,7 +6830,11 @@ function setupEvents(){
   });
   $('dashboardLink').onclick = ()=>showView('dashboard');
   $('clientsLink').onclick = ()=>showView('clients');
-  $('creationLink').onclick = ()=>showView('creation');
+  $('creationLink').onclick = ()=>{
+    creationPinnedClientId = '';
+    resetCreationForm();
+    showView('creation');
+  };
   $('suiviLink').onclick = ()=>showView('suivi');
   $('audienceLink').onclick = ()=>showView('audience');
   $('diligenceLink').onclick = ()=>showView('diligence');
@@ -5660,7 +6877,8 @@ function setupEvents(){
     if(!file) return;
     handleExcelImportFile(file, {
       importDossiers: true,
-      importAudiences: false
+      importAudiences: false,
+      clearAudienceOnDossierOnly: true
     }).catch(err=>console.error(err));
     e.target.value = '';
   });
@@ -5760,6 +6978,9 @@ function setupEvents(){
     filterSuiviTribunal = e.target.value === 'all' ? 'all' : resolveSuiviTribunalFilterKey(e.target.value);
     renderSuivi();
   });
+  $('selectAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(true));
+  $('clearAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(false));
+  $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
   $('audienceErrorsBtn')?.addEventListener('click', ()=>{
     filterAudienceErrorsOnly = !filterAudienceErrorsOnly;
@@ -5924,7 +7145,7 @@ function setSelectedAudienceColor(color, syncFilter){
 }
 
 // ================== NAV ==================
-function showView(v){
+function showView(v, options = {}){
   const setVisible = (id, visible)=>{
     const el = $(id);
     if(!el) return;
@@ -5950,12 +7171,16 @@ function showView(v){
   document.querySelectorAll('.nav-link').forEach(n=>n.classList.remove('active'));
   const target = $(v+'Link');
   if(target) target.classList.add('active');
-  if(v === 'suivi') renderSuivi();
-  if(v === 'audience') renderAudience();
-  if(v === 'diligence') renderDiligence();
-  if(v === 'salle') renderSalle();
-  if(v === 'equipe') renderEquipe();
-  if(v === 'recycle') renderRecycleBin();
+  if(v === 'dashboard') renderDashboard({ force: true });
+  if(v === 'clients') renderClients({ force: true });
+  if(v === 'creation') updateClientDropdown({ force: true });
+  if(v === 'suivi') renderSuivi({ force: true });
+  if(v === 'audience') renderAudience({ force: true });
+  if(v === 'diligence') renderDiligence({ force: true });
+  if(v === 'salle') renderSalle({ force: true });
+  if(v === 'equipe') renderEquipe({ force: true });
+  if(v === 'recycle') renderRecycleBin({ force: true });
+  if(v === 'dashboard' && options.warmup !== false) scheduleBackgroundDataWarmup(1800);
   if(isMobileViewport()){
     setSidebarCollapsed(true);
   }
@@ -5972,6 +7197,15 @@ function login(){
   );
   if(!u){ $('errorMsg').style.display='block'; return; }
   currentUser = u;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
   $('errorMsg').style.display='none';
   const forceDashboardVisible = ()=>{
     if($('loginScreen')) $('loginScreen').style.display = 'none';
@@ -6006,19 +7240,35 @@ function login(){
     }
   };
 
+  const queueLoginPostBoot = ()=>{
+    if(loginPostBootTimer){
+      clearTimeout(loginPostBootTimer);
+      loginPostBootTimer = null;
+    }
+    loginPostBootTimer = setTimeout(()=>{
+      loginPostBootTimer = null;
+      safeRun('renderDashboard(immediate)', ()=>renderDashboard({ force: true, immediate: true, deferHeavy: true, includeAudienceMetrics: false }));
+      safeRun('queueSidebarSalleSessionsRender', ()=>queueSidebarSalleSessionsRender(2800));
+      safeRun('scheduleBackgroundDataWarmup', ()=>scheduleBackgroundDataWarmup(2200));
+    }, 0);
+  };
+
   forceDashboardVisible();
-  safeRun('applyRoleUI', applyRoleUI);
-  safeRun('showView(dashboard)', ()=>showView('dashboard'));
-  safeRun('renderClients', renderClients);
-  safeRun('renderDashboard', renderDashboard);
-  safeRun('updateClientDropdown', updateClientDropdown);
-  safeRun('renderSuivi', renderSuivi);
-  safeRun('renderAudience', renderAudience);
-  safeRun('renderDiligence', renderDiligence);
-  safeRun('renderSalle', renderSalle);
-  safeRun('renderEquipe', renderEquipe);
-  safeRun('renderRecycleBin', renderRecycleBin);
-  safeRun('renderSidebarSalleSessions', renderSidebarSalleSessions);
+  markDeferredRenderDirty(
+    'dashboard',
+    'clients',
+    'creation',
+    'suivi',
+    'audience',
+    'diligence',
+    'salle',
+    'equipe',
+    'recycle',
+    'clientDropdown'
+  );
+  safeRun('applyRoleUI', ()=>applyRoleUI({ skipNavigation: true }));
+  safeRun('primeDashboardTotalClients', ()=>animateDashboardMetric('totalClients', getVisibleClients().length, { immediate: true }));
+  queueLoginPostBoot();
 
   const hasVisibleSection = [
     'dashboardSection',
@@ -6050,6 +7300,15 @@ function logout(){
   stopRemoteSync();
   closeDossierModal();
   currentUser = null;
+  visibleClientsCache = null;
+  visibleClientsCacheVersion = -1;
+  visibleClientsCacheUserKey = '';
+  editableClientsCache = null;
+  editableClientsCacheVersion = -1;
+  editableClientsCacheUserKey = '';
+  clientListSummaryCache = null;
+  clientListSummaryCacheVersion = -1;
+  clientListSummaryCacheUserKey = '';
   lastPingMs = null;
   lastLiveDelayMs = null;
   renderSyncMetrics();
@@ -6061,7 +7320,8 @@ function logout(){
   setSyncStatus('pending');
 }
 
-function applyRoleUI(){
+function applyRoleUI(options = {}){
+  const skipNavigation = options.skipNavigation === true;
   const viewer = isViewer();
   const manager = isManager();
   const canCreateClient = canEditData();
@@ -6078,8 +7338,9 @@ function applyRoleUI(){
   document.querySelectorAll('.color-btn').forEach(btn=> btn.disabled = !audienceEditable);
   if($('saveAudienceBtn')) $('saveAudienceBtn').style.display = audienceEditable ? '' : 'none';
 
+  if(skipNavigation) return;
+
   if(!manager){
-    if($('recycleSection')?.style.display !== 'none') showView('dashboard');
     showView('dashboard');
   }else if(viewer && $('creationSection')?.style.display !== 'none'){
     showView('dashboard');
@@ -6097,52 +7358,97 @@ function addClient(name){
     goToCreation(existing.id);
     return;
   }
-  AppState.clients.push({ id: Date.now(), name, dossiers: [] });
+  const newClient = { id: Date.now(), name, dossiers: [] };
+  AppState.clients.push(newClient);
   queuePersistAppState();
   $('clientName').value='';
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderAudience();
-  renderEquipe();
+  refreshPrimaryViews();
+  goToCreation(newClient.id);
 }
 
-function updateClientDropdown(){
+function updateClientDropdown(options = {}){
+  if(!shouldRenderClientDropdown(options)) return;
   const selectClient = $('selectClient');
   if(!selectClient) return;
-  const optionsHtml = getVisibleClients()
-    .filter(c=>canEditClient(c))
+  const currentValue = creationPinnedClientId
+    ? String(creationPinnedClientId)
+    : String(selectClient.value || '');
+  const optionsHtml = getEditableClients()
     .map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`)
     .join('');
   selectClient.innerHTML = `<option value="">Client</option>${optionsHtml}`;
+  if(currentValue) selectClient.value = currentValue;
+  selectClient.disabled = !!creationPinnedClientId;
 }
 
-function renderClients(){
+function renderClients(options = {}){
+  if(!shouldRenderDeferredSection('clients', options)) return;
   const q = $('searchClientInput')?.value?.toLowerCase() || '';
   const clientsBody = $('clientsBody');
   if(!clientsBody) return;
-  const rowsHtml = getVisibleClients()
-    .filter(c => c.name.toLowerCase().includes(q))
-    .map(c=>{
-      const canEdit = canEditClient(c);
-      const canDelete = canDeleteData();
+  const allVisibleClients = getClientListSummaries();
+  const canDelete = canDeleteData();
+  syncPaginationFilterState('clients', `${q}||${allVisibleClients.length}`);
+
+  const renderRows = (rows)=>{
+    const pageData = paginateRows(rows, 'clients');
+    if(!pageData.rows.length){
+      clientsBody.innerHTML = '<tr><td colspan="3" class="diligence-empty">Aucun client trouvé.</td></tr>';
+      renderPagination('clients', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      return;
+    }
+    const rowsHtml = pageData.rows.map(item=>{
+      const c = item.client;
+      const canEdit = item.canEdit;
       return `
         <tr>
-          <td data-label="Client">${escapeHtml(c.name)}</td>
-          <td data-label="Nb Dossiers">${c.dossiers.length}</td>
+          <td data-label="Client">${escapeHtml(item.name)}</td>
+          <td data-label="Nb Dossiers">${item.dossierCount}</td>
           <td data-label="Actions" class="client-actions-cell">
-            <button class="btn-primary" onclick="goToCreation(${c.id})" ${canEdit ? '' : 'disabled'}>
+            <button class="btn-primary" onclick="goToCreation(${item.id})" ${canEdit ? '' : 'disabled'}>
               <i class="fa-solid fa-folder-plus"></i>
             </button>
-            <button class="btn-danger" onclick="deleteClient(${c.id})" ${canDelete ? '' : 'disabled'}>
+            <button class="btn-danger" onclick="deleteClient(${item.id})" ${canDelete ? '' : 'disabled'}>
               <i class="fa-solid fa-trash"></i>
             </button>
           </td>
         </tr>
       `;
+    }).join('');
+    clientsBody.innerHTML = rowsHtml;
+    renderPagination('clients', pageData);
+  };
+
+  const canUseWorker = !!getClientFilterWorker() && allVisibleClients.length >= 200;
+  if(!q){
+    renderRows(allVisibleClients);
+    return;
+  }
+  if(!canUseWorker){
+    renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
+    return;
+  }
+
+  const requestId = ++clientFilterRequestSeq;
+  clientsBody.innerHTML = '<tr><td colspan="3" class="diligence-empty">Filtrage des clients...</td></tr>';
+  const workerInput = allVisibleClients.map((item, idx)=>({
+    idx,
+    name: item.name
+  }));
+
+  runClientFilterInWorker(workerInput, q, requestId)
+    .then((filteredIndexes)=>{
+      if(requestId !== clientFilterRequestSeq) return;
+      if(!Array.isArray(filteredIndexes)){
+        renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
+        return;
+      }
+      renderRows(filteredIndexes.map(idx=>allVisibleClients[idx]).filter(Boolean));
     })
-    .join('');
-  clientsBody.innerHTML = rowsHtml;
+    .catch(()=>{
+      if(requestId !== clientFilterRequestSeq) return;
+      renderRows(allVisibleClients.filter(item=>item.nameLower.includes(q)));
+    });
 }
 
 function deleteClient(clientId){
@@ -6165,14 +7471,7 @@ function deleteClient(clientId){
     return { ...user, clientIds: user.clientIds.filter(id => Number(id) !== Number(client.id)) };
   });
   queuePersistAppState();
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeRecycle: true });
 }
 
 function deleteAllClients(){
@@ -6204,20 +7503,13 @@ function deleteAllClients(){
   );
 
   queuePersistAppState();
-  renderClients();
-  updateClientDropdown();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderEquipe();
-  renderSalle();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeSalle: true, includeRecycle: true });
 }
 
 function goToCreation(clientId){
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client || !canEditClient(client)) return alert('Accès refusé');
+  creationPinnedClientId = String(clientId || '');
   resetCreationForm(clientId);
   showView('creation');
 }
@@ -6311,6 +7603,7 @@ async function addDossier(){
     dossier.history = [];
     console.log('[ADD DOSSIER]', JSON.stringify(dossier, null, 2));
 
+    let dossierPatch = null;
     if(editingDossier){
       const prevClient = AppState.clients.find(c=>c.id == editingDossier.clientId);
       const previousDossier = prevClient?.dossiers?.[editingDossier.index];
@@ -6324,20 +7617,39 @@ async function addDossier(){
         if(prevClient) prevClient.dossiers.splice(editingDossier.index, 1);
         client.dossiers.push(dossier);
       }
+      dossierPatch = {
+        action: 'update',
+        clientId: Number(editingDossier.clientId),
+        dossierIndex: Number(editingDossier.index),
+        targetClientId: Number(client.id),
+        dossier
+      };
     }else{
       dossier.history = [];
       client.dossiers.push(dossier);
+      dossierPatch = {
+        action: 'create',
+        clientId: Number(client.id),
+        dossier
+      };
     }
-    reconcileAudienceOrphanDossiers();
-    queuePersistAppState();
+    const previousAudienceImpact = editingDossier
+      ? dossierHasAudienceImpact(
+        AppState.clients.find(c=>c.id == editingDossier.clientId)?.dossiers?.[editingDossier.index] || {}
+      )
+      : false;
+    const dossierRequiresAudienceRefresh = previousAudienceImpact || dossierHasAudienceImpact(dossier);
+    if(dossierRequiresAudienceRefresh){
+      reconcileAudienceOrphanDossiers();
+    }
+    handleDossierDataChange({ audience: dossierRequiresAudienceRefresh });
+    if(dossierPatch){
+      await persistDossierPatchNow(dossierPatch, { source: 'dossier' });
+    }else{
+      queuePersistAppState();
+    }
 
-    renderSuivi();
-    renderDashboard();
-    renderClients();
-    renderAudience();
-    renderDiligence();
-    resetCreationForm();
-    showView('suivi');
+    refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi' });
   }catch(err){
     console.error(err);
     alert('Erreur pendant la sauvegarde du dossier');
@@ -6412,74 +7724,6 @@ function downloadFile(index){
 function removeFile(index){
   uploadedFiles.splice(index, 1);
   renderFileList();
-}
-
-// ================== SUIVI ==================
-function renderSuivi(){
-  const q = $('filterGlobal')?.value?.toLowerCase() || '';
-  syncPaginationFilterState('suivi', [q, filterSuiviProcedure, filterSuiviTribunal].join('||'));
-  const suiviBody = $('suiviBody');
-  if(!suiviBody) return;
-  suiviBody.innerHTML='';
-  if(!isManager() && getVisibleClients().length === 0){
-    suiviVirtualRows = [];
-    suiviVirtualLastRange = { start: -1, end: -1 };
-    suiviBody.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
-    renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
-    return;
-  }
-  const base = getSuiviBaseRowsCached();
-  suiviTribunalAliasMap = base.tribunalState.aliasMap;
-  const noProcedureFilter = filterSuiviProcedure === 'all';
-  const noTribunalFilter = filterSuiviTribunal === 'all';
-  const noSearchFilter = !q;
-  let sortedRows = [];
-
-  if(noProcedureFilter && noTribunalFilter && noSearchFilter){
-    sortedRows = base.sortedDefaultRows;
-  }else{
-    const filteredRows = [];
-    base.rawRows.forEach(row=>{
-      const tribunalKeys = row.tribunalKeys || [];
-      if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return;
-      if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return;
-      if(!noSearchFilter){
-        const haystack = row.__suiviHaystack
-          || (row.__suiviHaystack = buildSuiviSearchHaystack(
-            row.c.name,
-            row.d,
-            row.procSource,
-            (row.tribunalList && row.tribunalList.length) ? row.tribunalList : row.tribunalLabels
-          ));
-        if(!haystack.includes(q)) return;
-      }
-      filteredRows.push(row);
-    });
-
-    const duplicatePairCounts = new Map();
-    filteredRows.forEach(row=>{
-      const key = buildSuiviRefDebiteurKey(row);
-      if(!key) return;
-      duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
-    });
-    sortedRows = filteredRows
-      .slice()
-      .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
-  }
-  const pageData = paginateRows(sortedRows, 'suivi');
-  const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
-  suiviVirtualRows = pageData.rows;
-  suiviVirtualLastRange = { start: -1, end: -1 };
-  if(!pageData.rows.length){
-    suiviBody.innerHTML = '<tr><td colspan="9" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
-  }else if(useVirtual){
-    renderSuiviVirtualWindow(true);
-  }else{
-    suiviBody.innerHTML = pageData.rows.map(renderSuiviRowHtml).join('');
-  }
-  renderPagination('suivi', pageData);
-
-  syncSuiviFilterOptions(base.rowsMeta);
 }
 
 function getSuiviBaseRowsCached(){
@@ -6748,6 +7992,36 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
     .join(' ');
 }
 
+function getDiligenceSearchValues(row){
+  if(!row || typeof row !== 'object') return [];
+  const details = row.details || {};
+  const values = [
+    row.clientName,
+    row.procedure,
+    row.tribunal,
+    row.sort,
+    row.delegation,
+    row.ordonnance,
+    row.dossier?.debiteur,
+    row.dossier?.boiteNo,
+    row.dossier?.referenceClient,
+    row.dossier?.ville,
+    details.referenceClient,
+    details.dateDepot,
+    details.depotLe,
+    details.notificationNo,
+    details.notificationStatus,
+    details.notificationSort,
+    details.dateNotification,
+    details.certificatNonAppelStatus,
+    details.executionNo,
+    details.huissier
+  ];
+  return values
+    .map(value=>String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData, draftData){
   const fileNames = Array.isArray(dossier?.files)
     ? dossier.files.map(f=>String(f?.name || '').trim()).filter(Boolean)
@@ -6912,14 +8186,14 @@ function deleteDossier(clientId, index){
     dossier: JSON.parse(JSON.stringify(dossier || {}))
   });
   client.dossiers.splice(index, 1);
-  queuePersistAppState();
+  handleDossierDataChange({ audience: dossierHasAudienceImpact(dossier) });
+  persistDossierPatchNow({
+    action: 'delete',
+    clientId: Number(client.id),
+    dossierIndex: Number(index)
+  }, { source: 'dossier-delete' }).catch(()=>{});
   closeDossierModal();
-  renderClients();
-  renderDashboard();
-  renderSuivi();
-  renderAudience();
-  renderDiligence();
-  renderRecycleBin();
+  refreshPrimaryViews({ includeRecycle: true });
 }
 
 function resetCreationForm(clientId = ''){
@@ -6944,7 +8218,9 @@ function resetCreationForm(clientId = ''){
 
   const selectClient = $('selectClient');
   if(selectClient){
-    selectClient.value = clientId ? String(clientId) : '';
+    const selectedClientId = clientId ? String(clientId) : String(creationPinnedClientId || '');
+    selectClient.value = selectedClientId;
+    selectClient.disabled = !!creationPinnedClientId;
   }
   const addBtn = $('addDossierBtn');
   if(addBtn) addBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Créer le Dossier';
@@ -7062,6 +8338,24 @@ function getDossierByIds(clientId, index){
   return { client, dossier };
 }
 
+function getDossierIndexByReference(clientId, dossierRef){
+  const client = AppState.clients.find(c=>c.id == clientId);
+  if(!client || !Array.isArray(client.dossiers)) return -1;
+  return client.dossiers.indexOf(dossierRef);
+}
+
+function persistDossierReferenceNow(clientId, dossierRef, options = {}){
+  const dossierIndex = getDossierIndexByReference(clientId, dossierRef);
+  if(dossierIndex === -1) return Promise.resolve(false);
+  return persistDossierPatchNow({
+    action: 'update',
+    clientId: Number(clientId),
+    dossierIndex,
+    targetClientId: Number(clientId),
+    dossier: dossierRef
+  }, options);
+}
+
 function viewDossierFile(clientId, index, fileIndex){
   const data = getDossierByIds(clientId, index);
   if(!data) return;
@@ -7137,14 +8431,35 @@ function updateDiligenceCheckedCount(){
   node.innerText = `Cochés: ${diligencePrintSelection.size}`;
 }
 
+function queueDiligenceCheckedCountRender(){
+  if(diligenceCheckedCountRenderQueued) return;
+  diligenceCheckedCountRenderQueued = true;
+  const render = ()=>{
+    diligenceCheckedCountRenderQueued = false;
+    updateDiligenceCheckedCount();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(render);
+    return;
+  }
+  setTimeout(render, 0);
+}
+
 function toggleDiligencePrintSelection(clientId, dossierIndex, procedure, checked){
   const key = makeDiligencePrintKey(clientId, dossierIndex, procedure);
   if(checked){
+    const sizeBefore = diligencePrintSelection.size;
     diligencePrintSelection.add(key);
+    if(diligencePrintSelection.size !== sizeBefore){
+      diligencePrintSelectionVersion += 1;
+      queueDiligenceCheckedCountRender();
+    }
   }else{
-    diligencePrintSelection.delete(key);
+    if(diligencePrintSelection.delete(key)){
+      diligencePrintSelectionVersion += 1;
+      queueDiligenceCheckedCountRender();
+    }
   }
-  updateDiligenceCheckedCount();
 }
 
 function toggleDiligencePrintSelectionEncoded(clientId, dossierIndex, procedureEncoded, checked){
@@ -7153,8 +8468,15 @@ function toggleDiligencePrintSelectionEncoded(clientId, dossierIndex, procedureE
 
 function syncDiligencePrintSelection(allRows){
   const allowed = new Set((allRows || []).map(row=>makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure)));
-  diligencePrintSelection = new Set([...diligencePrintSelection].filter(key=>allowed.has(key)));
-  updateDiligenceCheckedCount();
+  const next = new Set([...diligencePrintSelection].filter(key=>allowed.has(key)));
+  const changed = next.size !== diligencePrintSelection.size;
+  diligencePrintSelection = next;
+  if(changed){
+    diligencePrintSelectionVersion += 1;
+    queueDiligenceCheckedCountRender();
+  }else{
+    updateDiligenceCheckedCount();
+  }
 }
 
 function setAllVisibleDiligenceRowsForPrint(checked){
@@ -7163,7 +8485,19 @@ function setAllVisibleDiligenceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
-  rows.forEach(row=>toggleDiligencePrintSelection(row.clientId, row.dossierIndex, row.procedure, checked));
+  let changed = false;
+  rows.forEach(row=>{
+    const key = makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure);
+    if(checked){
+      const sizeBefore = diligencePrintSelection.size;
+      diligencePrintSelection.add(key);
+      if(diligencePrintSelection.size !== sizeBefore) changed = true;
+    }else{
+      if(diligencePrintSelection.delete(key)) changed = true;
+    }
+  });
+  if(changed) diligencePrintSelectionVersion += 1;
+  queueDiligenceCheckedCountRender();
   renderDiligence();
 }
 
@@ -7312,102 +8646,6 @@ function syncDiligenceOrdonnanceFilter(rows){
   }
   select.value = filterDiligenceOrdonnance;
   diligenceFilterOrdonnanceRowsRef = rows;
-}
-
-function renderDiligence(){
-  const diligenceQuery = $('diligenceSearchInput')?.value?.toLowerCase() || '';
-  syncPaginationFilterState(
-    'diligence',
-    [
-      diligenceQuery,
-      filterDiligenceProcedure,
-      filterDiligenceSort,
-      filterDiligenceDelegation,
-      filterDiligenceOrdonnance,
-      filterDiligenceTribunal
-    ].join('||')
-  );
-  const body = $('diligenceBody');
-  const count = $('diligenceCount');
-  const headRow = $('diligenceHeadRow');
-  if(!body) return;
-  const allRows = getDiligenceRows();
-  syncDiligencePrintSelection(allRows);
-  syncDiligenceProcedureFilter(allRows);
-  syncDiligenceSortFilter(allRows);
-  syncDiligenceDelegationFilter(allRows);
-  syncDiligenceOrdonnanceFilter(allRows);
-  syncDiligenceTribunalFilter(allRows);
-  const rows = getFilteredDiligenceRows(allRows);
-  const showInjonctionColumns = rows.some(row=>String(row?.procedure || '').trim() === 'Injonction');
-
-  if(headRow){
-    if(showInjonctionColumns){
-      headRow.innerHTML = `
-        <th>Client</th>
-        <th>Débiteur</th>
-        <th>Date dépôt</th>
-        <th>Référence dossier</th>
-        <th>Ordonnance</th>
-        <th>Notification N°</th>
-        <th>Statut notification</th>
-        <th>Date notification</th>
-        <th>Certificat non appel</th>
-        <th>Execution N°</th>
-        <th>Ville</th>
-        <th>Délégation</th>
-        <th>Huissier</th>
-        <th>Sort</th>
-        <th>Tribunal</th>
-      `;
-    }else{
-      headRow.innerHTML = `
-        <th>Client</th>
-        <th>Débiteur</th>
-        <th>Date dépôt</th>
-        <th>Référence dossier</th>
-        <th>Ordonnance</th>
-        <th>Execution N°</th>
-        <th>Ville</th>
-        <th>Délégation</th>
-        <th>Huissier</th>
-        <th>Sort</th>
-        <th>Tribunal</th>
-      `;
-    }
-  }
-
-  if(count){
-    const labels = [];
-    labels.push(filterDiligenceProcedure === 'all' ? 'toutes les procédures' : `procédure: ${filterDiligenceProcedure}`);
-    labels.push(filterDiligenceSort === 'all' ? 'tous les sorts' : `sort: ${filterDiligenceSort}`);
-    labels.push(filterDiligenceDelegation === 'all' ? 'toutes les délégations' : `délégation: ${filterDiligenceDelegation}`);
-    labels.push(filterDiligenceOrdonnance === 'all' ? 'toutes les ordonnances' : `ordonnance: ${filterDiligenceOrdonnance}`);
-    labels.push(filterDiligenceTribunal === 'all' ? 'tous les tribunaux' : `tribunal: ${filterDiligenceTribunal}`);
-    const label = labels.join(', ');
-    count.textContent = `${rows.length} ligne(s) diligence (${label})`;
-  }
-
-  if(!rows.length){
-    diligenceVirtualRows = [];
-    diligenceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 15 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
-    renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
-    return;
-  }
-
-  const pageData = paginateRows(rows, 'diligence');
-  const useVirtual = pageData.rows.length >= DILIGENCE_VIRTUAL_MIN_ROWS;
-  diligenceVirtualRows = pageData.rows;
-  diligenceVirtualShowInjonctionColumns = showInjonctionColumns;
-  diligenceVirtualLastRange = { start: -1, end: -1 };
-  if(useVirtual){
-    renderDiligenceVirtualWindow(true);
-  }else{
-    body.innerHTML = pageData.rows.map(row=>renderDiligenceRowHtml(row, showInjonctionColumns)).join('');
-    applyDiligenceAutoSizing(body);
-  }
-  renderPagination('diligence', pageData);
 }
 
 function normalizeDiligenceAttOk(value){
@@ -7602,7 +8840,8 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
     before: previousValue,
     after: nextValue
   });
-  queuePersistAppState();
+  handleDossierDataChange({ audience: true, rerenderLinked: true });
+  persistDossierReferenceNow(clientId, dossier, { source: 'diligence' }).catch(()=>{});
 }
 
 function updateDiligenceFieldEncoded(clientId, dossierIndex, procKeyEncoded, field, value){
@@ -7629,13 +8868,8 @@ function getFilteredDiligenceRows(allRows){
     if(filterDiligenceOrdonnance !== 'all' && row.ordonnance !== filterDiligenceOrdonnance) return false;
     if(filterDiligenceTribunal !== 'all' && row.tribunal !== filterDiligenceTribunal) return false;
     if(!q) return true;
-    const haystack = row.__diligenceHaystack || (row.__diligenceHaystack = buildSuiviSearchHaystack(
-      row.clientName,
-      row.dossier,
-      [row.procedure],
-      row.tribunal ? [row.tribunal] : []
-    ));
-    return haystack.includes(q);
+    const searchValues = row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row));
+    return searchValues.some(value=>value === q);
   });
   diligenceFilteredRowsCacheInput = allRows;
   diligenceFilteredRowsCacheKey = filterKey;
@@ -7651,7 +8885,17 @@ function exportDiligenceXLS(){
   syncDiligenceDelegationFilter(allRows);
   syncDiligenceOrdonnanceFilter(allRows);
   syncDiligenceTribunalFilter(allRows);
-  const rows = allRows.filter(row=>isDiligenceSelectedForPrint(row));
+  const rows = (
+    allRows === diligenceSelectedExportRowsCacheInput
+    && diligenceSelectedExportRowsCacheVersion === diligencePrintSelectionVersion
+  )
+    ? diligenceSelectedExportRowsCacheOutput
+    : allRows.filter(row=>isDiligenceSelectedForPrint(row));
+  if(rows !== diligenceSelectedExportRowsCacheOutput){
+    diligenceSelectedExportRowsCacheInput = allRows;
+    diligenceSelectedExportRowsCacheVersion = diligencePrintSelectionVersion;
+    diligenceSelectedExportRowsCacheOutput = rows;
+  }
   if(!rows.length){
     alert('Cochez au moins une ligne pour exporter.');
     return;
@@ -7665,6 +8909,7 @@ function exportDiligenceXLS(){
     'Ordonnance',
     'Notification N°',
     'Statut notification',
+    'Sort notification',
     'Date notification',
     'Certificat non appel',
     'Exécution N°',
@@ -7683,6 +8928,7 @@ function exportDiligenceXLS(){
     normalizeDiligenceAttOk(row.details?.attOrdOrOrdOk || '') || 'att',
     row.details?.notificationNo || '-',
     row.details?.notificationStatus || '-',
+    row.details?.notificationSort || '-',
     row.details?.dateNotification || '-',
     row.details?.certificatNonAppelStatus || '-',
     row.details?.executionNo || '-',
@@ -7801,10 +9047,10 @@ function updateTeamClientCount(){
 }
 
 function updateTeamClientSelectorState(){
-  const role = $('teamRole')?.value || 'viewer';
+  const role = normalizeUserRole($('teamRole')?.value || 'client');
   const wrap = $('teamClientsWrap');
   if(!wrap) return;
-  const disabled = role !== 'viewer';
+  const disabled = role !== 'client';
   wrap.style.opacity = disabled ? '0.6' : '1';
   wrap.querySelectorAll('input[type="checkbox"]').forEach(i=> i.disabled = disabled);
   const search = $('teamClientSearchInput');
@@ -7819,7 +9065,7 @@ function resetTeamForm(){
   editingTeamUserId = null;
   if($('teamUsername')) $('teamUsername').value = '';
   if($('teamPassword')) $('teamPassword').value = '';
-  if($('teamRole')) $('teamRole').value = 'viewer';
+  if($('teamRole')) $('teamRole').value = 'client';
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes([]);
   updateTeamClientSelectorState();
@@ -7830,13 +9076,13 @@ async function saveTeamUser(){
   if(!canManageTeam()) return alert('Accès refusé');
   const username = $('teamUsername')?.value?.trim() || '';
   const password = $('teamPassword')?.value?.trim() || '';
-  const role = $('teamRole')?.value || 'viewer';
+  const role = normalizeUserRole($('teamRole')?.value || 'client');
   if(!username) return alert('Username obligatoire');
   if(!editingTeamUserId && !password) return alert('Mot de passe obligatoire');
 
   const selectedClientIds = role === 'manager' ? [] : getSelectedTeamClientIds();
-  const finalClientIds = role === 'viewer' ? selectedClientIds : [];
-  if(role === 'viewer' && finalClientIds.length === 0){
+  const finalClientIds = role === 'client' ? selectedClientIds : [];
+  if(role === 'client' && finalClientIds.length === 0){
     return alert('Choisir au moins un client pour ce compte client');
   }
 
@@ -7869,7 +9115,7 @@ async function saveTeamUser(){
       clientIds: finalClientIds
     });
   }
-  await persistAppStateNow();
+  await persistStateSliceNow('users', USERS, { source: 'team' });
   renderEquipe();
   resetTeamForm();
 }
@@ -7881,7 +9127,7 @@ function editTeamUser(userId){
   editingTeamUserId = userId;
   if($('teamUsername')) $('teamUsername').value = user.username;
   if($('teamPassword')) $('teamPassword').value = '';
-  if($('teamRole')) $('teamRole').value = user.role;
+  if($('teamRole')) $('teamRole').value = normalizeUserRole(user.role);
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes(Array.isArray(user.clientIds) ? user.clientIds : []);
   updateTeamClientSelectorState();
@@ -7903,12 +9149,13 @@ function deleteTeamUser(userId){
     return alert('Impossible de supprimer l’utilisateur connecté');
   }
   USERS = USERS.filter(u=>u.id !== userId);
-  queuePersistAppState();
+  persistStateSliceNow('users', USERS, { source: 'team' }).catch(()=>{});
   renderEquipe();
   if(editingTeamUserId === userId) resetTeamForm();
 }
 
-function renderEquipe(){
+function renderEquipe(options = {}){
+  if(!shouldRenderDeferredSection('equipe', options)) return;
   const panel = $('teamManagerPanel');
   const locked = $('teamLocked');
   const body = $('teamUsersBody');
@@ -7929,7 +9176,7 @@ function renderEquipe(){
   }
 
   body.innerHTML = USERS.map(u=>{
-    const roleLabel = u.role === 'viewer' ? 'client' : u.role;
+    const roleLabel = getRoleLabel(u.role);
     const clients = (Array.isArray(u.clientIds) ? u.clientIds : [])
       .map(getClientNameById)
       .join(', ') || '-';
@@ -7980,7 +9227,8 @@ function addSalleJudge(){
     day
   });
   AppState.salleAssignments = normalizeSalleAssignments(AppState.salleAssignments);
-  queuePersistAppState();
+  invalidateSalleAssignmentsCaches();
+  persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   if(jugeInput) jugeInput.value = '';
   renderSalle();
 }
@@ -7988,11 +9236,13 @@ function addSalleJudge(){
 function deleteSalleJudge(id){
   if(!canEditData()) return alert('Accès refusé');
   AppState.salleAssignments = AppState.salleAssignments.filter(row=>Number(row.id) !== Number(id));
-  queuePersistAppState();
+  invalidateSalleAssignmentsCaches();
+  persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
   renderSalle();
 }
 
-function renderSalle(){
+function renderSalle(options = {}){
+  if(!shouldRenderDeferredSection('salle', options)) return;
   const body = $('salleBody');
   const filterSelect = $('salleFilterSelect');
   const tribunalFilterSelect = $('salleTribunalFilter');
@@ -8032,7 +9282,7 @@ function renderSalle(){
 
   if(!salles.length){
     body.innerHTML = `<tr><td colspan="3" class="diligence-empty">Aucune salle configurée pour ${escapeHtml(getSalleWeekdayLabel(selectedDay))}.</td></tr>`;
-    renderSidebarSalleSessions();
+    queueSidebarSalleSessionsRender();
     return;
   }
 
@@ -8073,7 +9323,7 @@ function renderSalle(){
     const known = getKnownJudges();
     datalist.innerHTML = known.map(v=>`<option value="${escapeAttr(v)}"></option>`).join('');
   }
-  renderSidebarSalleSessions();
+  queueSidebarSalleSessionsRender();
 }
 
 function normalizeProcedures(d){
@@ -8181,118 +9431,66 @@ function toAgeDays(value){
   return days >= 0 ? days : 0;
 }
 
-function getDashboardAttSortRows(){
-  const rows = [];
-  AppState.clients.forEach((c, ci)=>{
-    if(!canViewClient(c)) return;
-    c.dossiers.forEach((d, di)=>{
-      const procKeys = normalizeProcedures(d);
-      procKeys.forEach(procKey=>{
-        if(!isAudienceProcedure(procKey)) return;
-        const p = getAudienceProcedure(ci, di, procKey);
-        if(String(p?.color || '') !== 'blue') return;
-        const audienceDate = String(p?.audience || '').trim() || '-';
-        rows.push({
-          client: c.name || '-',
-          debiteur: d.debiteur || '-',
-          procedure: procKey || '-',
-          audienceDate
-        });
-      });
-    });
+function getDashboardAttSortCount(){
+  let count = 0;
+  const audienceRows = getAudienceRowsForSidebar();
+  audienceRows.forEach(row=>{
+    if(String(row?.p?.color || '').trim() === 'blue'){
+      count += 1;
+    }
   });
-  return rows;
+  return count;
 }
 
-function getDashboardCalendarEvents(){
-  const byDate = {};
-  AppState.clients.forEach((c, ci)=>{
-    if(!canViewClient(c)) return;
-    c.dossiers.forEach((d, di)=>{
-      const procKeys = normalizeProcedures(d);
-      procKeys.forEach(procKey=>{
-        if(!isAudienceProcedure(procKey)) return;
-        const p = getAudienceProcedure(ci, di, procKey);
-        const dt = parseDateForAge(p?.audience || '');
-        if(!dt) return;
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth() + 1).padStart(2, '0');
-        const day = String(dt.getDate()).padStart(2, '0');
-        const key = `${y}-${m}-${day}`;
-        if(!byDate[key]) byDate[key] = [];
-        byDate[key].push({
-          client: c.name || '-',
-          procedure: procKey || '-',
-          debiteur: d.debiteur || '-'
-        });
-      });
-    });
-  });
-  return byDate;
-}
-
-function renderDashboardCalendar(){
-  const label = $('calendarMonthLabel');
-  const grid = $('dashboardCalendarGrid');
-  if(!label || !grid) return;
-
-  const year = dashboardCalendarCursor.getFullYear();
-  const month = dashboardCalendarCursor.getMonth();
-  label.textContent = dashboardCalendarCursor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-
-  const eventsByDate = getDashboardCalendarEvents();
-  const headers = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  const firstDay = new Date(year, month, 1);
-  const firstWeekday = (firstDay.getDay() + 6) % 7;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-  let html = headers.map(h=>`<div class="dashboard-calendar-weekday">${h}</div>`).join('');
-  for(let i = 0; i < firstWeekday; i++){
-    html += '<div class="dashboard-calendar-day is-empty"></div>';
+function getDashboardSnapshot(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    dashboardSnapshotCache
+    && dashboardSnapshotCacheVersion === audienceRowsRawDataVersion
+    && dashboardSnapshotCacheUserKey === userKey
+  ){
+    return dashboardSnapshotCache;
   }
-  for(let day = 1; day <= daysInMonth; day++){
-    const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const events = eventsByDate[key] || [];
-    const classes = ['dashboard-calendar-day'];
-    if(key === todayKey) classes.push('is-today');
-    const tooltip = events
-      .map(e=>`${e.client} / ${e.procedure} / ${e.debiteur}`)
-      .join(' | ');
-    html += `
-      <div class="${classes.join(' ')}" title="${escapeAttr(tooltip)}">
-        <span class="day-num">${day}</span>
-        ${key === todayKey && events.length ? `<span class="day-count">${events.length}</span>` : ''}
-      </div>
-    `;
-  }
-  grid.innerHTML = html;
-}
-
-// ================== DASHBOARD ==================
-function renderDashboard(){
   const visibleClients = getVisibleClients();
   let enCours = 0;
   let clotureCount = 0;
-  const attSortRows = getDashboardAttSortRows();
-
   visibleClients.forEach(c=>{
     c.dossiers.forEach(d=>{
       enCours += 1;
       if(d.statut === 'Clôture') clotureCount += 1;
     });
   });
-
-  animateDashboardMetric('totalClients', visibleClients.length);
-  animateDashboardMetric('dossiersEnCours', enCours);
-  animateDashboardMetric('dossiersTermines', clotureCount);
-  if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', attSortRows.length);
-  if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', getAudienceErrorDossierCount());
-  renderDashboardCalendar();
+  const snapshot = {
+    totalClients: visibleClients.length,
+    enCours,
+    clotureCount
+  };
+  dashboardSnapshotCache = snapshot;
+  dashboardSnapshotCacheVersion = audienceRowsRawDataVersion;
+  dashboardSnapshotCacheUserKey = userKey;
+  return snapshot;
 }
 
-function animateDashboardMetric(id, nextValue){
+function getDashboardAudienceMetrics(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    dashboardAudienceMetricsCache
+    && dashboardAudienceMetricsCacheVersion === audienceRowsRawDataVersion
+    && dashboardAudienceMetricsCacheUserKey === userKey
+  ){
+    return dashboardAudienceMetricsCache;
+  }
+  const metrics = {
+    attSortCount: getDashboardAttSortCount(),
+    audienceErrors: getAudienceErrorDossierCount()
+  };
+  dashboardAudienceMetricsCache = metrics;
+  dashboardAudienceMetricsCacheVersion = audienceRowsRawDataVersion;
+  dashboardAudienceMetricsCacheUserKey = userKey;
+  return metrics;
+}
+
+function animateDashboardMetric(id, nextValue, options = {}){
   const el = $(id);
   if(!el) return;
   const safeNext = Number.isFinite(Number(nextValue)) ? Math.max(0, Math.round(Number(nextValue))) : 0;
@@ -8304,7 +9502,7 @@ function animateDashboardMetric(id, nextValue){
   const shouldReduceMotion = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(shouldReduceMotion || prevValue === safeNext){
+  if(options.immediate === true || shouldReduceMotion || prevValue === safeNext){
     el.textContent = String(safeNext);
     return;
   }
@@ -8345,10 +9543,34 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  const sourceRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
-  return sourceRows
-    .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
-    .length;
+  return audiencePrintSelection.size;
+}
+
+function queueAudienceCheckedCountRender(){
+  if(audienceCheckedCountRenderQueued) return;
+  audienceCheckedCountRenderQueued = true;
+  const render = ()=>{
+    audienceCheckedCountRenderQueued = false;
+    updateAudienceCheckedCount();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(render);
+    return;
+  }
+  setTimeout(render, 0);
+}
+
+function pruneAudiencePrintSelection(rows = null){
+  const sourceRows = Array.isArray(rows) ? rows : getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  const validKeys = new Set(sourceRows.map(row=>makeAudiencePrintKey(row.ci, row.di, row.procKey)));
+  let changed = false;
+  audiencePrintSelection.forEach(key=>{
+    if(validKeys.has(key)) return;
+    audiencePrintSelection.delete(key);
+    changed = true;
+  });
+  if(changed) audiencePrintSelectionVersion += 1;
+  return changed;
 }
 
 function updateAudienceCheckedCount(){
@@ -8361,12 +9583,18 @@ function updateAudienceCheckedCount(){
 function toggleAudiencePrintSelection(ci, di, procKey, checked){
   const key = makeAudiencePrintKey(ci, di, procKey);
   if(checked){
+    const sizeBefore = audiencePrintSelection.size;
     audiencePrintSelection.add(key);
-    updateAudienceCheckedCount();
+    if(audiencePrintSelection.size !== sizeBefore){
+      audiencePrintSelectionVersion += 1;
+      queueAudienceCheckedCountRender();
+    }
     return;
   }
-  audiencePrintSelection.delete(key);
-  updateAudienceCheckedCount();
+  if(audiencePrintSelection.delete(key)){
+    audiencePrintSelectionVersion += 1;
+    queueAudienceCheckedCountRender();
+  }
 }
 
 function toggleAudiencePrintSelectionEncoded(ci, di, procKeyEncoded, checked){
@@ -8386,10 +9614,20 @@ function getActiveAudiencePriorityColor(){
 }
 
 function getAudienceRowDateValue(row){
-  const raw = String(row?.draft?.dateAudience || row?.p?.audience || '').trim();
-  if(!raw) return '';
-  const normalized = normalizeDateDDMMYYYY(raw);
-  return normalized || raw;
+  return formatAudienceDateDisplayValue(row?.draft?.dateAudience || row?.p?.audience || '');
+}
+
+function formatAudienceDateDisplayValue(value){
+  if(value === null || value === undefined) return '';
+  const normalized = normalizeDateDDMMYYYY(value);
+  if(normalized) return normalized;
+  const text = String(value || '').trim();
+  if(!text) return '';
+  const parsed = new Date(text);
+  if(!Number.isNaN(parsed.getTime())){
+    return formatDateDDMMYYYY(parsed);
+  }
+  return text;
 }
 
 function normalizeIsoDateToDDMMYYYY(value){
@@ -8407,12 +9645,17 @@ function getAudienceRowRefClientDisplayKey(row){
 }
 
 function buildAudienceMismatchRefClientSet(rows){
+  if(rows === audienceMismatchRefClientSetCacheInput){
+    return audienceMismatchRefClientSetCacheOutput;
+  }
   const set = new Set();
   (rows || []).forEach(row=>{
     if(!row?.p?._refClientMismatch) return;
     const key = getAudienceRowRefClientDisplayKey(row);
     if(key) set.add(key);
   });
+  audienceMismatchRefClientSetCacheInput = rows;
+  audienceMismatchRefClientSetCacheOutput = set;
   return set;
 }
 
@@ -8460,16 +9703,38 @@ function getFilteredAudienceRows(allRows = null){
     audienceFilteredRowsCacheOutput = out;
     return out;
   }
+  const canUsePriorityPartition =
+    !filterAudienceErrorsOnly
+    && filterAudienceProcedure === 'all'
+    && filterAudienceTribunal === 'all'
+    && !filterAudienceDate
+    && priorityColor
+    && priorityColor !== 'all'
+    && rows.length > AUDIENCE_DEFAULT_SORT_MAX_ROWS;
+  if(canUsePriorityPartition){
+    const matched = [];
+    const others = [];
+    rows.forEach(row=>{
+      if(String(row?.p?.color || '').trim() === priorityColor){
+        matched.push(row);
+      }else{
+        others.push(row);
+      }
+    });
+    const out = matched.concat(others);
+    audienceFilteredRowsCacheInput = rows;
+    audienceFilteredRowsCacheKey = filterKey;
+    audienceFilteredRowsCacheOutput = out;
+    return out;
+  }
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
+  const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
   const filtered = rows.filter(row=>{
-    const tribunalKey = resolveAudienceTribunalFilterKey(row.p.tribunal || '');
-    const rowProcFilterKey = getAudienceProcedureFilterKey(row.procKey);
-    if(filterAudienceProcedure !== 'all' && rowProcFilterKey !== filterAudienceProcedure) return false;
-    if(filterAudienceTribunal !== 'all' && tribunalKey !== filterAudienceTribunal) return false;
+    if(filterAudienceProcedure !== 'all' && row.__procFilterKey !== filterAudienceProcedure) return false;
+    if(filterAudienceTribunal !== 'all' && row.__tribunalFilterKey !== filterAudienceTribunal) return false;
     if(filterAudienceDate){
-      const targetDate = normalizeIsoDateToDDMMYYYY(filterAudienceDate);
-      const rowDate = getAudienceRowDateValue(row);
+      const rowDate = row.__audienceDateDisplay || (row.__audienceDateDisplay = getAudienceRowDateValue(row));
       if(targetDate && rowDate !== targetDate) return false;
     }
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
@@ -8478,7 +9743,7 @@ function getFilteredAudienceRows(allRows = null){
   const decorated = filtered.map(row=>{
     const bucket = getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet);
     const colorMatch = (!filterAudienceErrorsOnly && priorityColor && priorityColor !== 'all')
-      ? (String(row?.p?.color || '') === priorityColor ? 1 : 0)
+      ? (String(row?.p?.color || '').trim() === priorityColor ? 1 : 0)
       : 0;
     const sortMeta = buildAudienceSortMeta(row);
     return { row, bucket, colorMatch, sortMeta };
@@ -8501,117 +9766,23 @@ function setAllVisibleAudienceRowsForPrint(checked){
     alert('Aucune ligne visible.');
     return;
   }
-  rows.forEach(row=>{
-    toggleAudiencePrintSelection(row.ci, row.di, row.procKey, checked);
-  });
-  renderAudience();
-}
-
-function renderAudience(){
-  const audienceQuery = $('filterAudience')?.value?.toLowerCase() || '';
-  syncPaginationFilterState(
-    'audience',
-    [
-      audienceQuery,
-      filterAudienceColor,
-      filterAudienceProcedure,
-      filterAudienceTribunal,
-      filterAudienceDate,
-      filterAudienceErrorsOnly ? '1' : '0',
-      selectedAudienceColor
-    ].join('||')
-  );
-  const body = $('audienceBody');
-  if(!body){
-    queueSidebarSalleSessionsRender();
-    return;
-  }
-  body.innerHTML='';
-  if(!isManager() && getVisibleClients().length === 0){
-    audienceVirtualRows = [];
-    audienceVirtualDuplicateKeySet = new Set();
-    audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
-    renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
-    updateAudienceCheckedCount();
-    queueSidebarSalleSessionsRender();
-    return;
-  }
-
-  const allRows = getAudienceRows();
-  syncAudienceFilterOptions(allRows);
-  const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
-  const rows = getFilteredAudienceRows(allRows);
-  lastAudienceRenderedRows = rows;
-  const pageData = paginateRows(rows, 'audience');
-  const useVirtual = shouldUseAudienceVirtualization(pageData.rows.length);
-  audienceVirtualRows = pageData.rows;
-  audienceVirtualDuplicateKeySet = duplicateKeySet;
-  audienceVirtualLastRange = { start: -1, end: -1 };
-  if(!pageData.rows.length){
-    body.innerHTML = '<tr><td colspan="11" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
-  }else if(useVirtual){
-    renderAudienceVirtualWindow(true);
+  let changed = false;
+  if(checked){
+    rows.forEach(row=>{
+      const sizeBefore = audiencePrintSelection.size;
+      audiencePrintSelection.add(makeAudiencePrintKey(row.ci, row.di, row.procKey));
+      if(audiencePrintSelection.size !== sizeBefore) changed = true;
+    });
   }else{
-    body.innerHTML = pageData.rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
+    rows.forEach(row=>{
+      if(audiencePrintSelection.delete(makeAudiencePrintKey(row.ci, row.di, row.procKey))){
+        changed = true;
+      }
+    });
   }
-  renderPagination('audience', pageData);
-  updateAudienceCheckedCount();
-  queueSidebarSalleSessionsRender();
-}
-
-function shouldUseAudienceVirtualization(rowCount){
-  if(Number(rowCount) < AUDIENCE_VIRTUAL_MIN_ROWS) return false;
-  const container = $('audienceTableContainer');
-  if(!container) return false;
-  if(typeof window === 'undefined' || typeof window.getComputedStyle !== 'function'){
-    return false;
-  }
-  const style = window.getComputedStyle(container);
-  const overflowY = String(style.overflowY || '').toLowerCase();
-  const maxHeight = String(style.maxHeight || '').trim().toLowerCase();
-  const height = String(style.height || '').trim().toLowerCase();
-  const hasConstrainedHeight = (maxHeight && maxHeight !== 'none') || (height && height !== 'auto');
-  if(!hasConstrainedHeight) return false;
-  return overflowY === 'auto' || overflowY === 'scroll';
-}
-
-function captureAudienceScrollState(){
-  const container = $('audienceTableContainer');
-  return {
-    containerTop: container ? Number(container.scrollTop) || 0 : null,
-    containerLeft: container ? Number(container.scrollLeft) || 0 : null,
-    pageX: (typeof window !== 'undefined' ? Number(window.scrollX) : 0) || 0,
-    pageY: (typeof window !== 'undefined' ? Number(window.scrollY) : 0) || 0
-  };
-}
-
-function restoreAudienceScrollState(snapshot){
-  if(!snapshot || typeof snapshot !== 'object') return;
-  const container = $('audienceTableContainer');
-  if(container && Number.isFinite(snapshot.containerTop)){
-    container.scrollTop = Math.max(0, snapshot.containerTop);
-    if(Number.isFinite(snapshot.containerLeft)){
-      container.scrollLeft = Math.max(0, snapshot.containerLeft);
-    }
-    if(Array.isArray(audienceVirtualRows) && audienceVirtualRows.length >= AUDIENCE_VIRTUAL_MIN_ROWS){
-      queueAudienceVirtualRender();
-    }
-  }
-  if(typeof window !== 'undefined' && typeof window.scrollTo === 'function'){
-    window.scrollTo(snapshot.pageX || 0, snapshot.pageY || 0);
-  }
-}
-
-function renderAudienceKeepingPosition(){
-  const snapshot = captureAudienceScrollState();
+  if(changed) audiencePrintSelectionVersion += 1;
+  queueAudienceCheckedCountRender();
   renderAudience();
-  const apply = ()=>restoreAudienceScrollState(snapshot);
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(()=>window.requestAnimationFrame(apply));
-    return;
-  }
-  setTimeout(apply, 0);
 }
 
 function getAudienceDateDepotDisplayValue(row){
@@ -8635,9 +9806,20 @@ function getAudienceDateDepotDisplayValue(row){
 }
 
 function getSelectedAudienceRowsForExport(){
-  return getAudienceRows({ ignoreSearch: true, ignoreColor: true })
+  const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  if(
+    rows === audienceSelectedExportRowsCacheInput
+    && audienceSelectedExportRowsCacheVersion === audiencePrintSelectionVersion
+  ){
+    return audienceSelectedExportRowsCacheOutput;
+  }
+  const out = rows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
     .sort(compareAudienceRowsByReferenceProximity);
+  audienceSelectedExportRowsCacheInput = rows;
+  audienceSelectedExportRowsCacheVersion = audiencePrintSelectionVersion;
+  audienceSelectedExportRowsCacheOutput = out;
+  return out;
 }
 
 function getAudienceRowReferenceValue(row){
@@ -8758,12 +9940,19 @@ function getAudienceDuplicateKeySet(rows){
   return duplicates;
 }
 
-function queueSidebarSalleSessionsRender(){
-  if(sidebarSalleRenderTimer) return;
+function queueSidebarSalleSessionsRender(delayMs = 80){
+  if(sidebarSalleRenderTimer){
+    clearTimeout(sidebarSalleRenderTimer);
+    sidebarSalleRenderTimer = null;
+  }
   sidebarSalleRenderTimer = setTimeout(()=>{
     sidebarSalleRenderTimer = null;
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(()=>renderSidebarSalleSessions(), { timeout: 1800 });
+      return;
+    }
     renderSidebarSalleSessions();
-  }, 80);
+  }, Math.max(0, Number(delayMs) || 0));
 }
 
 function getAudienceRowContentScore(row){
@@ -8864,12 +10053,23 @@ function isAudienceRowInvalid(row, duplicateKeySet = null){
 
 function getAudienceErrorRows(){
   const rows = getAudienceRows();
+  if(rows === audienceErrorRowsCacheInput){
+    return audienceErrorRowsCacheOutput;
+  }
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
-  return rows.filter(row => isAudienceRowInvalid(row, duplicateKeySet));
+  const out = rows.filter(row => isAudienceRowInvalid(row, duplicateKeySet));
+  audienceErrorRowsCacheInput = rows;
+  audienceErrorRowsCacheOutput = out;
+  return out;
 }
 
 function getAudienceErrorDossierCount(){
-  return getAudienceErrorRows().length;
+  if(audienceErrorCountCacheVersion === audienceRowsRawDataVersion){
+    return audienceErrorCountCacheValue;
+  }
+  audienceErrorCountCacheValue = getAudienceErrorRows().length;
+  audienceErrorCountCacheVersion = audienceRowsRawDataVersion;
+  return audienceErrorCountCacheValue;
 }
 
 function syncAudienceFilterOptions(rows){
@@ -8930,9 +10130,7 @@ function hasAudienceProcedureData(procData, draftData){
     p.sort,
     d.instruction,
     p.instruction,
-    p.tribunal,
-    p.depotLe,
-    p.color
+    p.tribunal
   ];
   return fields.some(value=>String(value || '').trim().length > 0);
 }
@@ -8972,12 +10170,13 @@ function getAudienceRowsRawCached(){
           d,
           procKey,
           p,
-          color: p.color || '',
           key,
           draft,
           ci,
           di,
-          __dupKey: duplicateKey
+          __dupKey: duplicateKey,
+          __procFilterKey: getAudienceProcedureFilterKey(procKey),
+          __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || '')
         };
         rows.push(row);
       });
@@ -9029,7 +10228,7 @@ function getAudienceRows(options = {}){
     return baseRows;
   }
   const out = baseRows.filter(row=>{
-    if(!ignoreColor && filterAudienceColor !== 'all' && row.color !== filterAudienceColor) return false;
+    if(!ignoreColor && filterAudienceColor !== 'all' && String(row?.p?.color || '').trim() !== filterAudienceColor) return false;
     if(!ignoreSearch && q){
       const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft));
       if(!haystack.includes(q)) return false;
@@ -9168,8 +10367,8 @@ function setAudienceColor(ci, di, procKey, checked){
     if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
       dossier.statut = 'En cours';
     }
-    markAudienceRowsCacheDirty();
-    queueAudienceColorBatchUpdate({ persist: true, dashboard: true, suivi: false });
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: false });
     return;
   }
   if(selectedAudienceColor === 'all' || !allowed.has(selectedAudienceColor)){
@@ -9179,8 +10378,8 @@ function setAudienceColor(ci, di, procKey, checked){
   p.color = selectedAudienceColor;
   if(selectedAudienceColor === 'purple-dark') dossier.statut = 'Soldé';
   if(selectedAudienceColor === 'purple-light') dossier.statut = 'Arrêt définitif';
-  markAudienceRowsCacheDirty();
-  queueAudienceColorBatchUpdate({ persist: true, dashboard: true, suivi: true });
+  markAudienceColorCachesDirty();
+  queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
 }
 
 function setAudienceColorEncoded(ci, di, procKeyEncoded, checked){
@@ -9200,24 +10399,42 @@ function queueAudienceColorBatchUpdate(options = {}){
   if(opts.persist) audienceColorBatchNeedsPersist = true;
   if(opts.dashboard) audienceColorBatchNeedsDashboard = true;
   if(opts.suivi) audienceColorBatchNeedsSuivi = true;
+  if(opts.persistDossier) queueAudienceColorBatchUpdate.lastDossier = opts.persistDossier;
+  if(opts.persistClientId !== undefined) queueAudienceColorBatchUpdate.lastClientId = Number(opts.persistClientId);
   if(audienceColorBatchTimer) return;
   audienceColorBatchTimer = setTimeout(()=>{
     audienceColorBatchTimer = null;
     const doPersist = audienceColorBatchNeedsPersist;
     const doDashboard = audienceColorBatchNeedsDashboard;
     const doSuivi = audienceColorBatchNeedsSuivi;
+    const patchDossier = queueAudienceColorBatchUpdate.lastDossier;
+    const patchClientId = queueAudienceColorBatchUpdate.lastClientId;
     audienceColorBatchNeedsPersist = false;
     audienceColorBatchNeedsDashboard = false;
     audienceColorBatchNeedsSuivi = false;
+    queueAudienceColorBatchUpdate.lastDossier = null;
+    queueAudienceColorBatchUpdate.lastClientId = undefined;
     if(doPersist){
-      queuePersistAppState();
+      if(patchDossier && Number.isFinite(patchClientId)){
+        persistDossierReferenceNow(patchClientId, patchDossier, { source: 'audience-color' }).catch(()=>{});
+      }else{
+        queuePersistAppState();
+      }
     }
     if(doDashboard){
       renderDashboard();
     }
-    renderAudienceKeepingPosition();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
     if(doSuivi){
-      renderSuivi();
+      if(isDeferredRenderSectionVisible('suivi')){
+        renderSuivi();
+      }else{
+        markDeferredRenderDirty('suivi');
+      }
     }
   }, AUDIENCE_COLOR_BATCH_MS);
 }
@@ -9227,8 +10444,35 @@ function queueAudienceLinkedRenders(){
   audienceLinkedRenderTimer = setTimeout(()=>{
     audienceLinkedRenderTimer = null;
     renderDashboard();
-    renderSuivi();
-    renderSidebarSalleSessions();
+    if(isDeferredRenderSectionVisible('suivi')){
+      renderSuivi();
+    }else{
+      markDeferredRenderDirty('suivi');
+    }
+    if(isDeferredRenderSectionVisible('salle')){
+      renderSidebarSalleSessions();
+    }
+  }, 180);
+}
+
+function queueDossierLinkedRenders(){
+  if(dossierLinkedRenderTimer) clearTimeout(dossierLinkedRenderTimer);
+  dossierLinkedRenderTimer = setTimeout(()=>{
+    dossierLinkedRenderTimer = null;
+    renderDashboard();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
+    if(isDeferredRenderSectionVisible('suivi')){
+      renderSuivi();
+    }else{
+      markDeferredRenderDirty('suivi');
+    }
+    if(isDeferredRenderSectionVisible('salle')){
+      renderSidebarSalleSessions();
+    }
   }, 180);
 }
 
@@ -9369,9 +10613,12 @@ function saveAllAudience(options = {}){
   }
   queuePersistAppState();
   if(rerender){
-    renderDashboard();
-    renderAudience();
-    renderSuivi();
+    if(isDeferredRenderSectionVisible('audience')){
+      renderAudienceKeepingPosition();
+    }else{
+      markDeferredRenderDirty('audience');
+    }
+    queueAudienceLinkedRenders();
   }
 }
 
@@ -9379,11 +10626,7 @@ function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
-    saveAllAudience({
-      clearDraft: false,
-      rerender: false,
-      showAlert: false
-    });
+    persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
 }
 
@@ -9590,6 +10833,7 @@ function renderProcedureDetails(forceList, forceDraft){
         <input type="text" data-field="depotLe" placeholder="Dépôt le">
         <input type="text" data-field="referenceClient" placeholder="Référence dossier">
         <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
+        <input type="text" data-field="notificationSort" placeholder="Sort notification">
         <input type="text" data-field="notificationNo" placeholder="Notification N°">
         <select data-field="notificationStatus">
           <option value="att plie avec tr">att plie avec tr</option>

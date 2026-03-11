@@ -4,10 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Cabinet ARAQI HOUSSAINI - Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="local-icons.css"/>
+  <link rel="stylesheet" href="vendor/local-icons.css"/>
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
@@ -234,6 +231,7 @@
           <th>Tribunal</th>
           <th>Procédure</th>
           <th>Date dépôt</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="audienceBody"></tbody>
@@ -308,6 +306,7 @@
                   <th>Date dépôt</th>
                   <th>Référence dossier</th>
                   <th>Ordonnance</th>
+                  <th>Sort notification</th>
                   <th>Notification N°</th>
                   <th>Statut notification</th>
                   <th>Date notification</th>
@@ -404,9 +403,9 @@
             <div class="form-group">
               <label>Rôle</label>
               <select id="teamRole">
-                <option value="viewer">client</option>
-                <option value="admin">admin</option>
-                <option value="manager">gestionnaire</option>
+                <option value="client">Client</option>
+                <option value="admin">Admin</option>
+                <option value="manager">Gestionnaire</option>
               </select>
             </div>
             <div id="teamClientsWrap" class="form-group full">
@@ -473,6 +472,7 @@
           <tbody id="clientsBody"></tbody>
         </table>
       </div>
+      <div id="clientsPagination" class="table-pagination"></div>
     </div>
 
     <!-- CREATION DOSSIER -->
@@ -661,6 +661,16 @@
             <option value="all">Tous</option>
           </select>
         </div>
+        <div id="suiviCheckedCount" class="audience-checked-count">Cochés: 0</div>
+        <button id="selectAllSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-check"></i> Tout cocher
+        </button>
+        <button id="clearAllSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-regular fa-square-xmark"></i> Tout décocher
+        </button>
+        <button id="exportSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-file-export"></i> Exporter
+        </button>
       </div>
       
 
@@ -668,6 +678,7 @@
         <table>
           <thead>
             <tr>
+              <th>Sélection</th>
               <th>Client</th>
               <th>Date d’affectation</th>
               <th>Référence Client</th>
@@ -754,8 +765,28 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<!-- IMPORT PROGRESS MODAL -->
+<div id="importProgressModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card import-progress-card">
+    <div class="modal-head">
+      <h2 id="importProgressTitle"><i class="fa-solid fa-rotate"></i> Import en cours...</h2>
+    </div>
+    <div class="modal-body">
+      <p id="importProgressText" class="import-progress-text">Préparation...</p>
+      <div class="import-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="importProgressFill" class="import-progress-fill"></div>
+      </div>
+      <p id="importProgressPercent" class="import-progress-percent">0%</p>
+    </div>
+  </div>
+</div>
+
+<script src="./vendor/libs/xlsx.full.min.js"></script>
+<script src="./vendor/libs/exceljs.min.js"></script>
+<script src="state-persistence.js"></script>
+<script src="render-audience-suivi.js"></script>
+<script src="render-diligence.js"></script>
+<script src="render-dashboard.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

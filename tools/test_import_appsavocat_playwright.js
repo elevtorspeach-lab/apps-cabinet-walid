@@ -13,7 +13,7 @@ const BASE_URL = `http://${HOST}:${PORT}`;
 
 async function copyProjectSubset() {
   await fs.mkdir(TEMP_ROOT, { recursive: true });
-  for (const entry of ['app.js', 'index.html', 'style.css', 'vendor', 'workers', 'server']) {
+  for (const entry of ['app.js', 'index.html', 'style.css', 'state-persistence.js', 'render-dashboard.js', 'render-audience-suivi.js', 'render-diligence.js', 'vendor', 'workers', 'server']) {
     await fs.cp(path.join(SOURCE_ROOT, entry), path.join(TEMP_ROOT, entry), { recursive: true });
   }
 }
