@@ -107,6 +107,7 @@ let audienceColorBatchNeedsDashboard = false;
 let audienceColorBatchNeedsSuivi = false;
 let hasLoadedState = false;
 let importInProgress = false;
+let heavyUiOperationCount = 0;
 let remoteSyncTimer = null;
 let remoteSyncStream = null;
 let remoteSyncStreamRetryTimer = null;
@@ -1655,30 +1656,40 @@ function getFilteredSuiviRowsForSelection(){
   });
 }
 
+function getAllSuiviRows(){
+  return getSuiviBaseRowsCached().sortedDefaultRows;
+}
+
+function getSelectedSuiviRowsForExport(){
+  return getAllSuiviRows().filter(row=>isSuiviSelectedForPrint(row));
+}
+
 async function exportSuiviSelectedXLS(){
-  const rows = getFilteredSuiviRowsForSelection().filter(row=>isSuiviSelectedForPrint(row));
-  if(!rows.length){
-    alert('Cochez au moins une ligne pour exporter.');
-    return;
-  }
-  const headers = ['Client', 'Date d’affectation', 'Référence Client', 'Procédure', 'Débiteur', 'Montant', 'Ville', 'Statut'];
-  const tableRows = rows.map(row=>[
-    row.c?.name || '-',
-    normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
-    row.d?.referenceClient || '-',
-    Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
-    row.d?.debiteur || '-',
-    row.d?.montant || '-',
-    row.d?.ville || '-',
-    row.d?.statut || 'En cours'
-  ]);
-  await exportAudienceWorkbookXlsxStyled({
-    headers,
-    rows: tableRows,
-    subtitle: 'Export des dossiers cochés',
-    sheetName: 'Suivi',
-    colWidths: [{ wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 18 }],
-    filename: 'suivi_export.xlsx'
+  return runWithHeavyUiOperation(async ()=>{
+    const rows = getSelectedSuiviRowsForExport();
+    if(!rows.length){
+      alert('Cochez au moins une ligne pour exporter.');
+      return;
+    }
+    const headers = ['Client', 'Date d’affectation', 'Référence Client', 'Procédure', 'Débiteur', 'Montant', 'Ville', 'Statut'];
+    const tableRows = rows.map(row=>[
+      row.c?.name || '-',
+      normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
+      row.d?.referenceClient || '-',
+      Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
+      row.d?.debiteur || '-',
+      row.d?.montant || '-',
+      row.d?.ville || '-',
+      row.d?.statut || 'En cours'
+    ]);
+    await exportAudienceWorkbookXlsxStyled({
+      headers,
+      rows: tableRows,
+      subtitle: 'Export des dossiers cochés',
+      sheetName: 'Suivi',
+      colWidths: [{ wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 18 }],
+      filename: 'suivi_export.xlsx'
+    });
   });
 }
 
@@ -4157,10 +4168,28 @@ function updateRemoteStateMetadata(source){
   remoteStateUpdatedAt = String(source?.updatedAt || '');
 }
 
+function beginHeavyUiOperation(){
+  heavyUiOperationCount += 1;
+}
+
+function endHeavyUiOperation(){
+  heavyUiOperationCount = Math.max(0, heavyUiOperationCount - 1);
+}
+
+async function runWithHeavyUiOperation(task){
+  beginHeavyUiOperation();
+  try{
+    return await task();
+  }finally{
+    endHeavyUiOperation();
+  }
+}
+
 function getRemoteRefreshBlocker(){
   if(typeof document !== 'undefined' && document.hidden) return 'hidden';
   if(editingDossier) return 'editing';
   if(importInProgress) return 'import';
+  if(heavyUiOperationCount > 0) return 'busy';
   if(persistTimer) return 'persist';
   if(Object.keys(audienceDraft || {}).length) return 'draft';
   return '';
@@ -4568,6 +4597,7 @@ async function handleAppsavocatImportFile(file){
     return;
   }
   importInProgress = true;
+  beginHeavyUiOperation();
   try{
     openImportProgressModal('Import Cabinet ARAQI HOUSSAINI');
     updateImportProgress('Lecture du fichier...', 0, 1);
@@ -4585,6 +4615,7 @@ async function handleAppsavocatImportFile(file){
   }finally{
     closeImportProgressModal(false);
     importInProgress = false;
+    endHeavyUiOperation();
   }
 }
 
@@ -4952,17 +4983,19 @@ async function flushQueuedDossierPatchesNow(){
   const entries = [...queuedDossierPatchEntries.values()];
   queuedDossierPatchEntries = new Map();
   const results = [];
-  for(const entry of entries){
-    try{
-      const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
-      entry.resolvers.forEach(resolve=>resolve(result));
-      results.push(result);
-    }catch(err){
-      entry.rejecters.forEach(reject=>reject(err));
-      throw err;
+  return runWithHeavyUiOperation(async ()=>{
+    for(const entry of entries){
+      try{
+        const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
+        entry.resolvers.forEach(resolve=>resolve(result));
+        results.push(result);
+      }catch(err){
+        entry.rejecters.forEach(reject=>reject(err));
+        throw err;
+      }
     }
-  }
-  return results;
+    return results;
+  });
 }
 
 async function persistDossierPatchNow(patch, options = {}){
@@ -8988,28 +9021,29 @@ function getFilteredDiligenceRows(allRows){
 }
 
 function exportDiligenceXLS(){
-  const allRows = getDiligenceRows();
-  syncDiligencePrintSelection(allRows);
-  syncDiligenceProcedureFilter(allRows);
-  syncDiligenceSortFilter(allRows);
-  syncDiligenceDelegationFilter(allRows);
-  syncDiligenceOrdonnanceFilter(allRows);
-  syncDiligenceTribunalFilter(allRows);
-  const rows = (
-    allRows === diligenceSelectedExportRowsCacheInput
-    && diligenceSelectedExportRowsCacheVersion === diligencePrintSelectionVersion
-  )
-    ? diligenceSelectedExportRowsCacheOutput
-    : allRows.filter(row=>isDiligenceSelectedForPrint(row));
-  if(rows !== diligenceSelectedExportRowsCacheOutput){
-    diligenceSelectedExportRowsCacheInput = allRows;
-    diligenceSelectedExportRowsCacheVersion = diligencePrintSelectionVersion;
-    diligenceSelectedExportRowsCacheOutput = rows;
-  }
-  if(!rows.length){
-    alert('Cochez au moins une ligne pour exporter.');
-    return;
-  }
+  return runWithHeavyUiOperation(async ()=>{
+    const allRows = getDiligenceRows();
+    syncDiligencePrintSelection(allRows);
+    syncDiligenceProcedureFilter(allRows);
+    syncDiligenceSortFilter(allRows);
+    syncDiligenceDelegationFilter(allRows);
+    syncDiligenceOrdonnanceFilter(allRows);
+    syncDiligenceTribunalFilter(allRows);
+    const rows = (
+      allRows === diligenceSelectedExportRowsCacheInput
+      && diligenceSelectedExportRowsCacheVersion === diligencePrintSelectionVersion
+    )
+      ? diligenceSelectedExportRowsCacheOutput
+      : allRows.filter(row=>isDiligenceSelectedForPrint(row));
+    if(rows !== diligenceSelectedExportRowsCacheOutput){
+      diligenceSelectedExportRowsCacheInput = allRows;
+      diligenceSelectedExportRowsCacheVersion = diligencePrintSelectionVersion;
+      diligenceSelectedExportRowsCacheOutput = rows;
+    }
+    if(!rows.length){
+      alert('Cochez au moins une ligne pour exporter.');
+      return;
+    }
 
   const headers = [
     'Client',
@@ -9075,15 +9109,16 @@ function exportDiligenceXLS(){
     </html>
   `;
 
-  const blob = createExcelUtf8Blob(html);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'diligence_export.xls';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+    const blob = createExcelUtf8Blob(html);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'diligence_export.xls';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
 }
 
 // ================== EQUIPE ==================
@@ -10401,11 +10436,12 @@ function getAudienceRowsForSidebar(){
 }
 
 async function exportAudienceRegularXLS(){
-  const audienceRows = getAudienceRows().sort(compareAudienceRowsByReferenceProximity);
-  if(!audienceRows.length){
-    alert('Aucune ligne à exporter.');
-    return;
-  }
+  return runWithHeavyUiOperation(async ()=>{
+    const audienceRows = getAudienceRows().sort(compareAudienceRowsByReferenceProximity);
+    if(!audienceRows.length){
+      alert('Aucune ligne à exporter.');
+      return;
+    }
 
   const headers = [
     'Client',
@@ -10439,22 +10475,24 @@ async function exportAudienceRegularXLS(){
     ];
   });
 
-  await exportAudienceWorkbookXlsxStyled({
-    headers,
-    rows,
-    subtitle: 'Export standard',
-    sheetName: 'Export',
-    colWidths: [{ wch: 22 }, { wch: 28 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 28 }, { wch: 46 }],
-    filename: 'export_audience_standard.xlsx'
+    await exportAudienceWorkbookXlsxStyled({
+      headers,
+      rows,
+      subtitle: 'Export standard',
+      sheetName: 'Export',
+      colWidths: [{ wch: 22 }, { wch: 28 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 28 }, { wch: 46 }],
+      filename: 'export_audience_standard.xlsx'
+    });
   });
 }
 
 async function exportAudienceXLS(){
-  const audienceRows = getSelectedAudienceRowsForExport();
-  if(!audienceRows.length){
-    alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
-    return;
-  }
+  return runWithHeavyUiOperation(async ()=>{
+    const audienceRows = getSelectedAudienceRowsForExport();
+    if(!audienceRows.length){
+      alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
+      return;
+    }
 
   const headers = [
     'Client',
@@ -10488,13 +10526,14 @@ async function exportAudienceXLS(){
     .map(r=>normalizeDateDDMMYYYY(r?.draft?.dateAudience || r?.p?.audience || '') || String(r?.draft?.dateAudience || r?.p?.audience || '').trim())
     .find(v=>String(v || '').trim()) || '-';
 
-  await exportAudienceWorkbookXlsxStyled({
-    headers,
-    rows,
-    subtitle: `Date d'audience : ${dateAudienceTop}`,
-    sheetName: 'Audience',
-    colWidths: [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 46 }],
-    filename: 'audience_export.xlsx'
+    await exportAudienceWorkbookXlsxStyled({
+      headers,
+      rows,
+      subtitle: `Date d'audience : ${dateAudienceTop}`,
+      sheetName: 'Audience',
+      colWidths: [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 46 }],
+      filename: 'audience_export.xlsx'
+    });
   });
 }
 

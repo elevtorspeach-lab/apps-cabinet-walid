@@ -190,7 +190,7 @@ function renderSuivi(options = {}){
   const noTribunalFilter = filterSuiviTribunal === 'all';
   const noSearchFilter = !q;
   const finalizeSuiviRender = (sortedRows)=>{
-    syncSuiviPrintSelection(sortedRows);
+    syncSuiviPrintSelection(base.sortedDefaultRows);
     const pageData = paginateRows(sortedRows, 'suivi');
     const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
     suiviVirtualRows = pageData.rows;
@@ -348,7 +348,7 @@ function renderAudience(options = {}){
   }
 
   const finalizeAudienceRender = (allRows)=>{
-    const selectionPruned = pruneAudiencePrintSelection(allRows);
+    const selectionPruned = pruneAudiencePrintSelection(baseRows);
     syncAudienceFilterOptions(allRows);
     const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
     const rows = getFilteredAudienceRows(allRows);
