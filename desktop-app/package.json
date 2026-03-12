@@ -7,9 +7,11 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac --x64",
-    "build:win": "electron-builder --win portable --x64",
-    "build:win:portable": "electron-builder --win portable --x64"
+    "sync:web-assets": "node scripts/sync-offline-web.mjs",
+    "verify:web-assets": "node scripts/validate-offline-sync.mjs",
+    "build:mac": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --mac --x64",
+    "build:win": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --win portable --x64",
+    "build:win:portable": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --win portable --x64"
   },
   "devDependencies": {
     "electron": "^30.5.1",

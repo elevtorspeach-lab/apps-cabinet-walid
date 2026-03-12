@@ -9653,7 +9653,10 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  return audiencePrintSelection.size;
+  const sourceRows = getFilteredAudienceRows(getAudienceRows({ ignoreSearch: true, ignoreColor: true }));
+  return sourceRows
+    .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
+    .length;
 }
 
 function queueAudienceCheckedCountRender(){
