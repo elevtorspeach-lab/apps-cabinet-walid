@@ -1,6 +1,6 @@
 // ================== STATE ==================
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [] };
-const DEFAULT_MANAGER_USERNAME = 'manager';
+const DEFAULT_MANAGER_USERNAME = 'walid';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const DEFAULT_SEEDED_PASSWORD = '1234';
 
@@ -9,32 +9,12 @@ function buildSeedUsers(){
     { id: 1, username: DEFAULT_MANAGER_USERNAME, password: DEFAULT_MANAGER_PASSWORD, role: 'manager', clientIds: [] }
   ];
 
-  for(let i = 1; i <= 10; i += 1){
+  for(let i = 1; i <= 5; i += 1){
     users.push({
       id: 100 + i,
-      username: `admin${String(i).padStart(2, '0')}`,
+      username: `admin${i}`,
       password: DEFAULT_SEEDED_PASSWORD,
       role: 'admin',
-      clientIds: []
-    });
-  }
-
-  for(let i = 1; i <= 10; i += 1){
-    users.push({
-      id: 200 + i,
-      username: `gestionnaire${String(i).padStart(2, '0')}`,
-      password: DEFAULT_SEEDED_PASSWORD,
-      role: 'manager',
-      clientIds: []
-    });
-  }
-
-  for(let i = 1; i <= 10; i += 1){
-    users.push({
-      id: 300 + i,
-      username: `client${String(i).padStart(2, '0')}`,
-      password: DEFAULT_SEEDED_PASSWORD,
-      role: 'client',
       clientIds: []
     });
   }
@@ -4103,7 +4083,7 @@ function ensureManagerUser(users){
   );
 
   if(defaultManagerIdx >= 0){
-    // Keep "manager/1234" always available.
+    // Keep the default manager account always available.
     validUsers[defaultManagerIdx].username = DEFAULT_MANAGER_USERNAME;
     validUsers[defaultManagerIdx].password = DEFAULT_MANAGER_PASSWORD;
     validUsers[defaultManagerIdx].role = 'manager';
@@ -8131,6 +8111,7 @@ function getDiligenceSearchValues(row){
     row.sort,
     row.delegation,
     row.ordonnance,
+    ...getDiligenceOrdonnanceSearchValues(row.ordonnance),
     row.dossier?.debiteur,
     row.dossier?.boiteNo,
     row.dossier?.referenceClient,
@@ -8649,7 +8630,10 @@ function getDiligenceRows(){
         const tribunal = String(details.tribunal || '').trim();
         const sort = normalizeDiligenceSort(details.sort || '');
         const delegation = normalizeDiligenceAttOk(details.attDelegationOuDelegat || '') || 'att';
-        const ordonnance = normalizeDiligenceAttOk(details.attOrdOrOrdOk || '') || 'att';
+        const ordonnance = getDiligenceOrdonnanceStatus(
+          details.attOrdOrOrdOk || '',
+          details.notificationNo || ''
+        ) || 'att';
         rows.push({
           clientId: c.id,
           dossierIndex: di,
@@ -8759,17 +8743,21 @@ function syncDiligenceDelegationFilter(rows){
 function syncDiligenceOrdonnanceFilter(rows){
   const select = $('diligenceOrdonnanceFilter');
   if(!select) return;
+  const currentFilter = filterDiligenceOrdonnance === 'all'
+    ? 'all'
+    : (normalizeDiligenceOrdonnance(filterDiligenceOrdonnance) || 'all');
   if(rows === diligenceFilterOrdonnanceRowsRef){
-    select.value = filterDiligenceOrdonnance;
+    select.value = currentFilter;
     return;
   }
   const set = new Set();
   rows.forEach(r=>{
-    const ordonnance = String(r.ordonnance || '').trim();
+    const ordonnance = normalizeDiligenceOrdonnance(r.ordonnance || '');
     if(ordonnance) set.add(ordonnance);
   });
-  const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
-  select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+  const sorted = [...set].sort((a, b)=>getDiligenceOrdonnanceLabel(a).localeCompare(getDiligenceOrdonnanceLabel(b), 'fr'));
+  select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(getDiligenceOrdonnanceLabel(v))}</option>`).join('')}`;
+  filterDiligenceOrdonnance = currentFilter;
   if(filterDiligenceOrdonnance !== 'all' && !set.has(filterDiligenceOrdonnance)){
     filterDiligenceOrdonnance = 'all';
   }
@@ -8783,6 +8771,45 @@ function normalizeDiligenceAttOk(value){
   if(raw.includes('ok')) return 'ok';
   if(raw.includes('att')) return 'att';
   return '';
+}
+
+function normalizeDiligenceOrdonnance(value){
+  return normalizeDiligenceAttOk(value);
+}
+
+function isDiligenceNotificationNumberOrdOk(value){
+  const raw = String(value ?? '').trim().replace(/\s+/g, '');
+  if(!raw) return false;
+  return /^\d+$/.test(raw) || /^\d+(\/\d+)+$/.test(raw);
+}
+
+function getDiligenceOrdonnanceStatus(value, notificationNo = ''){
+  if(isDiligenceNotificationNumberOrdOk(notificationNo)) return 'ok';
+  return normalizeDiligenceOrdonnance(value);
+}
+
+function getDiligenceOrdonnanceLabel(value){
+  const status = getDiligenceOrdonnanceStatus(value);
+  if(status === 'ok') return 'ORD OK';
+  if(status === 'att') return 'ATT ORD';
+  return String(value || '').trim();
+}
+
+function getDiligenceOrdonnanceLabelFromDetails(details){
+  const status = getDiligenceOrdonnanceStatus(
+    details?.attOrdOrOrdOk || '',
+    details?.notificationNo || ''
+  );
+  if(status === 'ok') return 'ORD OK';
+  if(status === 'att') return 'ATT ORD';
+  return '';
+}
+
+function getDiligenceOrdonnanceSearchValues(value){
+  const status = getDiligenceOrdonnanceStatus(value);
+  if(status === 'ok') return ['ok', 'ord ok'];
+  if(status === 'att') return ['att', 'att ord'];
+  return [];
 }
 
 function normalizeDiligenceSort(value){
@@ -8870,11 +8897,27 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   const autoSizeAttrs = isAutoSize ? ` data-field="${escapeAttr(field)}"` : '';
   const autoSizeStyle = isAutoSize ? ` style="width:${getDiligenceAutoSizeWidthCh(field, normalized)}ch"` : '';
   const onSizeChange = isAutoSize ? 'autoSizeDiligenceControl(this);' : '';
-  const isStatusField = field === 'attOrdOrOrdOk' || field === 'attDelegationOuDelegat';
-  if(isStatusField){
-    const status = normalizeDiligenceAttOk(normalized) || 'att';
+  const isOrdonnanceField = field === 'attOrdOrOrdOk';
+  const isDelegationField = field === 'attDelegationOuDelegat';
+  if(isOrdonnanceField || isDelegationField){
+    const status = isOrdonnanceField
+      ? (getDiligenceOrdonnanceStatus(normalized, row?.details?.notificationNo || '') || 'att')
+      : (normalizeDiligenceAttOk(normalized) || 'att');
     if(!row?.canEdit){
+      if(isOrdonnanceField){
+        return escapeHtml(getDiligenceOrdonnanceLabel(status) || '-');
+      }
       return escapeHtml(status || '-');
+    }
+    if(isOrdonnanceField){
+      return `
+      <select
+        class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="att" ${status === 'att' ? 'selected' : ''}>ATT ORD</option>
+        <option value="ok" ${status === 'ok' ? 'selected' : ''}>ORD OK</option>
+      </select>
+    `;
     }
     return `
       <select
@@ -8964,6 +9007,7 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
   if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
   const details = dossier.procedureDetails[proc];
   const previousValue = field === 'ville' ? dossier.ville : details[field];
+  const previousOrdonnanceValue = details.attOrdOrOrdOk;
   let nextValue = value;
   if(field === 'attOrdOrOrdOk' || field === 'attDelegationOuDelegat'){
     nextValue = normalizeDiligenceAttOk(value);
@@ -8975,6 +9019,13 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
   }else{
     details[field] = nextValue;
   }
+  if(field === 'notificationNo' && isDiligenceNotificationNumberOrdOk(nextValue)){
+    details.attOrdOrOrdOk = 'ok';
+  }
+  if(field === 'attOrdOrOrdOk' && isDiligenceNotificationNumberOrdOk(details.notificationNo || '')){
+    details.attOrdOrOrdOk = 'ok';
+    nextValue = 'ok';
+  }
   queueDossierHistoryEntry(dossier, {
     source: 'diligence',
     field: field === 'ville' ? 'ville' : `procedureDetails.${field}`,
@@ -8982,6 +9033,15 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
     before: previousValue,
     after: nextValue
   });
+  if(details.attOrdOrOrdOk !== previousOrdonnanceValue && field !== 'attOrdOrOrdOk'){
+    queueDossierHistoryEntry(dossier, {
+      source: 'diligence',
+      field: 'procedureDetails.attOrdOrOrdOk',
+      procedure: proc,
+      before: previousOrdonnanceValue,
+      after: details.attOrdOrOrdOk
+    });
+  }
   handleDossierDataChange({ audience: true, rerenderLinked: true });
   persistDossierReferenceNow(clientId, dossier, { source: 'diligence' }).catch(()=>{});
 }
@@ -9009,7 +9069,10 @@ function getFilteredDiligenceRows(allRows){
     if(filterDiligenceProcedure !== 'all' && row.procedure !== filterDiligenceProcedure) return false;
     if(filterDiligenceSort !== 'all' && row.sort !== filterDiligenceSort) return false;
     if(filterDiligenceDelegation !== 'all' && row.delegation !== filterDiligenceDelegation) return false;
-    if(filterDiligenceOrdonnance !== 'all' && row.ordonnance !== filterDiligenceOrdonnance) return false;
+    if(
+      filterDiligenceOrdonnance !== 'all'
+      && normalizeDiligenceOrdonnance(row.ordonnance) !== normalizeDiligenceOrdonnance(filterDiligenceOrdonnance)
+    ) return false;
     if(filterDiligenceTribunal !== 'all' && row.tribunal !== filterDiligenceTribunal) return false;
     if(!q) return true;
     if(executionOnlyQuery) return hasDiligenceExecutionNumber(row);
@@ -9071,7 +9134,7 @@ function exportDiligenceXLS(){
     row.dossier?.debiteur || '-',
     row.details?.depotLe || row.details?.dateDepot || '-',
     row.details?.referenceClient || '-',
-    normalizeDiligenceAttOk(row.details?.attOrdOrOrdOk || '') || 'att',
+    getDiligenceOrdonnanceLabelFromDetails(row.details) || 'ATT ORD',
     row.details?.notificationNo || '-',
     row.details?.notificationStatus || '-',
     row.details?.notificationSort || '-',

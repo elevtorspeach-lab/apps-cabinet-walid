@@ -2,11 +2,13 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
   const isChecked = isDiligenceSelectedForPrint(row);
   const refValue = row.details?.referenceClient || '';
-  const ordValue = row.details?.attOrdOrOrdOk || '';
+  const ordValue = getDiligenceOrdonnanceStatus(
+    row.details?.attOrdOrOrdOk || '',
+    row.details?.notificationNo || ''
+  );
   const notificationSortValue = row.details?.notificationSort || '';
   const notificationNoValue = row.details?.notificationNo || '';
   const notificationStatusValue = row.details?.notificationStatus || '';
-  const dateNotificationValue = row.details?.dateNotification || '';
   const certificatNonAppelValue = row.details?.certificatNonAppelStatus || '';
   const executionValue = row.details?.executionNo || '';
   const villeValue = row.dossier?.ville || '';
@@ -34,7 +36,6 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationStatus', notificationStatusValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationSort', notificationSortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'dateNotification', dateNotificationValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
@@ -149,7 +150,6 @@ function renderDiligence(options = {}){
           <th>Notification N°</th>
           <th>Statut notification</th>
           <th>Sort notification</th>
-          <th>Date notification</th>
           <th>Certificat non appel</th>
           <th>Execution N°</th>
           <th>Ville</th>
@@ -180,7 +180,7 @@ function renderDiligence(options = {}){
       labels.push(filterDiligenceProcedure === 'all' ? 'toutes les procédures' : `procédure: ${filterDiligenceProcedure}`);
       labels.push(filterDiligenceSort === 'all' ? 'tous les sorts' : `sort: ${filterDiligenceSort}`);
       labels.push(filterDiligenceDelegation === 'all' ? 'toutes les délégations' : `délégation: ${filterDiligenceDelegation}`);
-      labels.push(filterDiligenceOrdonnance === 'all' ? 'toutes les ordonnances' : `ordonnance: ${filterDiligenceOrdonnance}`);
+      labels.push(filterDiligenceOrdonnance === 'all' ? 'toutes les ordonnances' : `ordonnance: ${getDiligenceOrdonnanceLabel(filterDiligenceOrdonnance)}`);
       labels.push(filterDiligenceTribunal === 'all' ? 'tous les tribunaux' : `tribunal: ${filterDiligenceTribunal}`);
       const label = labels.join(', ');
       count.textContent = `${rows.length} ligne(s) diligence (${label})`;
@@ -189,7 +189,7 @@ function renderDiligence(options = {}){
     if(!rows.length){
       diligenceVirtualRows = [];
       diligenceVirtualLastRange = { start: -1, end: -1 };
-      body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 16 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 15 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
       renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
       return;
     }
@@ -214,12 +214,15 @@ function renderDiligence(options = {}){
       if(filterDiligenceProcedure !== 'all' && row.procedure !== filterDiligenceProcedure) return false;
       if(filterDiligenceSort !== 'all' && row.sort !== filterDiligenceSort) return false;
       if(filterDiligenceDelegation !== 'all' && row.delegation !== filterDiligenceDelegation) return false;
-      if(filterDiligenceOrdonnance !== 'all' && row.ordonnance !== filterDiligenceOrdonnance) return false;
+      if(
+        filterDiligenceOrdonnance !== 'all'
+        && normalizeDiligenceOrdonnance(row.ordonnance) !== normalizeDiligenceOrdonnance(filterDiligenceOrdonnance)
+      ) return false;
       if(filterDiligenceTribunal !== 'all' && row.tribunal !== filterDiligenceTribunal) return false;
       return true;
     });
     const requestId = ++diligenceFilterRequestSeq;
-    body.innerHTML = '<tr><td colspan="16" class="diligence-empty">Recherche diligence en cours...</td></tr>';
+    body.innerHTML = '<tr><td colspan="15" class="diligence-empty">Recherche diligence en cours...</td></tr>';
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,

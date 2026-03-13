@@ -56,6 +56,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
+      <td data-label="Statut">${renderStatusDisplay(d.statut || 'En cours', d.statutDetails || '')}</td>
       <td data-label="Actions">
         <div class="table-actions">
           <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
@@ -76,7 +77,7 @@ function renderAudienceVirtualWindow(force = false){
   const rows = Array.isArray(audienceVirtualRows) ? audienceVirtualRows : [];
   if(!rows.length){
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
     return;
   }
 
@@ -89,10 +90,10 @@ function renderAudienceVirtualWindow(force = false){
   const topHeight = start * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const bottomHeight = (rows.length - end) * AUDIENCE_VIRTUAL_ROW_HEIGHT;
   const topSpacer = topHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="12" style="height:${topHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="13" style="height:${topHeight}px"></td></tr>`
     : '';
   const bottomSpacer = bottomHeight > 0
-    ? `<tr class="virtual-spacer"><td colspan="12" style="height:${bottomHeight}px"></td></tr>`
+    ? `<tr class="virtual-spacer"><td colspan="13" style="height:${bottomHeight}px"></td></tr>`
     : '';
   const rowsHtml = rows
     .slice(start, end)
@@ -340,7 +341,7 @@ function renderAudience(options = {}){
     audienceVirtualRows = [];
     audienceVirtualDuplicateKeySet = new Set();
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
     renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     updateAudienceCheckedCount();
     queueSidebarSalleSessionsRender();
@@ -359,7 +360,7 @@ function renderAudience(options = {}){
     audienceVirtualDuplicateKeySet = duplicateKeySet;
     audienceVirtualLastRange = { start: -1, end: -1 };
     if(!pageData.rows.length){
-      body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+      body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
     }else if(useVirtual){
       renderAudienceVirtualWindow(true);
     }else{
@@ -390,7 +391,7 @@ function renderAudience(options = {}){
   }
 
   const requestId = ++audienceFilterRequestSeq;
-  body.innerHTML = '<tr><td colspan="12" class="diligence-empty">Recherche audience en cours...</td></tr>';
+  body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Recherche audience en cours...</td></tr>';
   runAudienceFilterInWorker(
     colorFilteredRows.map((row, idx)=>({
       idx,

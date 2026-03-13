@@ -364,6 +364,7 @@ async function main() {
 
     await createDossier(adminActor, createReference);
     const createResults = await measurePropagation(sessions, waitForReference, [createReference]);
+    await waitForReference(gestionnaireActor, createReference, Date.now());
 
     await updateDossier(gestionnaireActor, createReference, updateNote);
     const updateResults = await measurePropagation(sessions, waitForNote, [createReference, updateNote]);
