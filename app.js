@@ -3759,45 +3759,72 @@ function renderImportHistoryPanel(containerId, type){
   const deleteFn = normalizedType === 'audience'
     ? 'deleteAudienceImportBatch'
     : 'deleteGlobalImportBatch';
+  const compactMode = true;
+  const compactSummaryLabel = normalizedType === 'audience'
+    ? 'Survolez pour voir la liste complete'
+    : 'Survolez pour voir tous les fichiers importes';
+  const compactDeleteLabel = normalizedType === 'audience'
+    ? 'Supprimer'
+    : 'Supprimer dossier global';
 
   container.style.display = '';
   container.innerHTML = `
-    <div class="import-history-card">
+    <div class="import-history-card ${compactMode ? 'import-history-card--compact' : ''}">
       <div class="import-history-header">
         <div>
           <h3 class="import-history-title">${escapeHtml(title)}</h3>
-          <p class="import-history-subtitle">${escapeHtml(subtitle)}</p>
+          <p class="import-history-subtitle">${escapeHtml(compactMode ? 'Survolez la case pour afficher tous les fichiers Excel importes.' : subtitle)}</p>
         </div>
       </div>
-      <div class="import-history-list">
-        ${entries.map(entry=>{
-          const deleteLabel = normalizedType === 'audience' ? 'Supprimer audience' : 'Supprimer dossier global';
-          return `
-            <div class="import-history-item">
-              <div class="import-history-main">
-                <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
-                <div class="import-history-content">
-                  <div class="import-history-file">${escapeHtml(entry.fileName || 'Import Excel')}</div>
-                  <div class="import-history-meta">
-                    <span>${escapeHtml(formatImportHistoryDate(entry.createdAt))}</span>
-                    <span>${escapeHtml(getImportHistorySummary(entry))}</span>
+      ${
+        compactMode
+          ? `
+            <div class="import-history-hoverbox" tabindex="0">
+              <div class="import-history-hover-trigger">
+                <div class="import-history-main">
+                  <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
+                  <div class="import-history-content">
+                    <div class="import-history-file">${entries.length} fichier${entries.length > 1 ? 's' : ''} Excel importe${entries.length > 1 ? 's' : ''}</div>
+                    <div class="import-history-meta">
+                      <span>Dernier: ${escapeHtml(entries[0]?.fileName || 'Import Excel')}</span>
+                      <span>${escapeHtml(compactSummaryLabel)}</span>
+                    </div>
                   </div>
                 </div>
+                <span class="import-history-caret"><i class="fa-solid fa-chevron-down"></i></span>
               </div>
-              <div class="import-history-actions">
-                <button
-                  class="btn-danger import-history-delete"
-                  type="button"
-                  onclick='${deleteFn}(${JSON.stringify(entry.id)})'
-                  ${canDelete ? '' : 'disabled'}
-                >
-                  <i class="fa-solid fa-trash"></i> ${escapeHtml(deleteLabel)}
-                </button>
+              <div class="import-history-hover-menu">
+                <div class="import-history-list">
+                  ${entries.map(entry=>`
+                    <div class="import-history-item import-history-item--menu">
+                      <div class="import-history-main">
+                        <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
+                        <div class="import-history-content">
+                          <div class="import-history-file">${escapeHtml(entry.fileName || 'Import Excel')}</div>
+                          <div class="import-history-meta">
+                            <span>${escapeHtml(formatImportHistoryDate(entry.createdAt))}</span>
+                            <span>${escapeHtml(getImportHistorySummary(entry))}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="import-history-actions">
+                        <button
+                          class="btn-danger import-history-delete"
+                          type="button"
+                          onclick='${deleteFn}(${JSON.stringify(entry.id)})'
+                          ${canDelete ? '' : 'disabled'}
+                        >
+                          <i class="fa-solid fa-trash"></i> ${escapeHtml(compactDeleteLabel)}
+                        </button>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
               </div>
             </div>
-          `;
-        }).join('')}
-      </div>
+          `
+          : ''
+      }
     </div>
   `;
 }

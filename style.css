@@ -1621,6 +1621,10 @@ tr:hover{background:#f1f5f9}
   box-shadow:0 12px 26px rgba(37,99,235,.08);
 }
 
+.import-history-card--compact{
+  overflow:visible;
+}
+
 .import-history-header{
   display:flex;
   align-items:flex-start;
@@ -1711,6 +1715,78 @@ tr:hover{background:#f1f5f9}
   padding:10px 14px;
   border-radius:14px;
   white-space:nowrap;
+}
+
+.import-history-hoverbox{
+  position:relative;
+}
+
+.import-history-hover-trigger{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:12px 14px;
+  border:1px solid #d9e4f4;
+  border-radius:16px;
+  background:#fff;
+  cursor:default;
+  transition:box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+}
+
+.import-history-caret{
+  flex:0 0 auto;
+  width:36px;
+  height:36px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:12px;
+  color:#1d4ed8;
+  background:#eff6ff;
+  transition:transform .18s ease;
+}
+
+.import-history-hover-menu{
+  position:absolute;
+  top:calc(100% + 10px);
+  left:0;
+  right:0;
+  z-index:25;
+  padding:10px;
+  border:1px solid #d8e2f2;
+  border-radius:18px;
+  background:#f8fbff;
+  box-shadow:0 18px 40px rgba(15,23,42,.16);
+  opacity:0;
+  visibility:hidden;
+  transform:translateY(-6px);
+  pointer-events:none;
+  transition:opacity .18s ease, transform .18s ease, visibility .18s ease;
+}
+
+.import-history-hoverbox:hover .import-history-hover-trigger,
+.import-history-hoverbox:focus-within .import-history-hover-trigger{
+  border-color:#93c5fd;
+  box-shadow:0 10px 22px rgba(37,99,235,.12);
+  transform:translateY(-1px);
+}
+
+.import-history-hoverbox:hover .import-history-hover-menu,
+.import-history-hoverbox:focus-within .import-history-hover-menu{
+  opacity:1;
+  visibility:visible;
+  transform:translateY(0);
+  pointer-events:auto;
+}
+
+.import-history-hoverbox:hover .import-history-caret,
+.import-history-hoverbox:focus-within .import-history-caret{
+  transform:rotate(180deg);
+}
+
+.import-history-item--menu{
+  padding:10px 12px;
 }
 
 .audience-filter-row .search-box{
@@ -1962,6 +2038,21 @@ tr.color-purple-light{border-left:6px solid #c2410c;background:#ffcda8}
   .import-history-card{
     padding:14px;
     border-radius:18px;
+  }
+  .import-history-hover-trigger{
+    align-items:flex-start;
+  }
+  .import-history-hover-menu{
+    position:static;
+    margin-top:10px;
+    opacity:1;
+    visibility:visible;
+    transform:none;
+    pointer-events:auto;
+    box-shadow:none;
+  }
+  .import-history-caret{
+    display:none;
   }
   .import-history-item{
     flex-direction:column;
