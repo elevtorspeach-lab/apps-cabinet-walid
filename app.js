@@ -200,6 +200,8 @@ let dashboardAudienceMetricsCacheUserKey = '';
 let dashboardCalendarEventsCache = null;
 let dashboardCalendarEventsCacheVersion = -1;
 let dashboardCalendarEventsCacheUserKey = '';
+let importHistoryPanelMarkupCache = new Map();
+let importHistoryMenuMarkupCache = new Map();
 let dashboardCalendarRenderTimer = null;
 let dashboardHeavyRenderTimer = null;
 let audienceErrorCountCacheVersion = -1;
@@ -3738,6 +3740,76 @@ function getImportHistorySummary(entry){
   return parts.join(' | ');
 }
 
+function buildImportHistoryPanelKey(entries, type, canDelete){
+  return JSON.stringify({
+    type,
+    canDelete: canDelete ? 1 : 0,
+    entries: (entries || []).map(entry=>({
+      id: String(entry?.id || ''),
+      fileName: String(entry?.fileName || ''),
+      createdAt: String(entry?.createdAt || ''),
+      summary: getImportHistorySummary(entry)
+    }))
+  });
+}
+
+function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
+  const menuCacheKey = `${normalizedType}::${canDelete ? '1' : '0'}::${buildImportHistoryPanelKey(entries, normalizedType, canDelete)}`;
+  const cached = importHistoryMenuMarkupCache.get(menuCacheKey);
+  if(cached) return cached;
+  const deleteFn = normalizedType === 'audience'
+    ? 'deleteAudienceImportBatch'
+    : 'deleteGlobalImportBatch';
+  const compactDeleteLabel = normalizedType === 'audience'
+    ? 'Supprimer'
+    : 'Supprimer dossier global';
+  const markup = `
+    <div class="import-history-list">
+      ${entries.map(entry=>`
+        <div class="import-history-item import-history-item--menu">
+          <div class="import-history-main">
+            <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
+            <div class="import-history-content">
+              <div class="import-history-file">${escapeHtml(entry.fileName || 'Import Excel')}</div>
+              <div class="import-history-meta">
+                <span>${escapeHtml(formatImportHistoryDate(entry.createdAt))}</span>
+                <span>${escapeHtml(getImportHistorySummary(entry))}</span>
+              </div>
+            </div>
+          </div>
+          <div class="import-history-actions">
+            <button
+              class="btn-danger import-history-delete"
+              type="button"
+              onclick='${deleteFn}(${JSON.stringify(entry.id)})'
+              ${canDelete ? '' : 'disabled'}
+            >
+              <i class="fa-solid fa-trash"></i> ${escapeHtml(compactDeleteLabel)}
+            </button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  importHistoryMenuMarkupCache.set(menuCacheKey, markup);
+  return markup;
+}
+
+function ensureImportHistoryHoverMenu(containerId, type){
+  const container = $(containerId);
+  if(!container) return;
+  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const entries = getImportHistoryEntriesByType(normalizedType);
+  if(!entries.length) return;
+  const canDelete = canDeleteData();
+  const menu = container.querySelector('.import-history-hover-menu');
+  if(!menu) return;
+  const renderKey = buildImportHistoryPanelKey(entries, normalizedType, canDelete);
+  if(menu.dataset.renderKey === renderKey && menu.innerHTML.trim()) return;
+  menu.innerHTML = buildImportHistoryMenuMarkup(entries, normalizedType, canDelete);
+  menu.dataset.renderKey = renderKey;
+}
+
 function renderImportHistoryPanel(containerId, type){
   const container = $(containerId);
   if(!container) return;
@@ -3746,6 +3818,7 @@ function renderImportHistoryPanel(containerId, type){
   if(!entries.length){
     container.innerHTML = '';
     container.style.display = 'none';
+    container.dataset.renderKey = '';
     return;
   }
 
@@ -3763,12 +3836,20 @@ function renderImportHistoryPanel(containerId, type){
   const compactSummaryLabel = normalizedType === 'audience'
     ? 'Survolez pour voir la liste complete'
     : 'Survolez pour voir tous les fichiers importes';
-  const compactDeleteLabel = normalizedType === 'audience'
-    ? 'Supprimer'
-    : 'Supprimer dossier global';
+  const renderKey = buildImportHistoryPanelKey(entries, normalizedType, canDelete);
+
+  if(container.dataset.renderKey === renderKey){
+    container.style.display = '';
+    if(isMobileViewport()){
+      ensureImportHistoryHoverMenu(containerId, normalizedType);
+    }
+    return;
+  }
 
   container.style.display = '';
-  container.innerHTML = `
+  const panelCacheKey = `${containerId}::${renderKey}`;
+  const cachedMarkup = importHistoryPanelMarkupCache.get(panelCacheKey);
+  container.innerHTML = cachedMarkup || `
     <div class="import-history-card ${compactMode ? 'import-history-card--compact' : ''}">
       <div class="import-history-header">
         <div>
@@ -3779,7 +3860,12 @@ function renderImportHistoryPanel(containerId, type){
       ${
         compactMode
           ? `
-            <div class="import-history-hoverbox" tabindex="0">
+            <div
+              class="import-history-hoverbox"
+              tabindex="0"
+              onmouseenter="ensureImportHistoryHoverMenu(${JSON.stringify(containerId)}, ${JSON.stringify(normalizedType)})"
+              onfocusin="ensureImportHistoryHoverMenu(${JSON.stringify(containerId)}, ${JSON.stringify(normalizedType)})"
+            >
               <div class="import-history-hover-trigger">
                 <div class="import-history-main">
                   <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
@@ -3793,40 +3879,20 @@ function renderImportHistoryPanel(containerId, type){
                 </div>
                 <span class="import-history-caret"><i class="fa-solid fa-chevron-down"></i></span>
               </div>
-              <div class="import-history-hover-menu">
-                <div class="import-history-list">
-                  ${entries.map(entry=>`
-                    <div class="import-history-item import-history-item--menu">
-                      <div class="import-history-main">
-                        <span class="import-history-icon"><i class="fa-solid fa-file-excel"></i></span>
-                        <div class="import-history-content">
-                          <div class="import-history-file">${escapeHtml(entry.fileName || 'Import Excel')}</div>
-                          <div class="import-history-meta">
-                            <span>${escapeHtml(formatImportHistoryDate(entry.createdAt))}</span>
-                            <span>${escapeHtml(getImportHistorySummary(entry))}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="import-history-actions">
-                        <button
-                          class="btn-danger import-history-delete"
-                          type="button"
-                          onclick='${deleteFn}(${JSON.stringify(entry.id)})'
-                          ${canDelete ? '' : 'disabled'}
-                        >
-                          <i class="fa-solid fa-trash"></i> ${escapeHtml(compactDeleteLabel)}
-                        </button>
-                      </div>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
+              <div class="import-history-hover-menu"></div>
             </div>
           `
           : ''
       }
     </div>
   `;
+  if(!cachedMarkup){
+    importHistoryPanelMarkupCache.set(panelCacheKey, container.innerHTML);
+  }
+  container.dataset.renderKey = renderKey;
+  if(isMobileViewport()){
+    ensureImportHistoryHoverMenu(containerId, normalizedType);
+  }
 }
 
 function pushRecycleBinEntry(type, payload){
