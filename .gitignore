@@ -9,3 +9,6 @@ desktop-app/dist/
 backups/
 appsavocatcomplet.zip
 server/data/
+server/ssl/local.key
+server/ssl/local.crt
+server/ssl/openssl-local.cnf

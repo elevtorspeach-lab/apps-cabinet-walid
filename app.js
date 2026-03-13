@@ -4191,7 +4191,9 @@ function getRemoteRefreshBlocker(){
   if(importInProgress) return 'import';
   if(heavyUiOperationCount > 0) return 'busy';
   if(persistTimer) return 'persist';
-  if(Object.keys(audienceDraft || {}).length) return 'draft';
+  // Only block while local audience draft changes are still unsaved.
+  // A non-empty persisted draft should not stop live updates from other users.
+  if(audienceAutoSaveTimer) return 'draft';
   return '';
 }
 

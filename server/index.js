@@ -1,12 +1,18 @@
 const express = require('express');
 const fs = require('fs');
 const fsp = require('fs/promises');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const HTTPS_PORT = Number(process.env.HTTPS_PORT || 3443);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_DIR = path.join(__dirname, '..');
+const SSL_DIR = path.join(__dirname, 'ssl');
+const SSL_KEY_FILE = process.env.SSL_KEY_FILE || path.join(SSL_DIR, 'local.key');
+const SSL_CERT_FILE = process.env.SSL_CERT_FILE || path.join(SSL_DIR, 'local.crt');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -159,6 +165,21 @@ function cleanupChunkedUploads(maxAgeMs = 15 * 60 * 1000) {
   for (const [uploadId, session] of chunkedStateUploads.entries()) {
     if (!session || (now - Number(session.createdAt || 0)) <= maxAgeMs) continue;
     chunkedStateUploads.delete(uploadId);
+  }
+}
+
+function loadSslCredentials() {
+  try {
+    if (!fs.existsSync(SSL_KEY_FILE) || !fs.existsSync(SSL_CERT_FILE)) {
+      return null;
+    }
+    return {
+      key: fs.readFileSync(SSL_KEY_FILE, 'utf8'),
+      cert: fs.readFileSync(SSL_CERT_FILE, 'utf8')
+    };
+  } catch (err) {
+    console.warn('Failed to load SSL certificates:', err);
+    return null;
   }
 }
 
@@ -564,8 +585,20 @@ app.get('/', (req, res) => {
 
 ensureDataFile()
   .then(() => {
-    app.listen(PORT, HOST, () => {
+    const httpServer = http.createServer(app);
+    httpServer.listen(PORT, HOST, () => {
       console.log(`Cabinet API running on http://${HOST}:${PORT}`);
+    });
+
+    const sslCredentials = loadSslCredentials();
+    if (!sslCredentials) {
+      console.log(`SSL inactive. Add certificates in ${SSL_DIR} to enable https on port ${HTTPS_PORT}.`);
+      return;
+    }
+
+    const httpsServer = https.createServer(sslCredentials, app);
+    httpsServer.listen(HTTPS_PORT, HOST, () => {
+      console.log(`Cabinet API SSL running on https://${HOST}:${HTTPS_PORT}`);
     });
   })
   .catch((err) => {
