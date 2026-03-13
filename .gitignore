@@ -7,6 +7,7 @@ desktop-app/dist/
 .DS_Store
 *.log
 backups/
+.stress-runs/
 appsavocatcomplet.zip
 server/data/
 server/ssl/local.key

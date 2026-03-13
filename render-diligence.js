@@ -112,7 +112,7 @@ function queueDiligenceVirtualRender(){
 
 function renderDiligence(options = {}){
   if(!shouldRenderDeferredSection('diligence', options)) return;
-  const diligenceQuery = $('diligenceSearchInput')?.value?.toLowerCase() || '';
+  const diligenceQuery = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
   const diligenceFilterStateKey = [
     diligenceQuery,
     filterDiligenceProcedure,
@@ -235,7 +235,7 @@ function renderDiligence(options = {}){
     )
       .then((filteredIndexes)=>{
         const currentStateKey = [
-          $('diligenceSearchInput')?.value?.toLowerCase() || '',
+          normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || ''),
           filterDiligenceProcedure,
           filterDiligenceSort,
           filterDiligenceDelegation,

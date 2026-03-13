@@ -25,18 +25,44 @@ const DOSSIER_COUNT = readCountArg('--dossiers', 30000);
 const AUDIENCE_COUNT = readCountArg('--audiences', 50000);
 const USER_COUNT = readCountArg('--users', 20);
 const SELECTED_EXPORT_ROWS = readCountArg('--selected-export-rows', 250);
+const ADMIN_COUNT = readCountArg('--admins', Math.max(0, USER_COUNT - 1));
+const MANAGER_COUNT = readCountArg('--managers', 1);
+const VIEWER_COUNT = readCountArg('--clients-users', 0);
+const MANAGER_USERNAME = String(process.env.MANAGER_USERNAME || 'walid').trim() || 'walid';
 const STARTUP_TIMEOUT_MS = 120000;
 const DATA_READY_TIMEOUT_MS = 900000;
 const DOWNLOAD_TIMEOUT_MS = 900000;
 
 function buildUsers() {
-  const users = [{ id: 1, username: 'manager', password: '1234', role: 'manager', clientIds: [] }];
-  for (let i = 1; i < USER_COUNT; i += 1) {
+  const requestedTotal = MANAGER_COUNT + ADMIN_COUNT + VIEWER_COUNT;
+  if (requestedTotal !== USER_COUNT) {
+    throw new Error(`Role counts (${requestedTotal}) must match USER_COUNT (${USER_COUNT}).`);
+  }
+  const users = [];
+  for (let i = 0; i < MANAGER_COUNT; i += 1) {
     users.push({
-      id: i + 1,
-      username: `admin${String(i).padStart(2, '0')}`,
+      id: users.length + 1,
+      username: i === 0 ? MANAGER_USERNAME : `manager${i + 1}`,
+      password: '1234',
+      role: 'manager',
+      clientIds: []
+    });
+  }
+  for (let i = 0; i < ADMIN_COUNT; i += 1) {
+    users.push({
+      id: users.length + 1,
+      username: `admin${i + 1}`,
       password: '1234',
       role: 'admin',
+      clientIds: []
+    });
+  }
+  for (let i = 0; i < VIEWER_COUNT; i += 1) {
+    users.push({
+      id: users.length + 1,
+      username: `client${i + 1}`,
+      password: '1234',
+      role: 'client',
       clientIds: []
     });
   }
@@ -100,11 +126,20 @@ async function writeFixtureFiles(users) {
     dossiers: DOSSIER_COUNT,
     audiences: AUDIENCE_COUNT
   });
-  payload.users = clone(users);
+  const assignedUsers = clone(users);
+  const viewerUsers = assignedUsers.filter((user) => user.role === 'client');
+  if (viewerUsers.length) {
+    payload.clients.forEach((client, index) => {
+      const targetUser = viewerUsers[index % viewerUsers.length];
+      if (!Array.isArray(targetUser.clientIds)) targetUser.clientIds = [];
+      targetUser.clientIds.push(Number(client.id));
+    });
+  }
+  payload.users = assignedUsers;
   payload.updatedAt = new Date().toISOString();
   const fixturePath = path.join(RUN_ROOT, `fixture_${CLIENT_COUNT}c_${DOSSIER_COUNT}d_${AUDIENCE_COUNT}a.appsavocat`);
   await fs.writeFile(fixturePath, JSON.stringify(payload), 'utf8');
-  return { fixturePath };
+  return { fixturePath, users: assignedUsers };
 }
 
 async function waitForServer(timeoutMs = STARTUP_TIMEOUT_MS) {
@@ -173,6 +208,41 @@ async function openSession(browser, user, slot) {
     page,
     dialogs,
     consoleErrors
+  };
+}
+
+async function runBrowseAction(session, label) {
+  await waitForDataReady(session);
+  console.log(`[${session.user.username}] browse start (${label})`);
+  const sections = ['dashboard', 'audience', 'suivi', 'diligence'];
+  const visited = [];
+  for (const section of sections) {
+    await openSection(session, section);
+    visited.push(section);
+    if (section === 'audience') {
+      await session.page.waitForSelector('#audienceSection', { state: 'visible' });
+      await session.page.fill('#filterAudience', 'Client');
+      await session.page.waitForTimeout(200);
+      await session.page.fill('#filterAudience', '');
+    } else if (section === 'suivi') {
+      await session.page.waitForSelector('#suiviSection', { state: 'visible' });
+      await session.page.fill('#filterGlobal', 'REF');
+      await session.page.waitForTimeout(200);
+      await session.page.fill('#filterGlobal', '');
+    } else if (section === 'diligence') {
+      await session.page.waitForSelector('#diligenceSection', { state: 'visible' });
+      await session.page.fill('#diligenceSearchInput', 'att');
+      await session.page.waitForTimeout(200);
+      await session.page.fill('#diligenceSearchInput', '');
+    } else {
+      await session.page.waitForSelector('#dashboardSection', { state: 'visible' });
+    }
+  }
+  console.log(`[${session.user.username}] browse done (${label})`);
+  return {
+    type: 'browse',
+    label,
+    visited
   };
 }
 
@@ -387,6 +457,8 @@ async function runAction(session, action) {
       details = await runSuiviExport(session);
     } else if (action.kind === 'diligence-export') {
       details = await runDiligenceExport(session);
+    } else if (action.kind === 'browse') {
+      details = await runBrowseAction(session, action.label || 'default');
     } else {
       throw new Error(`Unsupported action: ${action.kind}`);
     }
@@ -416,8 +488,9 @@ async function runAction(session, action) {
 
 function buildActionPlan(fixturePath) {
   const actions = [];
-  if (USER_COUNT >= 1) actions.push({ kind: 'import', fixturePath, label: 'primary' });
-  if (USER_COUNT >= 2) actions.push({ kind: 'import', fixturePath, label: 'secondary' });
+  const editorSlots = Math.max(0, MANAGER_COUNT + ADMIN_COUNT);
+  if (editorSlots >= 1) actions.push({ kind: 'import', fixturePath, label: 'primary' });
+  if (editorSlots >= 2) actions.push({ kind: 'import', fixturePath, label: 'secondary' });
 
   const actionFactories = [
     { usesModifyIndex: true, build: (index) => ({ kind: 'modify', targetIndex: index }) },
@@ -433,12 +506,15 @@ function buildActionPlan(fixturePath) {
   ];
 
   let modifyIndex = 0;
-  while (actions.length < USER_COUNT) {
-    const factory = actionFactories[(actions.length - Math.min(USER_COUNT, 2)) % actionFactories.length];
+  while (actions.length < editorSlots) {
+    const factory = actionFactories[(actions.length - Math.min(editorSlots, 2)) % actionFactories.length];
     actions.push(factory.build(modifyIndex));
     if (factory.usesModifyIndex) {
       modifyIndex += 1;
     }
+  }
+  while (actions.length < USER_COUNT) {
+    actions.push({ kind: 'browse', label: `viewer-${actions.length + 1}` });
   }
 
   if (actions.length !== USER_COUNT) {
@@ -465,7 +541,7 @@ async function main() {
   const users = buildUsers();
   await prepareRunWorkspace();
   await writeInitialState(users);
-  const { fixturePath } = await writeFixtureFiles(users);
+  const { fixturePath, users: fixtureUsers } = await writeFixtureFiles(users);
 
   const server = spawn('node', ['index.js'], {
     cwd: SERVER_ROOT,
@@ -512,8 +588,16 @@ async function main() {
         dossiers: DOSSIER_COUNT,
         audiences: AUDIENCE_COUNT,
         users: USER_COUNT,
+        admins: ADMIN_COUNT,
+        managers: MANAGER_COUNT,
+        clientUsers: VIEWER_COUNT,
         selectedExportRows: SELECTED_EXPORT_ROWS
       },
+      userRoles: fixtureUsers.map((user) => ({
+        username: user.username,
+        role: user.role,
+        clientIds: Array.isArray(user.clientIds) ? user.clientIds.length : 0
+      })),
       fixturePath,
       results,
       summary: summarizeResults(results),

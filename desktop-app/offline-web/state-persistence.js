@@ -11,6 +11,7 @@ function normalizePersistedStateSource(rawState){
     : {};
   const loadedRecycleBin = normalizeRecycleBinEntries(rawState?.recycleBin);
   const loadedRecycleArchive = normalizeRecycleArchiveEntries(rawState?.recycleArchive);
+  const loadedImportHistory = normalizeImportHistoryEntries(rawState?.importHistory);
   const nextUsers = ensureManagerUser(loadedUsers);
   const nextSignature = buildStateSignature(
     loadedClients,
@@ -18,7 +19,8 @@ function normalizePersistedStateSource(rawState){
     nextUsers,
     loadedDraft,
     loadedRecycleBin,
-    loadedRecycleArchive
+    loadedRecycleArchive,
+    loadedImportHistory
   );
   return {
     clients: loadedClients,
@@ -27,6 +29,7 @@ function normalizePersistedStateSource(rawState){
     audienceDraft: loadedDraft,
     recycleBin: loadedRecycleBin,
     recycleArchive: loadedRecycleArchive,
+    importHistory: loadedImportHistory,
     signature: nextSignature
   };
 }
@@ -51,13 +54,15 @@ async function applyPersistedStateSource(normalizedState, options = {}){
   audienceDraft = normalizedState.audienceDraft;
   AppState.recycleBin = normalizedState.recycleBin;
   AppState.recycleArchive = normalizedState.recycleArchive;
+  AppState.importHistory = normalizedState.importHistory;
   lastPersistedStateSignature = normalizedState.signature || buildStateSignature(
     AppState.clients,
     AppState.salleAssignments,
     USERS,
     audienceDraft,
     AppState.recycleBin,
-    AppState.recycleArchive
+    AppState.recycleArchive,
+    AppState.importHistory
   );
   syncCurrentUserFromUsers();
 

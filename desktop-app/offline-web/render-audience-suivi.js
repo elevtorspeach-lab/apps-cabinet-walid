@@ -46,7 +46,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       </td>
       <td data-label="Débiteur">${escapeHtml(d.debiteur || '-')}</td>
       <td data-label="Référence dossier">
-        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(draft.refDossier || p.referenceClient || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)">
+        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)">
         ${isMissingGlobal ? '<div class="audience-inline-error">Introuvable dans dossier global</div>' : ''}
       </td>
       <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)"></td>
@@ -335,6 +335,7 @@ function renderAudience(options = {}){
     queueSidebarSalleSessionsRender();
     return;
   }
+  renderImportHistoryPanel('audienceImportHistory', 'audience');
   body.innerHTML='';
   if(!isManager() && getVisibleClients().length === 0){
     audienceVirtualRows = [];
