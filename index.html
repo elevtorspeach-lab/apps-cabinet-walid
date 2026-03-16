@@ -83,7 +83,8 @@
     <i class="fa-solid fa-chevron-left"></i>
   </button>
 
-  <div class="content">
+  <div id="contentArea" class="content">
+    <div id="contentZoomViewport" class="content-zoom-viewport">
 
     <!-- DASHBOARD -->
     <div id="dashboardSection" class="section">
@@ -158,16 +159,19 @@
           <i class="fa-solid fa-square-check"></i> Cocher
         </button>
         <button id="selectAllPrintAudienceBtn" class="btn-primary" type="button">
-          <i class="fa-solid fa-check-double"></i> Tout cocher
+          <i class="fa-solid fa-check-double"></i> Cocher page
         </button>
         <button id="clearAllPrintAudienceBtn" class="btn-primary" type="button">
-          <i class="fa-solid fa-eraser"></i> Tout décocher
+          <i class="fa-solid fa-eraser"></i> Décocher page
         </button>
         <button id="exportAudienceBtn" class="btn-primary">
           <i class="fa-solid fa-file-export"></i> Exporter
         </button>
         <button id="exportAudienceDetailBtn" class="btn-primary">
           <i class="fa-solid fa-file-lines"></i> Export d'audience
+        </button>
+        <button id="previewAudienceBtn" class="btn-primary" type="button">
+          <i class="fa-regular fa-eye"></i> Voir le fichier
         </button>
       </div>
     </div>
@@ -220,8 +224,6 @@
       </div>
     </div>
 
-    <div id="audienceImportHistory" class="import-history-panel" style="display:none;"></div>
-
   </div>
 
   <div id="audienceTableContainer" class="table-container">
@@ -247,6 +249,7 @@
     </table>
   </div>
   <div id="audiencePagination" class="table-pagination"></div>
+  <div id="audienceImportHistory" class="import-history-panel" style="display:none;"></div>
 </div>
 
     <!-- DILIGENCE -->
@@ -288,21 +291,24 @@
                 <option value="all">Toutes</option>
               </select>
             </div>
-            <div class="audience-color-filter">
-              <label for="diligenceTribunalFilter">Tribunal</label>
-              <select id="diligenceTribunalFilter">
-                <option value="all">Tous</option>
-              </select>
-            </div>
-            <span id="diligenceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+	            <div class="audience-color-filter">
+	              <label for="diligenceTribunalFilter">Tribunal</label>
+	              <select id="diligenceTribunalFilter">
+	                <option value="all">Tous</option>
+	              </select>
+	            </div>
+	            <span id="diligenceCheckedCount" class="audience-checked-count">Cochés: 0</span>
             <button id="selectAllDiligenceBtn" class="btn-primary" type="button">
-              <i class="fa-solid fa-check-double"></i> Tout cocher
+              <i class="fa-solid fa-check-double"></i> Cocher page
             </button>
             <button id="clearAllDiligenceBtn" class="btn-primary" type="button">
-              <i class="fa-solid fa-eraser"></i> Tout décocher
+              <i class="fa-solid fa-eraser"></i> Décocher page
             </button>
             <button id="exportDiligenceBtn" class="btn-primary" type="button">
               <i class="fa-solid fa-file-export"></i> Exporter
+            </button>
+            <button id="previewDiligenceBtn" class="btn-primary" type="button">
+              <i class="fa-regular fa-eye"></i> Voir le fichier
             </button>
           </div>
           <div id="diligenceCount" class="diligence-count"></div>
@@ -676,13 +682,16 @@
         </div>
         <div id="suiviCheckedCount" class="audience-checked-count">Cochés: 0</div>
         <button id="selectAllSuiviBtn" class="btn-primary" type="button">
-          <i class="fa-solid fa-check"></i> Tout cocher
+          <i class="fa-solid fa-check"></i> Cocher page
         </button>
         <button id="clearAllSuiviBtn" class="btn-primary" type="button">
-          <i class="fa-regular fa-square-xmark"></i> Tout décocher
+          <i class="fa-regular fa-square-xmark"></i> Décocher page
         </button>
         <button id="exportSuiviBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-file-export"></i> Exporter
+        </button>
+        <button id="previewSuiviBtn" class="btn-primary" type="button">
+          <i class="fa-regular fa-eye"></i> Voir le fichier
         </button>
       </div>
       
@@ -739,7 +748,28 @@
       </div>
       <div id="recyclePagination" class="table-pagination"></div>
     </div>
-
+    </div>
+    <div id="zoomDock" class="zoom-dock" aria-label="Zoom interface">
+      <button id="zoomOutBtn" class="zoom-dock-btn" type="button" aria-label="Réduire le zoom">
+        <i class="fa-solid fa-minus"></i>
+      </button>
+      <input
+        id="zoomRange"
+        class="zoom-dock-range"
+        type="range"
+        min="60"
+        max="140"
+        step="5"
+        value="100"
+        aria-label="Niveau de zoom"
+      />
+      <button id="zoomInBtn" class="zoom-dock-btn" type="button" aria-label="Augmenter le zoom">
+        <i class="fa-solid fa-plus"></i>
+      </button>
+      <button id="zoomResetBtn" class="zoom-dock-percent" type="button" aria-label="Réinitialiser le zoom à 100%">
+        <span id="zoomPercent">100 %</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -774,6 +804,22 @@
           <i class="fa-solid fa-copy"></i> Copier les erreurs
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT PREVIEW MODAL -->
+<div id="exportPreviewModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card preview-modal-card">
+    <div class="modal-head">
+      <h2 id="exportPreviewTitle"><i class="fa-regular fa-file-excel"></i> Aperçu Excel</h2>
+      <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
+        <i class="fa-solid fa-xmark"></i> Fermer
+      </button>
+    </div>
+    <div class="modal-body preview-modal-body">
+      <div id="exportPreviewMeta" class="preview-modal-meta"></div>
+      <div id="exportPreviewTableWrap" class="preview-table-wrap"></div>
     </div>
   </div>
 </div>

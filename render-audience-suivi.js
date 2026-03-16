@@ -169,10 +169,24 @@ function queueSuiviVirtualRender(){
   });
 }
 
+function orderSuiviRowsByCheckedSelection(rows){
+  if(!filterSuiviCheckedFirst || !Array.isArray(rows) || rows.length < 2) return rows;
+  const checkedRows = [];
+  const otherRows = [];
+  rows.forEach(row=>{
+    if(isSuiviSelectedForPrint(row)){
+      checkedRows.push(row);
+    }else{
+      otherRows.push(row);
+    }
+  });
+  return checkedRows.concat(otherRows);
+}
+
 function renderSuivi(options = {}){
   if(!shouldRenderDeferredSection('suivi', options)) return;
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
-  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal, filterSuiviCheckedFirst ? 'checked-first' : 'default'].join('||');
   syncPaginationFilterState('suivi', suiviFilterKey);
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
@@ -190,8 +204,9 @@ function renderSuivi(options = {}){
   const noTribunalFilter = filterSuiviTribunal === 'all';
   const noSearchFilter = !q;
   const finalizeSuiviRender = (sortedRows)=>{
+    const orderedRows = orderSuiviRowsByCheckedSelection(sortedRows);
     syncSuiviPrintSelection(base.sortedDefaultRows);
-    const pageData = paginateRows(sortedRows, 'suivi');
+    const pageData = paginateRows(orderedRows, 'suivi');
     const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
     suiviVirtualRows = pageData.rows;
     suiviVirtualLastRange = { start: -1, end: -1 };
@@ -241,7 +256,8 @@ function renderSuivi(options = {}){
         const currentStateKey = [
           $('filterGlobal')?.value?.toLowerCase() || '',
           filterSuiviProcedure,
-          filterSuiviTribunal
+          filterSuiviTribunal,
+          filterSuiviCheckedFirst ? 'checked-first' : 'default'
         ].join('||');
         if(requestId !== suiviFilterRequestSeq) return;
         if(currentStateKey !== suiviFilterKey) return;
@@ -324,6 +340,7 @@ function renderAudience(options = {}){
     filterAudienceTribunal,
     filterAudienceDate,
     filterAudienceErrorsOnly ? '1' : '0',
+    filterAudienceCheckedFirst ? 'checked-first' : 'default',
     selectedAudienceColor
   ].join('||');
   syncPaginationFilterState(
@@ -416,6 +433,7 @@ function renderAudience(options = {}){
         filterAudienceTribunal,
         filterAudienceDate,
         filterAudienceErrorsOnly ? '1' : '0',
+        filterAudienceCheckedFirst ? 'checked-first' : 'default',
         selectedAudienceColor
       ].join('||');
       if(requestId !== audienceFilterRequestSeq) return;

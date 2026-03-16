@@ -1,6 +1,7 @@
 function renderDiligenceRowHtml(row, showInjonctionColumns){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
   const isChecked = isDiligenceSelectedForPrint(row);
+  const refClientValue = row.dossier?.referenceClient || '';
   const refValue = row.details?.referenceClient || '';
   const ordValue = getDiligenceOrdonnanceStatus(
     row.details?.attOrdOrOrdOk || '',
@@ -29,6 +30,7 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
           <span>${escapeHtml(row.clientName || '-')}</span>
         </label>
       </td>
+      <td>${escapeHtml(refClientValue || '-')}</td>
       <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
       <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
@@ -58,6 +60,7 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
           <span>${escapeHtml(row.clientName || '-')}</span>
         </label>
       </td>
+      <td>${escapeHtml(refClientValue || '-')}</td>
       <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
       <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
@@ -76,7 +79,7 @@ function renderDiligenceVirtualWindow(force = false){
   const body = $('diligenceBody');
   if(!body) return;
   const rows = Array.isArray(diligenceVirtualRows) ? diligenceVirtualRows : [];
-  const colCount = diligenceVirtualShowInjonctionColumns ? 15 : 11;
+  const colCount = diligenceVirtualShowInjonctionColumns ? 16 : 12;
   if(!rows.length){
     diligenceVirtualLastRange = { start: -1, end: -1 };
     body.innerHTML = `<tr><td colspan="${colCount}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
@@ -110,6 +113,20 @@ function queueDiligenceVirtualRender(){
   });
 }
 
+function orderDiligenceRowsByCheckedSelection(rows){
+  if(!filterDiligenceCheckedFirst || !Array.isArray(rows) || rows.length < 2) return rows;
+  const checkedRows = [];
+  const otherRows = [];
+  rows.forEach(row=>{
+    if(isDiligenceSelectedForPrint(row)){
+      checkedRows.push(row);
+    }else{
+      otherRows.push(row);
+    }
+  });
+  return checkedRows.concat(otherRows);
+}
+
 function renderDiligence(options = {}){
   if(!shouldRenderDeferredSection('diligence', options)) return;
   const diligenceQuery = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
@@ -119,7 +136,8 @@ function renderDiligence(options = {}){
     filterDiligenceSort,
     filterDiligenceDelegation,
     filterDiligenceOrdonnance,
-    filterDiligenceTribunal
+    filterDiligenceTribunal,
+    filterDiligenceCheckedFirst ? 'checked-first' : 'default'
   ].join('||');
   syncPaginationFilterState(
     'diligence',
@@ -137,12 +155,14 @@ function renderDiligence(options = {}){
   syncDiligenceOrdonnanceFilter(allRows);
   syncDiligenceTribunalFilter(allRows);
   const finalizeDiligenceRender = (rows)=>{
-    const showInjonctionColumns = rows.some(row=>String(row?.procedure || '').trim() === 'Injonction');
+    const orderedRows = orderDiligenceRowsByCheckedSelection(rows);
+    const showInjonctionColumns = orderedRows.some(row=>String(row?.procedure || '').trim() === 'Injonction');
 
     if(headRow){
       if(showInjonctionColumns){
         headRow.innerHTML = `
           <th>Client</th>
+          <th>Référence client</th>
           <th>Débiteur</th>
           <th>Date dépôt</th>
           <th>Référence dossier</th>
@@ -161,6 +181,7 @@ function renderDiligence(options = {}){
       }else{
         headRow.innerHTML = `
           <th>Client</th>
+          <th>Référence client</th>
           <th>Débiteur</th>
           <th>Date dépôt</th>
           <th>Référence dossier</th>
@@ -183,18 +204,18 @@ function renderDiligence(options = {}){
       labels.push(filterDiligenceOrdonnance === 'all' ? 'toutes les ordonnances' : `ordonnance: ${getDiligenceOrdonnanceLabel(filterDiligenceOrdonnance)}`);
       labels.push(filterDiligenceTribunal === 'all' ? 'tous les tribunaux' : `tribunal: ${filterDiligenceTribunal}`);
       const label = labels.join(', ');
-      count.textContent = `${rows.length} ligne(s) diligence (${label})`;
+      count.textContent = `${orderedRows.length} ligne(s) diligence (${label})`;
     }
 
-    if(!rows.length){
+    if(!orderedRows.length){
       diligenceVirtualRows = [];
       diligenceVirtualLastRange = { start: -1, end: -1 };
-      body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 15 : 11}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 16 : 12}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
       renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
       return;
     }
 
-    const pageData = paginateRows(rows, 'diligence');
+    const pageData = paginateRows(orderedRows, 'diligence');
     const useVirtual = pageData.rows.length >= DILIGENCE_VIRTUAL_MIN_ROWS;
     diligenceVirtualRows = pageData.rows;
     diligenceVirtualShowInjonctionColumns = showInjonctionColumns;
@@ -222,7 +243,7 @@ function renderDiligence(options = {}){
       return true;
     });
     const requestId = ++diligenceFilterRequestSeq;
-    body.innerHTML = '<tr><td colspan="15" class="diligence-empty">Recherche diligence en cours...</td></tr>';
+    body.innerHTML = '<tr><td colspan="16" class="diligence-empty">Recherche diligence en cours...</td></tr>';
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,
@@ -240,7 +261,8 @@ function renderDiligence(options = {}){
           filterDiligenceSort,
           filterDiligenceDelegation,
           filterDiligenceOrdonnance,
-          filterDiligenceTribunal
+          filterDiligenceTribunal,
+          filterDiligenceCheckedFirst ? 'checked-first' : 'default'
         ].join('||');
         if(requestId !== diligenceFilterRequestSeq) return;
         if(currentStateKey !== diligenceFilterStateKey) return;
