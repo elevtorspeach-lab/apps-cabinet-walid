@@ -84,7 +84,12 @@ const INDEXED_DB_EXPORT_DIRECTORY_KEY = 'preferred_export_directory';
 const API_BASE_STORAGE_KEY = 'applicationversion1-api-base-v1';
 const APP_INSTANCE_ID = `cabinet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
-let API_BASE = 'http://127.0.0.1:3000/api';
+let API_BASE = (() => {
+  if(typeof window !== 'undefined' && window.location && (window.location.protocol === 'http:' || window.location.protocol === 'https:')){
+    return `${window.location.origin}/api`;
+  }
+  return 'http://127.0.0.1:3000/api';
+})();
 let API_BASE_RESOLVED = false;
 let remoteAuthToken = '';
 let persistTimer = null;
@@ -105,6 +110,10 @@ let remoteSyncStream = null;
 let remoteSyncStreamRetryTimer = null;
 let remoteSyncHealthTick = 0;
 let remoteSyncStreamConnected = false;
+let remoteSyncHealthCheckInFlight = false;
+let remoteSyncLastRecoveryRefreshAt = 0;
+let remoteSyncStreamRetryDelayMs = 0;
+let lastApiBaseSuccessAt = 0;
 let lastPersistedStateSignature = '';
 let lastLocalSnapshotSignature = '';
 let lastRemoteStateLoadVersion = 0;
@@ -265,7 +274,7 @@ const DOSSIER_HISTORY_MAX_ENTRIES = 400;
 const DOSSIER_HISTORY_DEBOUNCE_MS = 900;
 const RECYCLE_BIN_MAX_ENTRIES = 600;
 const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
-const DOSSIER_PATCH_DEBOUNCE_MS = 220;
+const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
   boiteNo: 'Boîte N°',
@@ -319,10 +328,14 @@ const CONTENT_ZOOM_DEFAULT = 1;
 const CONTENT_ZOOM_MIN = 0.6;
 const CONTENT_ZOOM_MAX = 1.4;
 const CONTENT_ZOOM_STEP = 0.05;
-const REMOTE_SYNC_POLL_INTERVAL_MS = 3000;
-const REMOTE_SYNC_HEALTH_EVERY_TICKS = 3;
-const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 100;
-const REMOTE_SYNC_BLOCKED_RETRY_MS = 800;
+const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
+const REMOTE_SYNC_HEALTH_EVERY_TICKS = 6;
+const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
+const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
+const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 15000;
+const REMOTE_SYNC_STREAM_RETRY_BASE_MS = 2000;
+const REMOTE_SYNC_STREAM_RETRY_MAX_MS = 15000;
+const API_BASE_REDISCOVERY_COOLDOWN_MS = 60000;
 const DESKTOP_STATE_SAVE_DEBOUNCE_MS = 250;
 const AUTO_BACKUP_RETENTION_COUNT = 12;
 const AUTO_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
@@ -335,8 +348,8 @@ const PAGINATION_PAGE_SIZES = {
   diligence: 20,
   recycle: 30
 };
-const IMPORT_CHUNK_SIZE = 180;
-const IMPORT_EXCEL_CHUNK_SIZE = 120;
+const IMPORT_CHUNK_SIZE = 80;
+const IMPORT_EXCEL_CHUNK_SIZE = 60;
 const IMPORT_STATUS_THROTTLE_MS = 120;
 const AUDIENCE_VIRTUAL_MIN_ROWS = 40;
 const AUDIENCE_VIRTUAL_ROW_HEIGHT = 56;
@@ -373,9 +386,9 @@ const IS_REMOTE_WEB_HOST = (() => {
   if(hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   return true;
 })();
-const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 2500;
-const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 3500;
-const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 5000;
+const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 5000;
+const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 8000;
+const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 15000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 10000;
 const XLSX_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/xlsx.full.min.js' : '/vendor/libs/xlsx.full.min.js';
 const EXCELJS_LOCAL_URL = IS_FILE_PROTOCOL ? './vendor/libs/exceljs.min.js' : '/vendor/libs/exceljs.min.js';
@@ -698,7 +711,11 @@ function normalizeApiBaseCandidate(value){
   let base = String(value || '').trim();
   if(!base) return '';
   base = base.replace(/\/+$/, '');
+  base = base.replace(/\/api\/health$/i, '');
   base = base.replace(/\/health$/i, '');
+  if(!/\/api$/i.test(base)){
+    base = `${base}/api`;
+  }
   return base.replace(/\/+$/, '');
 }
 
@@ -855,16 +872,12 @@ function appendCandidateVariants(candidates, seen, value){
   const normalized = normalizeApiBaseCandidate(value);
   if(!normalized) return;
   pushApiCandidate(candidates, seen, normalized);
-  if(/\/api$/i.test(normalized)){
-    pushApiCandidate(candidates, seen, normalized.replace(/\/api$/i, ''));
-    return;
-  }
-  pushApiCandidate(candidates, seen, `${normalized}/api`);
 }
 
 function buildApiBaseCandidates(){
   const out = [];
   const seen = new Set();
+  appendCandidateVariants(out, seen, API_BASE);
   const queryApiBase = new URLSearchParams(window.location.search).get('apiBase');
   appendCandidateVariants(out, seen, queryApiBase);
   if(typeof localStorage !== 'undefined'){
@@ -880,14 +893,14 @@ function buildApiBaseCandidates(){
 
   if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
     appendCandidateVariants(out, seen, `${window.location.origin}/api`);
-    appendCandidateVariants(out, seen, window.location.origin);
   }
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-  if(isLocalHost){
+  const runningOnDefaultLocalApiPort = Number(window.location.port || 0) === 3000;
+  if(isLocalHost && (IS_FILE_PROTOCOL || !window.location.port || runningOnDefaultLocalApiPort)){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
   }
-  if(!IS_REMOTE_WEB_HOST){
+  if(!IS_REMOTE_WEB_HOST && IS_FILE_PROTOCOL){
     appendCandidateVariants(out, seen, 'http://127.0.0.1:3000/api');
   }
   return out;
@@ -1750,6 +1763,15 @@ async function runChunked(items, task, options = {}){
   if(onProgress) onProgress(list.length, list.length);
 }
 
+async function mapChunked(items, mapper, options = {}){
+  const list = Array.isArray(items) ? items : [];
+  const out = new Array(list.length);
+  await runChunked(list, async (item, index, total)=>{
+    out[index] = await mapper(item, index, total);
+  }, options);
+  return out;
+}
+
 function makeProgressReporter(prefix){
   let lastAt = 0;
   return (done, total)=>{
@@ -2080,6 +2102,7 @@ function buildSuiviSelectedExportDataset(){
   return {
     rows,
     headers,
+    procedureReferenceColumns,
     tableRows,
     colWidths: [
       { wch: 20 },
@@ -2100,6 +2123,40 @@ function buildSuiviSelectedExportDataset(){
   };
 }
 
+async function buildSuiviSelectedExportDatasetAsync(){
+  const dataset = buildSuiviSelectedExportDataset();
+  return {
+    ...dataset,
+    tableRows: await mapChunked(dataset.rows, async (row)=>{
+      return [
+        row.c?.name || '-',
+        normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
+        row.d?.type || '-',
+        row.d?.referenceClient || '-',
+        Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
+        row.d?.debiteur || '-',
+        row.d?.adresse || '-',
+        row.d?.ville || '-',
+        row.d?.ww || '-',
+        row.d?.marque || '-',
+        row.d?.caution || '-',
+        row.d?.cautionAdresse || '-',
+        ...dataset.procedureReferenceColumns.map((column)=>{
+          const details = row.d?.procedureDetails && typeof row.d.procedureDetails === 'object'
+            ? row.d.procedureDetails
+            : {};
+          const refs = Object.entries(details)
+            .filter(([procName])=>getProcedureBaseName(procName) === column.procedureName)
+            .map(([, procDetails])=>String(procDetails?.referenceClient || '').trim())
+            .filter(Boolean);
+          return refs.length ? [...new Set(refs)].join(', ') : '';
+        }),
+        (row.tribunalList && row.tribunalList.length) ? row.tribunalList.join(', ') : '-'
+      ];
+    }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') })
+  };
+}
+
 function previewSuiviSelectedRows(){
   const dataset = buildSuiviSelectedExportDataset();
   if(!dataset.rows.length){
@@ -2116,7 +2173,7 @@ function previewSuiviSelectedRows(){
 
 async function exportSuiviSelectedXLS(){
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = buildSuiviSelectedExportDataset();
+    const dataset = await buildSuiviSelectedExportDatasetAsync();
     if(!dataset.rows.length){
       alert('Cochez au moins une ligne pour exporter.');
       return;
@@ -2420,6 +2477,27 @@ function buildRemoteAuthHeaders(headers = {}){
   return nextHeaders;
 }
 
+function markApiBaseHealthy(base){
+  const normalized = normalizeApiBaseCandidate(base);
+  if(normalized){
+    API_BASE = normalized;
+  }
+  API_BASE_RESOLVED = true;
+  lastApiBaseSuccessAt = Date.now();
+  if(typeof localStorage !== 'undefined'){
+    try{
+      localStorage.setItem(API_BASE_STORAGE_KEY, API_BASE);
+    }catch(err){
+      console.warn('Impossible de sauvegarder la configuration API locale', err);
+    }
+  }
+}
+
+function canRetryApiBaseDiscovery(){
+  if(!lastApiBaseSuccessAt) return true;
+  return (Date.now() - lastApiBaseSuccessAt) >= API_BASE_REDISCOVERY_COOLDOWN_MS;
+}
+
 async function loginRemoteSession(username, password){
   if(LOCAL_ONLY_MODE) return { ok: false, reason: 'offline' };
   await resolveApiBase();
@@ -2441,6 +2519,7 @@ async function loginRemoteSession(username, password){
     if(!remoteAuthToken){
       return { ok: false, reason: 'invalid' };
     }
+    markApiBaseHealthy(API_BASE);
     return { ok: true };
   }catch(err){
     clearRemoteAuthSession();
@@ -2495,18 +2574,13 @@ async function resolveApiBase(forceRetry = false){
   if(API_BASE_RESOLVED && !forceRetry){
     return API_BASE;
   }
+  if(forceRetry && API_BASE_RESOLVED && !canRetryApiBaseDiscovery()){
+    return API_BASE;
+  }
   const candidates = buildApiBaseCandidates();
   for(const candidate of candidates){
     if(await pingApiBase(candidate, API_PROBE_TIMEOUT_MS)){
-      API_BASE = candidate;
-      API_BASE_RESOLVED = true;
-      if(typeof localStorage !== 'undefined'){
-        try{
-          localStorage.setItem(API_BASE_STORAGE_KEY, API_BASE);
-        }catch(err){
-          console.warn('Impossible de sauvegarder la configuration API locale', err);
-        }
-      }
+      markApiBaseHealthy(candidate);
       return API_BASE;
     }
   }
@@ -2518,30 +2592,45 @@ async function resolveApiBase(forceRetry = false){
 }
 
 async function refreshServerConnectionStatus(){
+  if(remoteSyncHealthCheckInFlight) return false;
   if(LOCAL_ONLY_MODE){
     setPingMetric(null);
     lastLiveDelayMs = null;
     renderSyncMetrics();
     setSyncStatus('error', 'Mode local (offline)');
-    return;
+    return false;
   }
-  const currentProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
-  if(currentProbe.ok){
-    setPingMetric(currentProbe.latencyMs);
-    setSyncStatus('ok', 'Connecte au serveur (actif)');
-    return;
+  const blocker = getRemoteRefreshBlocker();
+  if(remoteSyncStreamConnected && blocker && blocker !== 'hidden'){
+    return true;
   }
-  await resolveApiBase(true);
-  const retryProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
-  if(retryProbe.ok){
-    setPingMetric(retryProbe.latencyMs);
-    setSyncStatus('ok', 'Connecte au serveur (actif)');
-    return;
+  remoteSyncHealthCheckInFlight = true;
+  try{
+    const currentProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
+    if(currentProbe.ok){
+      markApiBaseHealthy(API_BASE);
+      setPingMetric(currentProbe.latencyMs);
+      setSyncStatus('ok', 'Connecte au serveur (actif)');
+      return true;
+    }
+    if(canRetryApiBaseDiscovery()){
+      await resolveApiBase(true);
+      const retryProbe = await pingApiBaseWithLatency(API_BASE, API_HEALTH_TIMEOUT_MS);
+      if(retryProbe.ok){
+        markApiBaseHealthy(API_BASE);
+        setPingMetric(retryProbe.latencyMs);
+        setSyncStatus('ok', 'Connecte au serveur (actif)');
+        return true;
+      }
+    }
+    setPingMetric(null);
+    lastLiveDelayMs = null;
+    renderSyncMetrics();
+    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Mode local (serveur indisponible)');
+    return false;
+  }finally{
+    remoteSyncHealthCheckInFlight = false;
   }
-  setPingMetric(null);
-  lastLiveDelayMs = null;
-  renderSyncMetrics();
-  setSyncStatus('error', 'Mode local (serveur indisponible)');
 }
 
 function isManager(){
@@ -3564,12 +3653,16 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
   sheet.mergeCells(`A2:${lastColLetter}2`);
   sheet.addRow([]);
   sheet.addRow(headers);
-  rows.forEach(r=>sheet.addRow(r));
+  await runChunked(rows, async (row)=>{
+    sheet.addRow(row);
+  }, { chunkSize: 80 });
 
   sheet.getRow(1).height = 44;
   sheet.getRow(2).height = 30;
   sheet.getRow(4).height = 46;
-  for(let r=5; r<=4 + rows.length; r++) sheet.getRow(r).height = 44;
+  await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 5), async (rowIndex)=>{
+    sheet.getRow(rowIndex).height = 44;
+  }, { chunkSize: 120 });
 
   const widthValues = colWidths.length
     ? colWidths.map(v=>Number(v?.wch || 20))
@@ -3600,17 +3693,18 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     cell.border = border;
   }
 
-  for(let r=5; r<=4 + rows.length; r++){
+  await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 5), async (rowIndex)=>{
     for(let c=1; c<=colCount; c++){
-      const cell = sheet.getRow(r).getCell(c);
+      const cell = sheet.getRow(rowIndex).getCell(c);
       cell.font = { name: 'Arial', size: 18, color: { argb: 'FF111111' } };
       const isArabicColumn = c === colCount;
       const align = c === 4 || c === 5 || isArabicColumn ? 'center' : 'left';
       cell.alignment = { horizontal: align, vertical: 'middle' };
       cell.border = border;
     }
-  }
+  }, { chunkSize: 40 });
 
+  await yieldToMainThread();
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob(
     [buffer],
@@ -5731,7 +5825,10 @@ function endHeavyUiOperation(){
 async function runWithHeavyUiOperation(task){
   beginHeavyUiOperation();
   try{
-    return await task();
+    await yieldToMainThread();
+    const result = await task();
+    await yieldToMainThread();
+    return result;
   }finally{
     endHeavyUiOperation();
   }
@@ -6691,12 +6788,13 @@ async function persistRemoteRequestNow(pathname, body){
       updateRemoteStateMetadata(conflictPayload);
       remoteRefreshPending = true;
       setSyncStatus('conflict', 'Conflit: serveur plus recent, rechargement...');
-      queueRemoteStateRefresh(0);
+      queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
       return false;
     }
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const saveResult = await res.json().catch(()=>({}));
     updateRemoteStateMetadata(saveResult);
+    markApiBaseHealthy(API_BASE);
     setSyncStatus('ok');
     return true;
   }catch(err){
@@ -6749,19 +6847,17 @@ async function flushQueuedDossierPatchesNow(){
   const entries = [...queuedDossierPatchEntries.values()];
   queuedDossierPatchEntries = new Map();
   const results = [];
-  return runWithHeavyUiOperation(async ()=>{
-    for(const entry of entries){
-      try{
-        const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
-        entry.resolvers.forEach(resolve=>resolve(result));
-        results.push(result);
-      }catch(err){
-        entry.rejecters.forEach(reject=>reject(err));
-        throw err;
-      }
+  for(const entry of entries){
+    try{
+      const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
+      entry.resolvers.forEach(resolve=>resolve(result));
+      results.push(result);
+    }catch(err){
+      entry.rejecters.forEach(reject=>reject(err));
+      throw err;
     }
-    return results;
-  });
+  }
+  return results;
 }
 
 async function persistDossierPatchNow(patch, options = {}){
@@ -6833,6 +6929,7 @@ async function loadPersistedState(){
         handleUnauthorizedRemoteSession();
       }else if(res.ok){
         const parsed = await res.json();
+        markApiBaseHealthy(API_BASE);
         updateRemoteStateMetadata(parsed);
         const normalizedState = normalizePersistedStateSource(parsed);
         if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
@@ -6959,7 +7056,7 @@ async function refreshRemoteState(){
     remoteRefreshInFlight = false;
     if(remoteRefreshPending){
       remoteRefreshPending = false;
-      queueRemoteStateRefresh(0);
+      queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
     }
   }
 }
@@ -6991,11 +7088,15 @@ function startRemoteSync(){
       refreshServerConnectionStatus().catch(()=>{});
     }
     if(remoteRefreshPending){
-      queueRemoteStateRefresh(0);
+      queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
       return;
     }
     if(!remoteSyncStreamConnected){
-      queueRemoteStateRefresh(0);
+      const now = Date.now();
+      if((now - remoteSyncLastRecoveryRefreshAt) >= REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS){
+        remoteSyncLastRecoveryRefreshAt = now;
+        queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
+      }
     }
   }, REMOTE_SYNC_POLL_INTERVAL_MS);
 }
@@ -7017,15 +7118,24 @@ function stopRemoteSync(){
   if(!remoteSyncTimer) return;
   clearInterval(remoteSyncTimer);
   remoteSyncTimer = null;
+  remoteSyncLastRecoveryRefreshAt = 0;
 }
 
 function scheduleRemoteSyncStreamRetry(){
   if(remoteSyncStreamRetryTimer) return;
+  const blocker = getRemoteRefreshBlocker();
+  const nextDelay = blocker
+    ? REMOTE_SYNC_STREAM_RETRY_MAX_MS
+    : Math.min(
+      REMOTE_SYNC_STREAM_RETRY_MAX_MS,
+      remoteSyncStreamRetryDelayMs > 0 ? remoteSyncStreamRetryDelayMs * 2 : REMOTE_SYNC_STREAM_RETRY_BASE_MS
+    );
+  remoteSyncStreamRetryDelayMs = nextDelay;
   remoteSyncStreamRetryTimer = setTimeout(()=>{
     remoteSyncStreamRetryTimer = null;
     if(!currentUser) return;
     startRemoteSyncStream();
-  }, 1000);
+  }, nextDelay);
 }
 
 function startRemoteSyncStream(){
@@ -7039,6 +7149,9 @@ function startRemoteSyncStream(){
     remoteSyncStream = stream;
     stream.onopen = ()=>{
       remoteSyncStreamConnected = true;
+      remoteSyncStreamRetryDelayMs = REMOTE_SYNC_STREAM_RETRY_BASE_MS;
+      remoteSyncLastRecoveryRefreshAt = Date.now();
+      markApiBaseHealthy(API_BASE);
       setSyncStatus('ok', 'Connecte au serveur (actif)');
     };
     stream.addEventListener('state-updated', (event)=>{
@@ -7075,7 +7188,7 @@ function startRemoteSyncStream(){
           return;
         }
       }catch(err){}
-      queueRemoteStateRefresh(0);
+      queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
     });
     stream.onerror = ()=>{
       remoteSyncStreamConnected = false;
@@ -9424,7 +9537,6 @@ async function login(){
     queueLoginPostBoot();
     if(!LOCAL_ONLY_MODE && hasRemoteAuthSession()){
       startRemoteSync();
-      refreshServerConnectionStatus().catch(()=>{});
     }else if(remoteLoginState === 'unavailable'){
       setSyncStatus('error', 'Mode local (serveur indisponible)');
     }
@@ -11302,7 +11414,7 @@ function getFilteredDiligenceRows(allRows){
 function exportDiligenceXLS(){
   return runWithHeavyUiOperation(async ()=>{
     const directExportHandlePromise = primeDirectExportDirectoryAccess();
-    const dataset = buildDiligenceSelectedExportDataset();
+    const dataset = await buildDiligenceSelectedExportDatasetAsync();
     if(!dataset.rows.length){
       alert('Cochez au moins une ligne pour exporter.');
       return;
@@ -11320,7 +11432,10 @@ function exportDiligenceXLS(){
   `;
 
   const thead = `<tr>${dataset.headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
-  const tbody = dataset.tableRows.map(r=>`<tr>${r.map(c=>`<td>${escapeHtml(String(c))}</td>`).join('')}</tr>`).join('');
+  const tbodyRows = await mapChunked(dataset.tableRows, async (row)=>(
+    `<tr>${row.map(cell=>`<td>${escapeHtml(String(cell))}</td>`).join('')}</tr>`
+  ), { chunkSize: 60, onProgress: makeProgressReporter('Export diligence') });
+  const tbody = tbodyRows.join('');
   const html = `
     <html>
       <head>${styles}</head>
@@ -11399,6 +11514,32 @@ function buildDiligenceSelectedExportDataset(){
     row.tribunal || '-'
   ]);
   return { rows, headers, tableRows };
+}
+
+async function buildDiligenceSelectedExportDatasetAsync(){
+  const dataset = buildDiligenceSelectedExportDataset();
+  return {
+    ...dataset,
+    tableRows: await mapChunked(dataset.rows, async (row)=>[
+      row.clientName || '-',
+      row.dossier?.referenceClient || '-',
+      row.dossier?.debiteur || '-',
+      row.details?.depotLe || row.details?.dateDepot || '-',
+      row.details?.referenceClient || '-',
+      getDiligenceOrdonnanceLabelFromDetails(row.details) || 'ATT ORD',
+      row.details?.notificationNo || '-',
+      row.details?.notificationStatus || '-',
+      row.details?.notificationSort || '-',
+      row.details?.dateNotification || '-',
+      row.details?.certificatNonAppelStatus || '-',
+      row.details?.executionNo || '-',
+      row.dossier?.ville || '-',
+      normalizeDiligenceAttOk(row.details?.attDelegationOuDelegat || '') || 'att',
+      row.details?.huissier || '-',
+      normalizeDiligenceSort(row.details?.sort || ''),
+      row.tribunal || '-'
+    ], { chunkSize: 80, onProgress: makeProgressReporter('Export diligence') })
+  };
 }
 
 function previewDiligenceSelectedRows(){
@@ -12400,6 +12541,31 @@ function buildAudienceSelectedExportDataset(){
   };
 }
 
+async function buildAudienceSelectedExportDatasetAsync(){
+  const dataset = buildAudienceSelectedExportDataset();
+  return {
+    ...dataset,
+    tableRows: await mapChunked(dataset.rows, async (r)=>{
+      const p = r.p;
+      const d = r.d;
+      const draft = r.draft;
+      const dossierRef = getAudienceRowDraftReferenceValue(r);
+      const sortValue = '';
+      const instructionValue = draft.instruction || p.instruction || draft.sort || p.sort || '';
+      const jugeValue = draft.juge || p.juge || '';
+      return [
+        r.c.name || '',
+        d.debiteur || '',
+        dossierRef || '-',
+        jugeValue,
+        instructionValue,
+        sortValue,
+        p.tribunal || ''
+      ];
+    }, { chunkSize: 80, onProgress: makeProgressReporter('Export audience') })
+  };
+}
+
 function previewAudienceSelectedRows(){
   const dataset = buildAudienceSelectedExportDataset();
   if(!dataset.rows.length){
@@ -12852,9 +13018,17 @@ function getAudienceRowsForSidebar(){
   return getAudienceRowsDedupedCached();
 }
 
+function getAudienceRowsForRegularExport(){
+  const rows = getAudienceRows();
+  if(rows.length > AUDIENCE_DEFAULT_SORT_MAX_ROWS){
+    return rows;
+  }
+  return rows.slice().sort(compareAudienceRowsByReferenceProximity);
+}
+
 async function exportAudienceRegularXLS(){
   return runWithHeavyUiOperation(async ()=>{
-    const audienceRows = getAudienceRows().sort(compareAudienceRowsByReferenceProximity);
+    const audienceRows = getAudienceRowsForRegularExport();
     if(!audienceRows.length){
       alert('Aucune ligne à exporter.');
       return;
@@ -12871,7 +13045,7 @@ async function exportAudienceRegularXLS(){
     'Tribunal'
   ];
 
-  const rows = audienceRows.map(r=>{
+  const rows = await mapChunked(audienceRows, async (r)=>{
     const p = r.p;
     const d = r.d;
     const draft = r.draft;
@@ -12890,6 +13064,9 @@ async function exportAudienceRegularXLS(){
       sortValue,
       p.tribunal || ''
     ];
+  }, {
+    chunkSize: 120,
+    onProgress: makeProgressReporter('Export audience')
   });
 
     await exportAudienceWorkbookXlsxStyled({
@@ -12905,7 +13082,7 @@ async function exportAudienceRegularXLS(){
 
 async function exportAudienceXLS(){
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = buildAudienceSelectedExportDataset();
+    const dataset = await buildAudienceSelectedExportDatasetAsync();
     if(!dataset.rows.length){
       alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
       return;

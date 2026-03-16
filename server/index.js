@@ -425,6 +425,29 @@ function findClientIndexById(clients, clientId) {
   return clients.findIndex((client) => Number(client?.id) === Number(clientId));
 }
 
+function normalizePatchReference(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolvePatchReference(body, dossier) {
+  const direct = normalizePatchReference(body?.referenceClient);
+  if (direct) return direct;
+  return normalizePatchReference(dossier?.referenceClient);
+}
+
+function findDossierIndexForPatch(dossiers, requestedIndex, referenceClient) {
+  const normalizedReference = normalizePatchReference(referenceClient);
+  const safeDossiers = Array.isArray(dossiers) ? dossiers : [];
+  if (Number.isFinite(requestedIndex) && requestedIndex >= 0 && requestedIndex < safeDossiers.length) {
+    const indexed = safeDossiers[requestedIndex];
+    if (!normalizedReference || normalizePatchReference(indexed?.referenceClient) === normalizedReference) {
+      return requestedIndex;
+    }
+  }
+  if (!normalizedReference) return requestedIndex;
+  return safeDossiers.findIndex((entry) => normalizePatchReference(entry?.referenceClient) === normalizedReference);
+}
+
 function deepCloneJson(value) {
   if (value === null || value === undefined) return value;
   return JSON.parse(JSON.stringify(value));
@@ -861,6 +884,7 @@ function applyDossierPatch(currentState, body) {
   const dossierIndex = Number(body?.dossierIndex);
   const targetClientId = Number(body?.targetClientId);
   const dossier = sanitizePatchObject(body?.dossier);
+  const referenceClient = resolvePatchReference(body, dossier);
   const sourceClients = Array.isArray(currentState?.clients) ? currentState.clients : [];
   const clients = sourceClients.slice();
 
@@ -894,21 +918,22 @@ function applyDossierPatch(currentState, body) {
     : null;
   if (!sourceClient) throw new Error('Source client not found.');
   const sourceDossiers = Array.isArray(sourceClient.dossiers) ? sourceClient.dossiers.slice() : [];
+  const resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient);
   sourceClient.dossiers = sourceDossiers;
   clients[sourceClientIdx] = sourceClient;
 
   if (action === 'delete') {
-    if (dossierIndex < 0 || dossierIndex >= sourceDossiers.length) {
+    if (resolvedSourceDossierIndex < 0 || resolvedSourceDossierIndex >= sourceDossiers.length) {
       throw new Error('Source dossier not found.');
     }
-    sourceDossiers.splice(dossierIndex, 1);
+    sourceDossiers.splice(resolvedSourceDossierIndex, 1);
     return clients;
   }
 
   if (!dossier) throw new Error('Missing dossier payload.');
 
   if (action === 'update') {
-    if (dossierIndex < 0 || dossierIndex >= clients[sourceClientIdx].dossiers.length) {
+    if (resolvedSourceDossierIndex < 0 || resolvedSourceDossierIndex >= clients[sourceClientIdx].dossiers.length) {
       throw new Error('Source dossier not found.');
     }
     const nextTargetClientId = Number.isFinite(targetClientId) ? targetClientId : clientId;
@@ -916,7 +941,7 @@ function applyDossierPatch(currentState, body) {
     if (targetClientIdx === -1) throw new Error('Target client not found.');
 
     if (targetClientIdx === sourceClientIdx) {
-      sourceDossiers[dossierIndex] = dossier;
+      sourceDossiers[resolvedSourceDossierIndex] = dossier;
       return clients;
     }
 
@@ -925,7 +950,7 @@ function applyDossierPatch(currentState, body) {
       : null;
     if (!targetClient) throw new Error('Target client not found.');
     const targetDossiers = Array.isArray(targetClient.dossiers) ? targetClient.dossiers.slice() : [];
-    sourceDossiers.splice(dossierIndex, 1);
+    sourceDossiers.splice(resolvedSourceDossierIndex, 1);
     targetDossiers.push(dossier);
     targetClient.dossiers = targetDossiers;
     clients[targetClientIdx] = targetClient;
@@ -935,10 +960,13 @@ function applyDossierPatch(currentState, body) {
   throw new Error('Unsupported dossier patch action.');
 }
 
-app.get('/api/health', async (req, res) => {
+async function handleHealth(req, res) {
   await ensureDataFile();
   res.json({ ok: true, service: 'cabinet-api', ts: new Date().toISOString() });
-});
+}
+
+app.get('/health', handleHealth);
+app.get('/api/health', handleHealth);
 
 app.post('/api/auth/login', async (req, res) => {
   await ensureDataFile();
@@ -1221,11 +1249,6 @@ app.post('/api/state/dossiers', async (req, res) => {
       await ensureDataFile();
       const body = req.body && typeof req.body === 'object' ? req.body : {};
       const sourceId = String(body?._sourceId || '').trim();
-      const baseVersion = extractBaseVersion(body);
-      const currentState = await readState();
-      if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
-        return { conflict: true, state: currentState };
-      }
       const saved = await persistJournalMutation({
         type: 'dossier',
         body
@@ -1238,9 +1261,6 @@ app.post('/api/state/dossiers', async (req, res) => {
       });
       return { saved };
     });
-    if (result?.conflict) {
-      return res.status(409).json(buildConflictResponse(result.state));
-    }
     res.json({ ok: true, version: result.saved.version, updatedAt: result.saved.updatedAt });
   } catch (err) {
     res.status(400).json({
