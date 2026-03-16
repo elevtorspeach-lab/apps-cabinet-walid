@@ -1,3 +1,38 @@
+const DILIGENCE_EMPTY_MESSAGE = 'Aucun dossier SFDC/S-bien/Injonction trouvé.';
+const DILIGENCE_LOADING_MESSAGE = 'Recherche diligence en cours...';
+const DILIGENCE_HEAD_HTML_DEFAULT = `
+  <th>Client</th>
+  <th>Référence client</th>
+  <th>Débiteur</th>
+  <th>Date dépôt</th>
+  <th>Référence dossier</th>
+  <th>Ordonnance</th>
+  <th>Execution N°</th>
+  <th>Ville</th>
+  <th>Délégation</th>
+  <th>Huissier</th>
+  <th>Sort</th>
+  <th>Tribunal</th>
+`;
+const DILIGENCE_HEAD_HTML_INJONCTION = `
+  <th>Client</th>
+  <th>Référence client</th>
+  <th>Débiteur</th>
+  <th>Date dépôt</th>
+  <th>Référence dossier</th>
+  <th>Ordonnance</th>
+  <th>Notification N°</th>
+  <th>Statut notification</th>
+  <th>Sort notification</th>
+  <th>Certificat non appel</th>
+  <th>Execution N°</th>
+  <th>Ville</th>
+  <th>Délégation</th>
+  <th>Huissier</th>
+  <th>Sort</th>
+  <th>Tribunal</th>
+`;
+
 function renderDiligenceRowHtml(row, showInjonctionColumns){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
   const isChecked = isDiligenceSelectedForPrint(row);
@@ -82,7 +117,11 @@ function renderDiligenceVirtualWindow(force = false){
   const colCount = diligenceVirtualShowInjonctionColumns ? 16 : 12;
   if(!rows.length){
     diligenceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = `<tr><td colspan="${colCount}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+    setElementHtmlWithRenderKey(
+      body,
+      `<tr><td colspan="${colCount}" class="diligence-empty">${DILIGENCE_EMPTY_MESSAGE}</td></tr>`,
+      `diligence-empty::${colCount}`
+    );
     return;
   }
   const { start, end } = getVirtualWindowByContainer('diligenceTableContainer', rows.length);
@@ -157,43 +196,14 @@ function renderDiligence(options = {}){
   const finalizeDiligenceRender = (rows)=>{
     const orderedRows = orderDiligenceRowsByCheckedSelection(rows);
     const showInjonctionColumns = orderedRows.some(row=>String(row?.procedure || '').trim() === 'Injonction');
+    const colCount = showInjonctionColumns ? 16 : 12;
 
     if(headRow){
-      if(showInjonctionColumns){
-        headRow.innerHTML = `
-          <th>Client</th>
-          <th>Référence client</th>
-          <th>Débiteur</th>
-          <th>Date dépôt</th>
-          <th>Référence dossier</th>
-          <th>Ordonnance</th>
-          <th>Notification N°</th>
-          <th>Statut notification</th>
-          <th>Sort notification</th>
-          <th>Certificat non appel</th>
-          <th>Execution N°</th>
-          <th>Ville</th>
-          <th>Délégation</th>
-          <th>Huissier</th>
-          <th>Sort</th>
-          <th>Tribunal</th>
-        `;
-      }else{
-        headRow.innerHTML = `
-          <th>Client</th>
-          <th>Référence client</th>
-          <th>Débiteur</th>
-          <th>Date dépôt</th>
-          <th>Référence dossier</th>
-          <th>Ordonnance</th>
-          <th>Execution N°</th>
-          <th>Ville</th>
-          <th>Délégation</th>
-          <th>Huissier</th>
-          <th>Sort</th>
-          <th>Tribunal</th>
-        `;
-      }
+      setElementHtmlWithRenderKey(
+        headRow,
+        showInjonctionColumns ? DILIGENCE_HEAD_HTML_INJONCTION : DILIGENCE_HEAD_HTML_DEFAULT,
+        showInjonctionColumns ? 'diligence-head::injonction' : 'diligence-head::default'
+      );
     }
 
     if(count){
@@ -204,13 +214,17 @@ function renderDiligence(options = {}){
       labels.push(filterDiligenceOrdonnance === 'all' ? 'toutes les ordonnances' : `ordonnance: ${getDiligenceOrdonnanceLabel(filterDiligenceOrdonnance)}`);
       labels.push(filterDiligenceTribunal === 'all' ? 'tous les tribunaux' : `tribunal: ${filterDiligenceTribunal}`);
       const label = labels.join(', ');
-      count.textContent = `${orderedRows.length} ligne(s) diligence (${label})`;
+      setElementTextIfChanged(count, `${orderedRows.length} ligne(s) diligence (${label})`);
     }
 
     if(!orderedRows.length){
       diligenceVirtualRows = [];
       diligenceVirtualLastRange = { start: -1, end: -1 };
-      body.innerHTML = `<tr><td colspan="${showInjonctionColumns ? 16 : 12}" class="diligence-empty">Aucun dossier SFDC/S-bien/Injonction trouvé.</td></tr>`;
+      setElementHtmlWithRenderKey(
+        body,
+        `<tr><td colspan="${colCount}" class="diligence-empty">${DILIGENCE_EMPTY_MESSAGE}</td></tr>`,
+        `diligence-empty::${colCount}`
+      );
       renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
       return;
     }
@@ -243,7 +257,11 @@ function renderDiligence(options = {}){
       return true;
     });
     const requestId = ++diligenceFilterRequestSeq;
-    body.innerHTML = '<tr><td colspan="16" class="diligence-empty">Recherche diligence en cours...</td></tr>';
+    setElementHtmlWithRenderKey(
+      body,
+      `<tr><td colspan="16" class="diligence-empty">${DILIGENCE_LOADING_MESSAGE}</td></tr>`,
+      'diligence-loading'
+    );
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,

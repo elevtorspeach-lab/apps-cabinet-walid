@@ -1,3 +1,10 @@
+const AUDIENCE_EMPTY_MESSAGE = 'Aucune audience trouvée avec ces filtres.';
+const AUDIENCE_LOADING_MESSAGE = 'Recherche audience en cours...';
+const AUDIENCE_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
+const SUIVI_EMPTY_MESSAGE = 'Aucun dossier trouvé avec ces filtres.';
+const SUIVI_LOADING_MESSAGE = 'Recherche dossier en cours...';
+const SUIVI_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
+
 function getAudienceVirtualWindow(rowsLength){
   return getVirtualWindowByContainer('audienceTableContainer', rowsLength);
 }
@@ -76,7 +83,7 @@ function renderAudienceVirtualWindow(force = false){
   const rows = Array.isArray(audienceVirtualRows) ? audienceVirtualRows : [];
   if(!rows.length){
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+    renderTableMessage(body, 13, AUDIENCE_EMPTY_MESSAGE, 'audience-empty');
     return;
   }
 
@@ -142,7 +149,7 @@ function renderSuiviVirtualWindow(force = false){
   const rows = Array.isArray(suiviVirtualRows) ? suiviVirtualRows : [];
   if(!rows.length){
     suiviVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
+    renderTableMessage(body, 10, SUIVI_EMPTY_MESSAGE, 'suivi-empty');
     return;
   }
   const { start, end } = getVirtualWindowByContainer('suiviTableContainer', rows.length);
@@ -190,11 +197,10 @@ function renderSuivi(options = {}){
   syncPaginationFilterState('suivi', suiviFilterKey);
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
-  suiviBody.innerHTML='';
   if(!isManager() && getVisibleClients().length === 0){
     suiviVirtualRows = [];
     suiviVirtualLastRange = { start: -1, end: -1 };
-    suiviBody.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    renderTableMessage(suiviBody, 10, SUIVI_NO_CLIENT_MESSAGE, 'suivi-no-client');
     renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     return;
   }
@@ -211,11 +217,15 @@ function renderSuivi(options = {}){
     suiviVirtualRows = pageData.rows;
     suiviVirtualLastRange = { start: -1, end: -1 };
     if(!pageData.rows.length){
-      suiviBody.innerHTML = '<tr><td colspan="10" class="diligence-empty">Aucun dossier trouvé avec ces filtres.</td></tr>';
+      renderTableMessage(suiviBody, 10, SUIVI_EMPTY_MESSAGE, 'suivi-empty');
     }else if(useVirtual){
       renderSuiviVirtualWindow(true);
     }else{
-      suiviBody.innerHTML = pageData.rows.map(renderSuiviRowHtml).join('');
+      setElementHtmlWithRenderKey(
+        suiviBody,
+        pageData.rows.map(renderSuiviRowHtml).join(''),
+        `suivi-rows::${pageData.page}::${pageData.rows.length}::${filterSuiviCheckedFirst ? 'checked-first' : 'default'}`
+      );
     }
     renderPagination('suivi', pageData);
     updateSuiviCheckedCount();
@@ -237,7 +247,7 @@ function renderSuivi(options = {}){
       return true;
     });
     const requestId = ++suiviFilterRequestSeq;
-    suiviBody.innerHTML = '<tr><td colspan="10" class="diligence-empty">Recherche dossier en cours...</td></tr>';
+    renderTableMessage(suiviBody, 10, SUIVI_LOADING_MESSAGE, 'suivi-loading');
     runSuiviFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,
@@ -353,12 +363,11 @@ function renderAudience(options = {}){
     return;
   }
   renderImportHistoryPanel('audienceImportHistory', 'audience');
-  body.innerHTML='';
   if(!isManager() && getVisibleClients().length === 0){
     audienceVirtualRows = [];
     audienceVirtualDuplicateKeySet = new Set();
     audienceVirtualLastRange = { start: -1, end: -1 };
-    body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucun client assigné à ce compte. Contactez le gestionnaire.</td></tr>';
+    renderTableMessage(body, 13, AUDIENCE_NO_CLIENT_MESSAGE, 'audience-no-client');
     renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
     updateAudienceCheckedCount();
     queueSidebarSalleSessionsRender();
@@ -377,11 +386,15 @@ function renderAudience(options = {}){
     audienceVirtualDuplicateKeySet = duplicateKeySet;
     audienceVirtualLastRange = { start: -1, end: -1 };
     if(!pageData.rows.length){
-      body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Aucune audience trouvée avec ces filtres.</td></tr>';
+      renderTableMessage(body, 13, AUDIENCE_EMPTY_MESSAGE, 'audience-empty');
     }else if(useVirtual){
       renderAudienceVirtualWindow(true);
     }else{
-      body.innerHTML = pageData.rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
+      setElementHtmlWithRenderKey(
+        body,
+        pageData.rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join(''),
+        `audience-rows::${pageData.page}::${pageData.rows.length}::${filterAudienceCheckedFirst ? 'checked-first' : 'default'}::${filterAudienceErrorsOnly ? 'errors' : 'all'}`
+      );
     }
     renderPagination('audience', pageData);
     if(selectionPruned){
@@ -416,7 +429,7 @@ function renderAudience(options = {}){
   }
 
   const requestId = ++audienceFilterRequestSeq;
-  body.innerHTML = '<tr><td colspan="13" class="diligence-empty">Recherche audience en cours...</td></tr>';
+  renderTableMessage(body, 13, AUDIENCE_LOADING_MESSAGE, 'audience-loading');
   runAudienceFilterInWorker(
     colorFilteredRows.map((row, idx)=>({
       idx,

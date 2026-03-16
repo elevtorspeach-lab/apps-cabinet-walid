@@ -1420,6 +1420,37 @@ function debounce(fn, wait = 120){
   };
 }
 
+function setElementTextIfChanged(el, text){
+  if(!el) return false;
+  const nextText = String(text ?? '');
+  if(el.textContent === nextText) return false;
+  el.textContent = nextText;
+  return true;
+}
+
+function setElementHtmlWithRenderKey(el, html, renderKey){
+  if(!el) return false;
+  const nextHtml = String(html ?? '');
+  const nextKey = String(renderKey ?? '');
+  if(el.dataset.renderKey === nextKey && el.innerHTML === nextHtml) return false;
+  el.innerHTML = nextHtml;
+  el.dataset.renderKey = nextKey;
+  return true;
+}
+
+function buildTableMessageRowHtml(colSpan, message, className = 'diligence-empty'){
+  const safeColSpan = Math.max(1, Number(colSpan) || 1);
+  return `<tr><td colspan="${safeColSpan}" class="${escapeAttr(className)}">${escapeHtml(String(message ?? ''))}</td></tr>`;
+}
+
+function renderTableMessage(el, colSpan, message, renderKey, className = 'diligence-empty'){
+  return setElementHtmlWithRenderKey(
+    el,
+    buildTableMessageRowHtml(colSpan, message, className),
+    renderKey
+  );
+}
+
 function getClientFilterWorker(){
   if(clientFilterWorkerFailed) return null;
   if(clientFilterWorker) return clientFilterWorker;
@@ -1798,7 +1829,7 @@ function renderPagination(section, pagination){
     ? pagination
     : { page: 1, totalPages: 1, totalRows: 0, from: 0, to: 0 };
   if(!meta.totalRows){
-    el.innerHTML = '';
+    setElementHtmlWithRenderKey(el, '', `${section}::empty`);
     return;
   }
   const buildCompactPages = ()=>{
@@ -1832,7 +1863,7 @@ function renderPagination(section, pagination){
   }).join('');
   const prevDisabled = meta.page <= 1 ? 'disabled' : '';
   const nextDisabled = meta.page >= meta.totalPages ? 'disabled' : '';
-  el.innerHTML = `
+  const paginationHtml = `
     <div class="table-pagination-info">
       ${meta.from}-${meta.to} / ${meta.totalRows} (${pageSize}/page)
     </div>
@@ -1856,6 +1887,16 @@ function renderPagination(section, pagination){
       </button>
     </div>
   `;
+  const renderKey = [
+    section,
+    meta.page,
+    meta.totalPages,
+    meta.totalRows,
+    meta.from,
+    meta.to,
+    pageSize
+  ].join('::');
+  setElementHtmlWithRenderKey(el, paginationHtml, renderKey);
 }
 
 function changePaginationPage(section, delta){
