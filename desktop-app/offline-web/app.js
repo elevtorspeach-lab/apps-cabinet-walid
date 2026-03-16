@@ -47,7 +47,7 @@ let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
 let suiviTribunalAliasMap = new Map();
 let suiviPrintSelection = new Set();
-let filterDiligenceProcedure = 'SFDC';
+let filterDiligenceProcedure = 'all';
 let filterDiligenceSort = 'all';
 let filterDiligenceDelegation = 'all';
 let filterDiligenceOrdonnance = 'all';
@@ -71,10 +71,12 @@ let dashboardCalendarCursor = new Date(new Date().getFullYear(), new Date().getM
 let procedureMontantGroups = [];
 const STORAGE_KEY = 'cabinet-avocat-state-v1';
 const INDEXED_DB_NAME = 'cabinet-avocat-db-v1';
-const INDEXED_DB_VERSION = 2;
+const INDEXED_DB_VERSION = 3;
 const INDEXED_DB_STORE = 'state_store';
 const INDEXED_DB_BACKUP_STORE = 'backup_store';
+const INDEXED_DB_EXPORT_STORE = 'export_store';
 const INDEXED_DB_STATE_KEY = 'app_state';
+const INDEXED_DB_EXPORT_DIRECTORY_KEY = 'preferred_export_directory';
 const API_BASE_STORAGE_KEY = 'applicationversion1-api-base-v1';
 const APP_INSTANCE_ID = `cabinet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
@@ -188,6 +190,8 @@ let backgroundDataWarmupVersion = -1;
 let audienceSearchWarmupTimer = null;
 let audienceSearchWarmupToken = 0;
 let suiviSearchWarmupTimer = null;
+let preferredExportDirectoryHandle = null;
+let preferredExportDirectoryHandleLoaded = false;
 let suiviSearchWarmupToken = 0;
 let diligenceSearchWarmupTimer = null;
 let diligenceSearchWarmupToken = 0;
@@ -1856,23 +1860,74 @@ async function exportSuiviSelectedXLS(){
       alert('Cochez au moins une ligne pour exporter.');
       return;
     }
-    const headers = ['Client', 'Date d’affectation', 'Référence Client', 'Procédure', 'Débiteur', 'Montant', 'Ville', 'Statut'];
+    const baseHeaders = [
+      'Client',
+      'Date d’affectation',
+      'Type',
+      'Référence Client',
+      'Procédure',
+      'Nom',
+      'Adresse',
+      'Ville',
+      'WW',
+      'Marque',
+      'Caution',
+      'Adresse de caution'
+    ];
+    const getProcedureReference = (dossier, procedureName)=>{
+      const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+        ? dossier.procedureDetails
+        : {};
+      const refs = Object.entries(details)
+        .filter(([procName])=>getProcedureBaseName(procName) === procedureName)
+        .map(([, procDetails])=>String(procDetails?.referenceClient || '').trim())
+        .filter(Boolean);
+      return refs.length ? [...new Set(refs)].join(', ') : '';
+    };
+    const procedureReferenceColumns = [
+      { label: 'Référence ASS', procedureName: 'ASS', width: 26 },
+      { label: 'Référence Restitution', procedureName: 'Restitution', width: 30 },
+      { label: 'Référence Nantissement', procedureName: 'Nantissement', width: 30 }
+    ].filter(column=>rows.some(row=>getProcedureReference(row.d, column.procedureName)));
+    const headers = [
+      ...baseHeaders,
+      ...procedureReferenceColumns.map(column=>column.label)
+    ];
     const tableRows = rows.map(row=>[
       row.c?.name || '-',
       normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
+      row.d?.type || '-',
       row.d?.referenceClient || '-',
       Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
       row.d?.debiteur || '-',
-      row.d?.montant || '-',
+      row.d?.adresse || '-',
       row.d?.ville || '-',
-      row.d?.statut || 'En cours'
+      row.d?.ww || '-',
+      row.d?.marque || '-',
+      row.d?.caution || '-',
+      row.d?.cautionAdresse || '-',
+      ...procedureReferenceColumns.map(column=>getProcedureReference(row.d, column.procedureName))
     ]);
     await exportAudienceWorkbookXlsxStyled({
       headers,
       rows: tableRows,
-      subtitle: 'Export des dossiers cochés',
+      subtitle: '',
       sheetName: 'Suivi',
-      colWidths: [{ wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 18 }],
+      colWidths: [
+        { wch: 20 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 28 },
+        { wch: 28 },
+        { wch: 38 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 34 },
+        ...procedureReferenceColumns.map(column=>({ wch: column.width }))
+      ],
       filename: 'suivi_export.xlsx'
     });
   });
@@ -3169,7 +3224,109 @@ function createExcelUtf8Blob(html){
   return new Blob(['\uFEFF', utf8Html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
 }
 
+function createXlsxBlobFromWorkbook(wb){
+  if(typeof XLSX === 'undefined' || !wb) return null;
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  return new Blob(
+    [buffer],
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+  );
+}
+
+function triggerBrowserDownloadFromBlob(blob, filename){
+  if(!blob) return false;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = String(filename || 'export');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return true;
+}
+
+function canUseDirectBrowserExport(){
+  return typeof window !== 'undefined'
+    && window.isSecureContext === true
+    && typeof window.showDirectoryPicker === 'function';
+}
+
+async function ensureExportDirectoryPermission(handle, options = {}){
+  if(!handle) return false;
+  const prompt = options.prompt === true;
+  const permissionOptions = { mode: 'readwrite' };
+  try{
+    if(typeof handle.queryPermission === 'function'){
+      const status = await handle.queryPermission(permissionOptions);
+      if(status === 'granted') return true;
+      if(status === 'denied') return false;
+    }
+    if(prompt && typeof handle.requestPermission === 'function'){
+      const status = await handle.requestPermission(permissionOptions);
+      return status === 'granted';
+    }
+  }catch(err){
+    console.warn('Permission export direct introuvable', err);
+    return false;
+  }
+  return true;
+}
+
+async function writeBlobToDirectoryHandle(handle, filename, blob){
+  if(!handle || !blob) return false;
+  const fileHandle = await handle.getFileHandle(String(filename || 'export'), { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+  return true;
+}
+
+function primeDirectExportDirectoryAccess(){
+  return Promise.resolve(null);
+}
+
+async function saveBlobDirectOrDownload(blob, filename, options = {}){
+  if(!blob){
+    console.warn('Aucun contenu à exporter pour', filename);
+    return 'error';
+  }
+  const fallback = ()=>triggerBrowserDownloadFromBlob(blob, filename);
+  if(options.direct !== true){
+    fallback();
+    return 'download';
+  }
+  const candidateHandle = options.preferredHandle || null;
+  if(!canUseDirectBrowserExport()){
+    fallback();
+    return 'download';
+  }
+
+  let handle = candidateHandle;
+  if(handle){
+    const granted = await ensureExportDirectoryPermission(handle, { prompt: false });
+    if(!granted) handle = null;
+  }
+  if(!handle){
+    handle = await ensurePreferredExportDirectoryHandle({ prompt: options.prompt !== false });
+  }
+
+  if(handle){
+    try{
+      await writeBlobToDirectoryHandle(handle, filename, blob);
+      return 'direct';
+    }catch(err){
+      console.warn('Export direct impossible, fallback téléchargement', err);
+      await clearPreferredExportDirectoryHandle();
+    }
+  }
+
+  fallback();
+  return 'download';
+}
+
 async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', sheetName = 'Audience', colWidths = [], filename = 'audience_export.xlsx' }){
+  const directExportHandlePromise = primeDirectExportDirectoryAccess();
   const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
   if(!excelReady) return;
   const subtitleText = String(subtitle || '').trim();
@@ -3189,7 +3346,10 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     ws['!cols'] = colWidths.length ? colWidths : new Array(headers.length).fill({ wch: 20 });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    XLSX.writeFile(wb, filename);
+    const blob = createXlsxBlobFromWorkbook(wb);
+    await saveBlobDirectOrDownload(blob, filename, {
+      preferredHandle: await directExportHandlePromise
+    });
     return;
   }
 
@@ -3256,14 +3416,9 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     [buffer],
     { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
   );
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  await saveBlobDirectOrDownload(blob, filename, {
+    preferredHandle: await directExportHandlePromise
+  });
 }
 
 function parseProcedureToken(token){
@@ -5855,6 +6010,9 @@ function getIndexedDbConnection(){
         if(!db.objectStoreNames.contains(INDEXED_DB_BACKUP_STORE)){
           db.createObjectStore(INDEXED_DB_BACKUP_STORE);
         }
+        if(!db.objectStoreNames.contains(INDEXED_DB_EXPORT_STORE)){
+          db.createObjectStore(INDEXED_DB_EXPORT_STORE);
+        }
       };
       req.onsuccess = ()=>resolve(req.result || null);
       req.onerror = ()=>{
@@ -5867,6 +6025,123 @@ function getIndexedDbConnection(){
     }
   });
   return indexedDbOpenPromise;
+}
+
+async function readIndexedDbValue(storeName, key){
+  const db = await getIndexedDbConnection();
+  if(!db || !storeName) return null;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+      const req = store.get(key);
+      req.onsuccess = ()=>resolve(req.result ?? null);
+      req.onerror = ()=>{
+        console.warn(`Lecture IndexedDB impossible (${storeName})`, req.error);
+        resolve(null);
+      };
+    }catch(err){
+      console.warn(`Transaction IndexedDB impossible (${storeName})`, err);
+      resolve(null);
+    }
+  });
+}
+
+async function writeIndexedDbValue(storeName, key, value){
+  const db = await getIndexedDbConnection();
+  if(!db || !storeName) return false;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      store.put(value, key);
+      tx.oncomplete = ()=>resolve(true);
+      tx.onerror = ()=>{
+        console.warn(`Echec écriture IndexedDB (${storeName})`, tx.error);
+        resolve(false);
+      };
+      tx.onabort = ()=>resolve(false);
+    }catch(err){
+      console.warn(`Ecriture IndexedDB impossible (${storeName})`, err);
+      resolve(false);
+    }
+  });
+}
+
+async function deleteIndexedDbValue(storeName, key){
+  const db = await getIndexedDbConnection();
+  if(!db || !storeName) return false;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      store.delete(key);
+      tx.oncomplete = ()=>resolve(true);
+      tx.onerror = ()=>{
+        console.warn(`Echec suppression IndexedDB (${storeName})`, tx.error);
+        resolve(false);
+      };
+      tx.onabort = ()=>resolve(false);
+    }catch(err){
+      console.warn(`Suppression IndexedDB impossible (${storeName})`, err);
+      resolve(false);
+    }
+  });
+}
+
+async function readPreferredExportDirectoryHandle(){
+  if(preferredExportDirectoryHandleLoaded) return preferredExportDirectoryHandle;
+  preferredExportDirectoryHandleLoaded = true;
+  preferredExportDirectoryHandle = await readIndexedDbValue(
+    INDEXED_DB_EXPORT_STORE,
+    INDEXED_DB_EXPORT_DIRECTORY_KEY
+  );
+  return preferredExportDirectoryHandle;
+}
+
+async function writePreferredExportDirectoryHandle(handle){
+  preferredExportDirectoryHandle = handle || null;
+  preferredExportDirectoryHandleLoaded = true;
+  if(!handle) return deleteIndexedDbValue(INDEXED_DB_EXPORT_STORE, INDEXED_DB_EXPORT_DIRECTORY_KEY);
+  return writeIndexedDbValue(INDEXED_DB_EXPORT_STORE, INDEXED_DB_EXPORT_DIRECTORY_KEY, handle);
+}
+
+async function clearPreferredExportDirectoryHandle(){
+  preferredExportDirectoryHandle = null;
+  preferredExportDirectoryHandleLoaded = true;
+  return deleteIndexedDbValue(INDEXED_DB_EXPORT_STORE, INDEXED_DB_EXPORT_DIRECTORY_KEY);
+}
+
+async function ensurePreferredExportDirectoryHandle(options = {}){
+  if(!canUseDirectBrowserExport()) return null;
+  const prompt = options.prompt === true;
+  let handle = await readPreferredExportDirectoryHandle();
+  if(handle){
+    const granted = await ensureExportDirectoryPermission(handle, { prompt });
+    if(granted) return handle;
+    await clearPreferredExportDirectoryHandle();
+  }
+  if(!prompt) return null;
+  try{
+    handle = await window.showDirectoryPicker({
+      id: 'cabinet-avocat-exports',
+      mode: 'readwrite'
+    });
+    if(!handle) return null;
+    const granted = await ensureExportDirectoryPermission(handle, { prompt: true });
+    if(!granted) return null;
+    const stored = await writePreferredExportDirectoryHandle(handle);
+    if(!stored){
+      preferredExportDirectoryHandle = handle;
+      preferredExportDirectoryHandleLoaded = true;
+    }
+    return handle;
+  }catch(err){
+    if(err?.name !== 'AbortError'){
+      console.warn('Sélection du dossier export impossible', err);
+    }
+    return null;
+  }
 }
 
 async function writeStateToIndexedDb(payload){
@@ -6009,9 +6284,11 @@ async function createAutoBackupSnapshot(payload, options = {}){
   };
 
   await writeAutoBackupToIndexedDb(entry);
-  const localEntries = readAutoBackupsFromLocalStorage();
-  localEntries.unshift(entry);
-  writeAutoBackupsToLocalStorage(localEntries);
+  if(!shouldSkipFullLocalStorageCache(safePayload)){
+    const localEntries = readAutoBackupsFromLocalStorage();
+    localEntries.unshift(entry);
+    writeAutoBackupsToLocalStorage(localEntries);
+  }
   pruneIndexedDbAutoBackups().catch(()=>{});
   lastAutoBackupAt = now;
   lastAutoBackupSignature = signature;
@@ -6638,7 +6915,32 @@ function parseExcelData(rows){
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
     notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
     notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
-    executionNo: ['execution n', 'execution no', 'execution n°', 'execution numero', 'num execution', 'numero execution', 'numéro execution'],
+    executionNo: [
+      'execution',
+      'execution n',
+      'execution no',
+      'execution n°',
+      'execution numero',
+      'execution num',
+      'execution nume ro',
+      'n execution',
+      'n execution inj',
+      'n execution injonction',
+      'n d execution',
+      'n d execution inj',
+      'n d execution injonction',
+      'num execution',
+      'num execution inj',
+      'num execution injonction',
+      'numero execution',
+      'numero execution inj',
+      'numero execution injonction',
+      'numéro execution',
+      'numéro execution inj',
+      'numéro execution injonction',
+      'execution inj',
+      'execution injonction'
+    ],
     sort: ['sort'],
     tribunal: ['tribunal', 'trib', 'tr'],
     statut: ['statut', 'status', 'etat', 'état']
@@ -7568,10 +7870,26 @@ async function applyExcelImport(payload, options = {}){
       }
     };
 
-    setProcRef('ASS', row.refAssignation);
-    setProcRef('Restitution', row.refRestitution);
-    setProcRef('SFDC', row.refSfdc);
-    setProcRef('Injonction', row.refInjonction);
+    const hasAnyExplicitProcedureRef = !!(row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction);
+    const mainProcedureRefValue = String(row.refClient || dossier.referenceClient || '').trim();
+    const resolveProcedureReference = (proc, explicitRefValue)=>{
+      const explicitRef = String(explicitRefValue || '').trim();
+      if(explicitRef) return explicitRef;
+      if(!hasAnyExplicitProcedureRef && procedures.length === 1 && procedures[0] === proc){
+        return mainProcedureRefValue;
+      }
+      return '';
+    };
+
+    const assReference = resolveProcedureReference('ASS', row.refAssignation);
+    const restitutionReference = resolveProcedureReference('Restitution', row.refRestitution);
+    const sfdcReference = resolveProcedureReference('SFDC', row.refSfdc);
+    const injonctionReference = resolveProcedureReference('Injonction', row.refInjonction);
+
+    setProcRef('ASS', assReference);
+    setProcRef('Restitution', restitutionReference);
+    setProcRef('SFDC', sfdcReference);
+    setProcRef('Injonction', injonctionReference);
     const executionNoValue = String(row.executionNo || '').trim();
     const notificationSortValue = String(row.notificationSort || '').trim();
     const notificationNoValue = String(row.notificationNo || '').trim();
@@ -7586,8 +7904,8 @@ async function applyExcelImport(payload, options = {}){
       if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
       if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
     };
-    assignProcedureMeta('SFDC', row.refSfdc);
-    assignProcedureMeta('Injonction', row.refInjonction);
+    assignProcedureMeta('SFDC', sfdcReference);
+    assignProcedureMeta('Injonction', injonctionReference);
     const normalizedImportedProcs = [...procedureSet];
     // Keep Excel procedure order as the source of truth.
     // Any extra procedures discovered from references are appended after.
@@ -8033,11 +8351,6 @@ async function exportBackupExcelImportable(){
     };
   });
 
-  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
-  if(!excelReady){
-    return;
-  }
-
   const totalCols = 14;
   const fillToCols = (arr, size)=>[...arr, ...Array(Math.max(0, size - arr.length)).fill('')];
   const now = new Date();
@@ -8049,6 +8362,13 @@ async function exportBackupExcelImportable(){
     String(now.getHours()).padStart(2, '0'),
     String(now.getMinutes()).padStart(2, '0')
   ].join('');
+  const filename = `sauvegarde_importable_${stamp}.xlsx`;
+  const directExportHandlePromise = primeDirectExportDirectoryAccess();
+
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
+  if(!excelReady){
+    return;
+  }
 
   if(typeof ExcelJS !== 'undefined'){
     const workbook = new ExcelJS.Workbook();
@@ -8205,14 +8525,9 @@ async function exportBackupExcelImportable(){
       [buffer],
       { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
     );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sauvegarde_importable_${stamp}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await saveBlobDirectOrDownload(blob, filename, {
+      preferredHandle: await directExportHandlePromise
+    });
     return;
   }
 
@@ -8256,7 +8571,10 @@ async function exportBackupExcelImportable(){
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sauvegarde');
-  XLSX.writeFile(wb, `sauvegarde_importable_${stamp}.xlsx`);
+  const blob = createXlsxBlobFromWorkbook(wb);
+  await saveBlobDirectOrDownload(blob, filename, {
+    preferredHandle: await directExportHandlePromise
+  });
 }
 
 // ================== INIT ==================
@@ -9218,8 +9536,6 @@ async function addDossier(){
       files: await serializeUploadedFiles(uploadedFiles)
     };
     dossier.history = [];
-    console.log('[ADD DOSSIER]', JSON.stringify(dossier, null, 2));
-
     let dossierPatch = null;
     if(editingDossier){
       const prevClient = AppState.clients.find(c=>c.id == editingDossier.clientId);
@@ -9606,9 +9922,6 @@ function getDiligenceSearchValues(row){
     row.clientName,
     row.procedure,
     row.tribunal,
-    row.sort,
-    row.delegation,
-    row.ordonnance,
     row.dossier?.debiteur,
     row.dossier?.boiteNo,
     row.dossier?.referenceClient,
@@ -9727,8 +10040,6 @@ function editDossier(clientId, index){
   if(!canEditClient(client)) return alert('Accès refusé');
   const d = client.dossiers[index];
   if(!d) return;
-  console.log('[EDIT DOSSIER]', JSON.stringify(d, null, 2));
-
   editingDossier = { clientId, index };
   editingOriginalProcedures = normalizeProcedures(d);
   showView('creation');
@@ -10211,7 +10522,7 @@ function syncDiligenceProcedureFilter(rows){
   const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
   select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
   if(!set.has(filterDiligenceProcedure)){
-    filterDiligenceProcedure = set.has('SFDC') ? 'SFDC' : 'all';
+    filterDiligenceProcedure = 'all';
   }
   select.value = filterDiligenceProcedure;
   diligenceFilterProcedureRowsRef = rows;
@@ -10627,6 +10938,7 @@ function getFilteredDiligenceRows(allRows){
 
 function exportDiligenceXLS(){
   return runWithHeavyUiOperation(async ()=>{
+    const directExportHandlePromise = primeDirectExportDirectoryAccess();
     const allRows = getDiligenceRows();
     syncDiligencePrintSelection(allRows);
     syncDiligenceProcedureFilter(allRows);
@@ -10715,14 +11027,9 @@ function exportDiligenceXLS(){
   `;
 
     const blob = createExcelUtf8Blob(html);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'diligence_export.xls';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await saveBlobDirectOrDownload(blob, 'diligence_export.xls', {
+      preferredHandle: await directExportHandlePromise
+    });
   });
 }
 
