@@ -2337,10 +2337,42 @@ function isSuiviSelectedForPrint(row){
   return suiviPrintSelection.has(makeSuiviPrintKey(row?.c?.id, row?.index));
 }
 
+function syncPageSelectionToggleControl(inputId, labelId, totalRows, selectedRows){
+  const input = $(inputId);
+  if(!input) return;
+  const label = labelId ? $(labelId) : input.closest('label');
+  const total = Math.max(0, Number(totalRows) || 0);
+  const selected = Math.max(0, Number(selectedRows) || 0);
+  input.disabled = total === 0;
+  input.indeterminate = total > 0 && selected > 0 && selected < total;
+  input.checked = total > 0 && selected === total;
+  if(label){
+    label.classList.toggle('is-disabled', total === 0);
+    label.classList.toggle('is-partial', total > 0 && selected > 0 && selected < total);
+  }
+}
+
+function getVisibleSuiviPageRowsForPrintSelection(){
+  const orderedRows = typeof orderSuiviRowsByCheckedSelection === 'function'
+    ? orderSuiviRowsByCheckedSelection(getFilteredSuiviRowsForSelection())
+    : getFilteredSuiviRowsForSelection();
+  return getCurrentPageRows(orderedRows, 'suivi');
+}
+
+function getAllFilteredSuiviRowsForPrintSelection(){
+  return getFilteredSuiviRowsForSelection();
+}
+
+function syncSuiviPageSelectionToggle(){
+  const rows = getAllFilteredSuiviRowsForPrintSelection();
+  const selected = rows.reduce((count, row)=>count + (isSuiviSelectedForPrint(row) ? 1 : 0), 0);
+  syncPageSelectionToggleControl('suiviPageSelectionToggle', 'suiviCheckedCount', rows.length, selected);
+}
+
 function updateSuiviCheckedCount(){
-  const node = $('suiviCheckedCount');
-  if(!node) return;
-  node.innerText = `Cochés: ${suiviPrintSelection.size}`;
+  const node = $('suiviCheckedCountValue');
+  if(node) node.textContent = String(suiviPrintSelection.size);
+  syncSuiviPageSelectionToggle();
 }
 
 function toggleSuiviPrintSelection(clientId, dossierIndex, checked){
@@ -2375,6 +2407,29 @@ function setAllVisibleSuiviRowsForPrint(checked){
   const rows = getCurrentPageRows(orderedRows, 'suivi');
   if(!rows.length){
     alert('Aucune ligne visible.');
+    return;
+  }
+  let changed = false;
+  rows.forEach(row=>{
+    const key = makeSuiviPrintKey(row?.c?.id, row?.index);
+    if(checked){
+      const sizeBefore = suiviPrintSelection.size;
+      suiviPrintSelection.add(key);
+      if(suiviPrintSelection.size !== sizeBefore) changed = true;
+    }else{
+      if(suiviPrintSelection.delete(key)) changed = true;
+    }
+  });
+  if(changed) suiviPrintSelectionVersion += 1;
+  updateSuiviCheckedCount();
+  if(filterSuiviCheckedFirst) paginationState.suivi = 1;
+  renderSuivi();
+}
+
+function setAllFilteredSuiviRowsForPrint(checked){
+  const rows = getAllFilteredSuiviRowsForPrintSelection();
+  if(!rows.length){
+    alert('Aucune ligne filtrée.');
     return;
   }
   let changed = false;
@@ -2566,7 +2621,9 @@ function previewSuiviSelectedRows(){
     title: 'Aperçu Excel - Suivi des dossiers',
     subtitle: 'Lignes cochées prêtes à exporter',
     headers: dataset.headers,
-    rows: dataset.tableRows
+    rows: dataset.tableRows,
+    exportLabel: 'Exporter Suivi Excel',
+    onExport: exportSuiviSelectedXLS
   });
 }
 
@@ -2583,8 +2640,7 @@ async function exportSuiviSelectedXLS(){
       subtitle: '',
       sheetName: 'Suivi',
       colWidths: dataset.colWidths,
-      filename: 'suivi_export.xlsx',
-      preferWorker: true
+      filename: 'suivi_export.xlsx'
     });
   });
 }
@@ -8241,32 +8297,186 @@ function closeImportResultModal(){
   if(modal) modal.style.display = 'none';
 }
 
+let exportPreviewAction = null;
+let exportPreviewButtonLabel = 'Exporter Excel';
+let exportPreviewBusy = false;
+
 function closeExportPreviewModal(){
   const modal = $('exportPreviewModal');
   const meta = $('exportPreviewMeta');
   const wrap = $('exportPreviewTableWrap');
+  const exportBtn = $('exportPreviewExcelBtn');
+  const printBtn = $('printExportPreviewBtn');
+  exportPreviewAction = null;
+  exportPreviewButtonLabel = 'Exporter Excel';
+  exportPreviewBusy = false;
   if(meta) meta.innerHTML = '';
   if(wrap) wrap.innerHTML = '';
+  if(exportBtn){
+    exportBtn.style.display = 'none';
+    exportBtn.disabled = false;
+    exportBtn.innerHTML = '<i class="fa-regular fa-file-excel"></i> Exporter Excel';
+  }
+  if(printBtn){
+    printBtn.style.display = 'none';
+    printBtn.disabled = false;
+  }
   if(modal) modal.style.display = 'none';
 }
 
-function showExportPreviewModal({ title = '', subtitle = '', headers = [], rows = [] } = {}){
+async function handleExportPreviewExcel(){
+  if(exportPreviewBusy || typeof exportPreviewAction !== 'function') return;
+  const exportBtn = $('exportPreviewExcelBtn');
+  exportPreviewBusy = true;
+  if(exportBtn){
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Export en cours...';
+  }
+  try{
+    await exportPreviewAction();
+  }finally{
+    exportPreviewBusy = false;
+    if(exportBtn){
+      exportBtn.disabled = false;
+      exportBtn.innerHTML = `<i class="fa-regular fa-file-excel"></i> ${escapeHtml(exportPreviewButtonLabel)}`;
+    }
+  }
+}
+
+function handlePrintExportPreview(){
+  const titleNode = $('exportPreviewTitle');
+  const metaNode = $('exportPreviewMeta');
+  const wrap = $('exportPreviewTableWrap');
+  if(!titleNode || !metaNode || !wrap){
+    alert('Aperçu indisponible.');
+    return;
+  }
+  const tableHtml = String(wrap.innerHTML || '').trim();
+  if(!tableHtml || tableHtml.includes('preview-empty')){
+    alert('Aucune donnée à imprimer.');
+    return;
+  }
+  const title = escapeHtml(titleNode.textContent || 'Aperçu Excel');
+  const meta = metaNode.innerHTML;
+  const printHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    :root{color-scheme:light}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px;font-family:Arial,sans-serif;color:#0f172a;background:#fff}
+    .print-head{margin-bottom:18px}
+    .print-head h1{margin:0 0 10px;color:#1e3a8a;font-size:28px}
+    .print-meta{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:#475569;font-size:13px;font-weight:700;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    thead th{background:#1e3a8a;color:#fff;padding:8px;border:1px solid #cbd5e1;text-align:left}
+    td{padding:8px;border:1px solid #d9e4f5;text-align:left;vertical-align:top}
+    tbody tr:nth-child(even) td{background:#f8fbff}
+    @page{size:auto;margin:12mm}
+  </style>
+</head>
+<body>
+  <div class="print-head">
+    <h1>${title}</h1>
+    <div class="print-meta">${meta}</div>
+  </div>
+  ${tableHtml}
+</body>
+</html>`;
+
+  const existingFrame = document.getElementById('exportPreviewPrintFrame');
+  if(existingFrame) existingFrame.remove();
+
+  const printFrame = document.createElement('iframe');
+  printFrame.id = 'exportPreviewPrintFrame';
+  printFrame.setAttribute('aria-hidden', 'true');
+  printFrame.style.position = 'fixed';
+  printFrame.style.right = '0';
+  printFrame.style.bottom = '0';
+  printFrame.style.width = '0';
+  printFrame.style.height = '0';
+  printFrame.style.border = '0';
+  printFrame.style.opacity = '0';
+
+  const cleanup = ()=>{
+    setTimeout(()=>{
+      if(printFrame.parentNode) printFrame.remove();
+    }, 400);
+  };
+
+  printFrame.onload = ()=>{
+    const frameWindow = printFrame.contentWindow;
+    if(!frameWindow){
+      cleanup();
+      alert("Ouverture de l'aperçu d'impression impossible.");
+      return;
+    }
+    frameWindow.focus();
+    if('onafterprint' in frameWindow){
+      frameWindow.onafterprint = cleanup;
+    }
+    setTimeout(()=>{
+      try{
+        frameWindow.print();
+      }catch(err){
+        console.error(err);
+        cleanup();
+        alert("L'impression a échoué. Réessayez.");
+      }
+    }, 150);
+  };
+
+  document.body.appendChild(printFrame);
+  const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
+  if(!frameDoc){
+    cleanup();
+    alert("Création de l'aperçu d'impression impossible.");
+    return;
+  }
+  frameDoc.open();
+  frameDoc.write(printHtml);
+  frameDoc.close();
+}
+
+function showExportPreviewModal({ title = '', subtitle = '', headers = [], rows = [], onExport = null, exportLabel = 'Exporter Excel' } = {}){
   const modal = $('exportPreviewModal');
   const titleNode = $('exportPreviewTitle');
   const metaNode = $('exportPreviewMeta');
   const wrap = $('exportPreviewTableWrap');
+  const exportBtn = $('exportPreviewExcelBtn');
+  const printBtn = $('printExportPreviewBtn');
   if(!modal || !titleNode || !metaNode || !wrap){
     alert('Aperçu indisponible.');
     return;
   }
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
+  exportPreviewAction = typeof onExport === 'function' ? onExport : null;
+  exportPreviewButtonLabel = String(exportLabel || 'Exporter Excel').trim() || 'Exporter Excel';
+  exportPreviewBusy = false;
   titleNode.innerHTML = `<i class="fa-regular fa-file-excel"></i> ${escapeHtml(title || 'Aperçu Excel')}`;
   const subtitleText = String(subtitle || '').trim();
   metaNode.innerHTML = `
     <div>${subtitleText ? escapeHtml(subtitleText) : 'Aperçu sans téléchargement'}</div>
     <div>${safeRows.length} ligne(s)</div>
   `;
+  if(exportBtn){
+    if(exportPreviewAction && safeRows.length){
+      exportBtn.style.display = 'inline-flex';
+      exportBtn.disabled = false;
+      exportBtn.innerHTML = `<i class="fa-regular fa-file-excel"></i> ${escapeHtml(exportPreviewButtonLabel)}`;
+    }else{
+      exportBtn.style.display = 'none';
+      exportBtn.disabled = false;
+      exportBtn.innerHTML = '<i class="fa-regular fa-file-excel"></i> Exporter Excel';
+    }
+  }
+  if(printBtn){
+    printBtn.style.display = safeRows.length ? 'inline-flex' : 'none';
+    printBtn.disabled = false;
+  }
   if(!safeHeaders.length || !safeRows.length){
     wrap.innerHTML = '<div class="preview-empty">Aucune donnée à afficher.</div>';
   }else{
@@ -9589,6 +9799,8 @@ function setupEvents(){
   $('closeDossierModalBtn')?.addEventListener('click', closeDossierModal);
   $('closeImportResultModalBtn')?.addEventListener('click', closeImportResultModal);
   $('closeExportPreviewModalBtn')?.addEventListener('click', closeExportPreviewModal);
+  $('exportPreviewExcelBtn')?.addEventListener('click', handleExportPreviewExcel);
+  $('printExportPreviewBtn')?.addEventListener('click', handlePrintExportPreview);
   $('copyImportErrorsBtn')?.addEventListener('click', copyImportErrors);
   $('dossierModal')?.addEventListener('click', (e)=>{
     if(e.target?.id === 'dossierModal') closeDossierModal();
@@ -9724,6 +9936,7 @@ function setupEvents(){
   });
   $('selectAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(true));
   $('clearAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(false));
+  $('suiviPageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredSuiviRowsForPrint(!!e.target?.checked));
   $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('previewSuiviBtn')?.addEventListener('click', previewSuiviSelectedRows);
   $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
@@ -9770,6 +9983,7 @@ function setupEvents(){
   $('previewDiligenceBtn')?.addEventListener('click', previewDiligenceSelectedRows);
   $('selectAllDiligenceBtn')?.addEventListener('click', ()=>setAllVisibleDiligenceRowsForPrint(true));
   $('clearAllDiligenceBtn')?.addEventListener('click', ()=>setAllVisibleDiligenceRowsForPrint(false));
+  $('diligencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredDiligenceRowsForPrint(!!e.target?.checked));
   $('salleFilterSelect')?.addEventListener('change', (e)=>{
     filterSalle = String(e.target?.value || 'all');
     renderSalle();
@@ -9869,6 +10083,7 @@ function setupEvents(){
   });
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
+  $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
   $('exportAudienceBtn')?.addEventListener('click', exportAudienceRegularXLS);
   $('exportAudienceDetailBtn')?.addEventListener('click', exportAudienceXLS);
   $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
@@ -11369,10 +11584,27 @@ function isDiligenceSelectedForPrint(row){
   return diligencePrintSelection.has(key);
 }
 
+function getVisibleDiligencePageRowsForPrintSelection(){
+  const orderedRows = typeof orderDiligenceRowsByCheckedSelection === 'function'
+    ? orderDiligenceRowsByCheckedSelection(getFilteredDiligenceRows(getDiligenceRows()))
+    : getFilteredDiligenceRows(getDiligenceRows());
+  return getCurrentPageRows(orderedRows, 'diligence');
+}
+
+function getAllFilteredDiligenceRowsForPrintSelection(){
+  return getFilteredDiligenceRows(getDiligenceRows());
+}
+
+function syncDiligencePageSelectionToggle(){
+  const rows = getAllFilteredDiligenceRowsForPrintSelection();
+  const selected = rows.reduce((count, row)=>count + (isDiligenceSelectedForPrint(row) ? 1 : 0), 0);
+  syncPageSelectionToggleControl('diligencePageSelectionToggle', 'diligenceCheckedCount', rows.length, selected);
+}
+
 function updateDiligenceCheckedCount(){
-  const node = $('diligenceCheckedCount');
-  if(!node) return;
-  node.innerText = `Cochés: ${diligencePrintSelection.size}`;
+  const node = $('diligenceCheckedCountValue');
+  if(node) node.textContent = String(diligencePrintSelection.size);
+  syncDiligencePageSelectionToggle();
 }
 
 function queueDiligenceCheckedCountRender(){
@@ -11437,6 +11669,29 @@ function setAllVisibleDiligenceRowsForPrint(checked){
   const rows = getCurrentPageRows(orderedRows, 'diligence');
   if(!rows.length){
     alert('Aucune ligne visible.');
+    return;
+  }
+  let changed = false;
+  rows.forEach(row=>{
+    const key = makeDiligencePrintKey(row.clientId, row.dossierIndex, row.procedure);
+    if(checked){
+      const sizeBefore = diligencePrintSelection.size;
+      diligencePrintSelection.add(key);
+      if(diligencePrintSelection.size !== sizeBefore) changed = true;
+    }else{
+      if(diligencePrintSelection.delete(key)) changed = true;
+    }
+  });
+  if(changed) diligencePrintSelectionVersion += 1;
+  queueDiligenceCheckedCountRender();
+  if(filterDiligenceCheckedFirst) paginationState.diligence = 1;
+  renderDiligence();
+}
+
+function setAllFilteredDiligenceRowsForPrint(checked){
+  const rows = getAllFilteredDiligenceRowsForPrintSelection();
+  if(!rows.length){
+    alert('Aucune ligne filtrée.');
     return;
   }
   let changed = false;
@@ -12055,8 +12310,7 @@ function exportDiligenceXLS(){
         { wch: 18 },
         { wch: 26 }
       ],
-      filename: 'diligence_export.xlsx',
-      preferWorker: true
+      filename: 'diligence_export.xlsx'
     });
   });
 }
@@ -12164,7 +12418,9 @@ function previewDiligenceSelectedRows(){
     title: 'Aperçu Excel - Diligence',
     subtitle: 'Lignes cochées prêtes à exporter',
     headers: dataset.headers,
-    rows: dataset.tableRows
+    rows: dataset.tableRows,
+    exportLabel: 'Exporter Diligence Excel',
+    onExport: exportDiligenceXLS
   });
 }
 
@@ -12812,10 +13068,10 @@ function pruneAudiencePrintSelection(rows = null){
 }
 
 function updateAudienceCheckedCount(){
-  const node = $('audienceCheckedCount');
-  if(!node) return;
-  const count = getSelectedAudienceRowsCount();
-  node.innerHTML = `<span class="label">Cochés</span><span class="value">${count}</span>`;
+  const count = audiencePrintSelection.size;
+  const node = $('audienceCheckedCountValue');
+  if(node) node.textContent = String(count);
+  syncAudiencePageSelectionToggle();
 }
 
 function toggleAudiencePrintSelection(ci, di, procKey, checked){
@@ -13075,6 +13331,43 @@ function setAllVisibleAudienceRowsForPrint(checked){
   renderAudience();
 }
 
+function getVisibleAudiencePageRowsForPrintSelection(){
+  return getCurrentPageRows(getFilteredAudienceRows(), 'audience');
+}
+
+function getAllFilteredAudienceRowsForPrintSelection(){
+  return getFilteredAudienceRows();
+}
+
+function syncAudiencePageSelectionToggle(){
+  const rows = getAllFilteredAudienceRowsForPrintSelection();
+  const selected = rows.reduce((count, row)=>count + (isAudienceSelectedForPrint(row.ci, row.di, row.procKey) ? 1 : 0), 0);
+  syncPageSelectionToggleControl('audiencePageSelectionToggle', 'audienceCheckedCount', rows.length, selected);
+}
+
+function setAllFilteredAudienceRowsForPrint(checked){
+  const rows = getAllFilteredAudienceRowsForPrintSelection();
+  if(!rows.length){
+    alert('Aucune ligne filtrée.');
+    return;
+  }
+  let changed = false;
+  rows.forEach(row=>{
+    const key = makeAudiencePrintKey(row.ci, row.di, row.procKey);
+    if(checked){
+      const sizeBefore = audiencePrintSelection.size;
+      audiencePrintSelection.add(key);
+      if(audiencePrintSelection.size !== sizeBefore) changed = true;
+    }else{
+      if(audiencePrintSelection.delete(key)) changed = true;
+    }
+  });
+  if(changed) audiencePrintSelectionVersion += 1;
+  queueAudienceCheckedCountRender();
+  if(filterAudienceCheckedFirst) paginationState.audience = 1;
+  renderAudience();
+}
+
 function getAudienceDateDepotDisplayValue(row){
   const depotLeRaw = String(row?.p?.depotLe || '').trim();
   if(depotLeRaw){
@@ -13194,7 +13487,9 @@ function previewAudienceSelectedRows(){
     title: "Aperçu Excel - Export d'audience",
     subtitle: dataset.subtitle,
     headers: dataset.headers,
-    rows: dataset.tableRows
+    rows: dataset.tableRows,
+    exportLabel: "Exporter Audience Excel",
+    onExport: exportAudienceXLS
   });
 }
 
@@ -13818,8 +14113,7 @@ async function exportAudienceXLS(){
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
       colWidths: dataset.colWidths,
-      filename: 'audience_export.xlsx',
-      preferWorker: true
+      filename: 'audience_export.xlsx'
     });
   });
 }

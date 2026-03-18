@@ -227,6 +227,7 @@ function renderDiligence(options = {}){
         `diligence-empty::${colCount}`
       );
       renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      updateDiligenceCheckedCount();
       return;
     }
 
@@ -255,6 +256,7 @@ function renderDiligence(options = {}){
       applyDiligenceAutoSizing(body);
     }
     renderPagination('diligence', pageData);
+    updateDiligenceCheckedCount();
   };
 
   if(diligenceQuery && allRows.length >= 1200 && !!getDiligenceFilterWorker()){

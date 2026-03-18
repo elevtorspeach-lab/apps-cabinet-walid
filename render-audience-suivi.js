@@ -203,6 +203,7 @@ function renderSuivi(options = {}){
     suiviVirtualLastRange = { start: -1, end: -1 };
     renderTableMessage(suiviBody, 10, SUIVI_NO_CLIENT_MESSAGE, 'suivi-no-client');
     renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+    updateSuiviCheckedCount();
     return;
   }
   const base = getSuiviBaseRowsCached();

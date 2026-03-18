@@ -154,7 +154,11 @@
       </div>
 
       <div class="audience-actions-right">
-        <span id="audienceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+        <label id="audienceCheckedCount" class="audience-checked-count" for="audiencePageSelectionToggle">
+          <input id="audiencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page audience">
+          <span class="label">Cochés</span>
+          <span id="audienceCheckedCountValue" class="value">0</span>
+        </label>
         <button id="printAudienceBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-square-check"></i> Cocher
         </button>
@@ -297,7 +301,11 @@
 	                <option value="all">Tous</option>
 	              </select>
 	            </div>
-	            <span id="diligenceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+	            <label id="diligenceCheckedCount" class="audience-checked-count" for="diligencePageSelectionToggle">
+              <input id="diligencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page diligence">
+              <span class="label">Cochés</span>
+              <span id="diligenceCheckedCountValue" class="value">0</span>
+            </label>
             <button id="selectAllDiligenceBtn" class="btn-primary" type="button">
               <i class="fa-solid fa-check-double"></i> Cocher page
             </button>
@@ -680,7 +688,11 @@
             <option value="all">Tous</option>
           </select>
         </div>
-        <div id="suiviCheckedCount" class="audience-checked-count">Cochés: 0</div>
+        <label id="suiviCheckedCount" class="audience-checked-count" for="suiviPageSelectionToggle">
+          <input id="suiviPageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page suivi">
+          <span class="label">Cochés</span>
+          <span id="suiviCheckedCountValue" class="value">0</span>
+        </label>
         <button id="selectAllSuiviBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-check"></i> Cocher page
         </button>
@@ -751,7 +763,7 @@
     </div>
     <div id="zoomDock" class="zoom-dock" aria-label="Zoom interface">
       <button id="zoomOutBtn" class="zoom-dock-btn" type="button" aria-label="Réduire le zoom">
-        <i class="fa-solid fa-minus"></i>
+        <span class="zoom-dock-symbol" aria-hidden="true">-</span>
       </button>
       <input
         id="zoomRange"
@@ -813,9 +825,17 @@
   <div class="modal-card preview-modal-card">
     <div class="modal-head">
       <h2 id="exportPreviewTitle"><i class="fa-regular fa-file-excel"></i> Aperçu Excel</h2>
-      <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
-        <i class="fa-solid fa-xmark"></i> Fermer
-      </button>
+      <div class="preview-modal-actions">
+        <button id="exportPreviewExcelBtn" class="btn-success" type="button" style="display:none;">
+          <i class="fa-regular fa-file-excel"></i> Exporter Excel
+        </button>
+        <button id="printExportPreviewBtn" class="btn-primary" type="button" style="display:none;">
+          <i class="fa-solid fa-print"></i> Imprimer
+        </button>
+        <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
+          <i class="fa-solid fa-xmark"></i> Fermer
+        </button>
+      </div>
     </div>
     <div class="modal-body preview-modal-body">
       <div id="exportPreviewMeta" class="preview-modal-meta"></div>

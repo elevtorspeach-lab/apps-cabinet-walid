@@ -402,6 +402,12 @@ body{
   border-radius:10px;
   font-size:13px;
 }
+.zoom-dock-symbol{
+  color:#0f172a;
+  font-size:18px;
+  font-weight:800;
+  line-height:1;
+}
 .zoom-dock-btn:hover,
 .zoom-dock-percent:hover{
   color:#1e40af;
@@ -1659,11 +1665,21 @@ tr:hover{background:#f1f5f9}
   font-weight:800;
   letter-spacing:.1px;
   box-shadow:0 8px 18px rgba(37,99,235,.14);
+  cursor:pointer;
+  user-select:none;
+  transition:border-color .18s ease, box-shadow .18s ease, background .18s ease, opacity .18s ease;
 }
-.audience-checked-count::before{
-  content:"\2611";
-  color:#2563eb;
-  font-size:14px;
+.audience-checked-count:hover{
+  border-color:#93c5fd;
+  box-shadow:0 12px 22px rgba(37,99,235,.16);
+}
+.audience-checked-count input{
+  width:18px;
+  height:18px;
+  margin:0;
+  accent-color:#2563eb;
+  cursor:pointer;
+  flex:0 0 auto;
 }
 .audience-checked-count .label{
   opacity:.9;
@@ -1676,6 +1692,21 @@ tr:hover{background:#f1f5f9}
   color:#fff;
   background:linear-gradient(135deg,#2563eb,#1d4ed8);
   box-shadow:0 6px 14px rgba(37,99,235,.32);
+}
+
+.audience-checked-count.is-partial{
+  border-color:#93c5fd;
+  background:linear-gradient(135deg,#eff6ff 0%, #dbeafe 100%);
+}
+
+.audience-checked-count.is-disabled{
+  opacity:.58;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+
+.audience-checked-count.is-disabled input{
+  cursor:not-allowed;
 }
 
 .audience-filter-row{
@@ -2523,6 +2554,14 @@ tr.color-purple-light{border-left:6px solid #c2410c;background:#ffcda8}
   gap:14px;
 }
 
+.preview-modal-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
 .preview-modal-meta{
   display:flex;
   align-items:center;
@@ -2588,6 +2627,16 @@ tr.color-purple-light{border-left:6px solid #c2410c;background:#ffcda8}
   padding:22px 18px;
   color:#475569;
   font-weight:700;
+}
+
+@media (max-width: 720px){
+  .preview-modal-actions{
+    width:100%;
+  }
+  .preview-modal-actions button{
+    flex:1 1 auto;
+    justify-content:center;
+  }
 }
 
 .password-setup-card{
