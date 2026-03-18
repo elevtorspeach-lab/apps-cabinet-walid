@@ -31,6 +31,8 @@
     </div>
 
     <button id="loginBtn" class="btn-success login-submit">Se connecter</button>
+    <p id="loginBootstrapHint" class="login-subtitle" style="display:none;"></p>
+    <button id="bootstrapSetupBtn" class="btn-primary login-submit" type="button" style="display:none;">Configurer le compte gestionnaire</button>
     <p id="errorMsg" class="error-msg">Nom d'utilisateur ou mot de passe incorrect</p>
   </div>
 </div>
@@ -154,7 +156,11 @@
       </div>
 
       <div class="audience-actions-right">
-        <span id="audienceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+        <label id="audienceCheckedCount" class="audience-checked-count" for="audiencePageSelectionToggle">
+          <input id="audiencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page audience">
+          <span class="label">Cochés</span>
+          <span id="audienceCheckedCountValue" class="value">0</span>
+        </label>
         <button id="printAudienceBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-square-check"></i> Cocher
         </button>
@@ -297,7 +303,11 @@
 	                <option value="all">Tous</option>
 	              </select>
 	            </div>
-	            <span id="diligenceCheckedCount" class="audience-checked-count">Cochés: 0</span>
+	            <label id="diligenceCheckedCount" class="audience-checked-count" for="diligencePageSelectionToggle">
+              <input id="diligencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page diligence">
+              <span class="label">Cochés</span>
+              <span id="diligenceCheckedCountValue" class="value">0</span>
+            </label>
             <button id="selectAllDiligenceBtn" class="btn-primary" type="button">
               <i class="fa-solid fa-check-double"></i> Cocher page
             </button>
@@ -317,19 +327,21 @@
               <thead>
                 <tr id="diligenceHeadRow">
                   <th>Client</th>
-                  <th>Débiteur</th>
+                  <th>Référence client</th>
+                  <th>Nom</th>
                   <th>Date dépôt</th>
                   <th>Référence dossier</th>
+                  <th>Juge</th>
+                  <th>Sort</th>
                   <th>Ordonnance</th>
-                  <th>Sort notification</th>
                   <th>Notification N°</th>
-                  <th>Statut notification</th>
+                  <th>Sort notification</th>
                   <th>Certificat non appel</th>
                   <th>Execution N°</th>
                   <th>Ville</th>
                   <th>Délégation</th>
                   <th>Huissier</th>
-                  <th>Sort</th>
+                  <th>Sort exécution</th>
                   <th>Tribunal</th>
                 </tr>
               </thead>
@@ -597,8 +609,11 @@
               <label data-proc="Restitution"><input type="checkbox" value="Restitution" class="proc-check"> Restitution</label>
               <label data-proc="Nantissement"><input type="checkbox" value="Nantissement" class="proc-check"> Nantissement</label>
               <label data-proc="SFDC"><input type="checkbox" value="SFDC" class="proc-check"> SFDC</label>
-              <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
               <label data-proc="Injonction"><input type="checkbox" value="Injonction" class="proc-check"> Injonction</label>
+              <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
+              <label data-proc="Vérification de créance"><input type="checkbox" value="Vérification de créance" class="proc-check"> Vérification de créance</label>
+              <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
+              <label data-proc="Liquidation judiciaire"><input type="checkbox" value="Liquidation judiciaire" class="proc-check"> Liquidation judiciaire</label>
             </div>
             <div class="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">
@@ -676,11 +691,21 @@
         </div>
         <div class="audience-color-filter">
           <label for="filterSuiviTribunal">Tribunal</label>
-          <select id="filterSuiviTribunal">
-            <option value="all">Tous</option>
-          </select>
+          <input
+            type="text"
+            id="filterSuiviTribunal"
+            list="filterSuiviTribunalOptions"
+            placeholder=""
+            autocomplete="off"
+          />
+          <datalist id="filterSuiviTribunalOptions">
+          </datalist>
         </div>
-        <div id="suiviCheckedCount" class="audience-checked-count">Cochés: 0</div>
+        <label id="suiviCheckedCount" class="audience-checked-count" for="suiviPageSelectionToggle">
+          <input id="suiviPageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page suivi">
+          <span class="label">Cochés</span>
+          <span id="suiviCheckedCountValue" class="value">0</span>
+        </label>
         <button id="selectAllSuiviBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-check"></i> Cocher page
         </button>
@@ -751,7 +776,7 @@
     </div>
     <div id="zoomDock" class="zoom-dock" aria-label="Zoom interface">
       <button id="zoomOutBtn" class="zoom-dock-btn" type="button" aria-label="Réduire le zoom">
-        <i class="fa-solid fa-minus"></i>
+        <span class="zoom-dock-symbol" aria-hidden="true">-</span>
       </button>
       <input
         id="zoomRange"
@@ -813,9 +838,14 @@
   <div class="modal-card preview-modal-card">
     <div class="modal-head">
       <h2 id="exportPreviewTitle"><i class="fa-regular fa-file-excel"></i> Aperçu Excel</h2>
-      <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
-        <i class="fa-solid fa-xmark"></i> Fermer
-      </button>
+      <div class="preview-modal-actions">
+        <button id="exportPreviewExcelBtn" class="btn-success" type="button" style="display:none;">
+          <i class="fa-regular fa-file-excel"></i> Exporter Excel
+        </button>
+        <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
+          <i class="fa-solid fa-xmark"></i> Fermer
+        </button>
+      </div>
     </div>
     <div class="modal-body preview-modal-body">
       <div id="exportPreviewMeta" class="preview-modal-meta"></div>
@@ -844,10 +874,10 @@
 <div id="passwordSetupModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card password-setup-card">
     <div class="modal-head">
-      <h2><i class="fa-solid fa-key"></i> Sécuriser ce compte</h2>
+      <h2 id="passwordSetupTitle"><i class="fa-solid fa-key"></i> Sécuriser ce compte</h2>
     </div>
     <div class="modal-body password-setup-body">
-      <p class="password-setup-lead">
+      <p id="passwordSetupLead" class="password-setup-lead">
         Ce compte utilise encore un mot de passe de démarrage. Définissez maintenant un mot de passe fort pour continuer.
       </p>
       <div class="form-group full">
@@ -861,7 +891,7 @@
       <div id="passwordSetupError" class="error-msg password-setup-error">Veuillez définir un mot de passe valide.</div>
       <div class="password-setup-actions">
         <button id="passwordSetupSaveBtn" class="btn-success" type="button">
-          <i class="fa-solid fa-shield-halved"></i> Mettre à jour
+          <i class="fa-solid fa-shield-halved"></i> <span id="passwordSetupSaveLabel">Mettre à jour</span>
         </button>
         <button id="passwordSetupLogoutBtn" class="btn-danger" type="button">
           <i class="fa-solid fa-right-from-bracket"></i> Se déconnecter

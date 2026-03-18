@@ -1,24 +1,35 @@
 const DILIGENCE_EMPTY_MESSAGE = 'Aucun dossier ASS/SFDC/S-bien/Injonction trouvé.';
 const DILIGENCE_LOADING_MESSAGE = 'Recherche diligence en cours...';
-const DILIGENCE_HEAD_HTML = `
-  <th>Client</th>
-  <th>Référence client</th>
-  <th>Nom</th>
-  <th>Date dépôt</th>
-  <th>Référence dossier</th>
-  <th>Juge</th>
-  <th>Sort</th>
-  <th>Ordonnance</th>
-  <th>Notification N°</th>
-  <th>Sort notification</th>
-  <th>Certificat non appel</th>
-  <th>Execution N°</th>
-  <th>Ville</th>
-  <th>Délégation</th>
-  <th>Huissier</th>
-  <th>Sort exécution</th>
-  <th>Tribunal</th>
-`;
+function shouldShowDiligenceAssColumns(rows){
+  if(String(filterDiligenceProcedure || '').trim() === 'ASS') return true;
+  const list = Array.isArray(rows) ? rows : [];
+  return !!list.length && list.every(row=>String(row?.procedure || '').trim() === 'ASS');
+}
+
+function getDiligenceColCount(){
+  return diligenceVirtualShowAssColumns ? 17 : 15;
+}
+
+function buildDiligenceHeadHtml(){
+  return `
+    <th>Client</th>
+    <th>Référence client</th>
+    <th>Nom</th>
+    <th>Date dépôt</th>
+    <th>Référence dossier</th>
+    ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
+    <th>Ordonnance</th>
+    <th>Notification N°</th>
+    <th>Sort notification</th>
+    <th>Certificat non appel</th>
+    <th>Execution N°</th>
+    <th>Ville</th>
+    <th>Délégation</th>
+    <th>Huissier</th>
+    <th>Sort exécution</th>
+    <th>Tribunal</th>
+  `;
+}
 
 function renderDiligenceRowHtml(row){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
@@ -57,8 +68,8 @@ function renderDiligenceRowHtml(row){
       <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
       <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'juge', judgeValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
+      ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'juge', judgeValue)}</td>` : ''}
+      ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>` : ''}
       <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationSort', notificationSortValue)}</td>
@@ -77,7 +88,7 @@ function renderDiligenceVirtualWindow(force = false){
   const body = $('diligenceBody');
   if(!body) return;
   const rows = Array.isArray(diligenceVirtualRows) ? diligenceVirtualRows : [];
-  const colCount = 17;
+  const colCount = getDiligenceColCount();
   if(!rows.length){
     diligenceVirtualLastRange = { start: -1, end: -1 };
     setElementHtmlWithRenderKey(
@@ -158,13 +169,14 @@ function renderDiligence(options = {}){
   syncDiligenceTribunalFilter(allRows);
   const finalizeDiligenceRender = (rows)=>{
     const orderedRows = orderDiligenceRowsByCheckedSelection(rows);
-    const colCount = 17;
+    diligenceVirtualShowAssColumns = shouldShowDiligenceAssColumns(orderedRows);
+    const colCount = getDiligenceColCount();
 
     if(headRow){
       setElementHtmlWithRenderKey(
         headRow,
-        DILIGENCE_HEAD_HTML,
-        'diligence-head::comprehensive',
+        buildDiligenceHeadHtml(),
+        `diligence-head::${diligenceVirtualShowAssColumns ? 'ass-columns' : 'compact-columns'}`,
         { trustRenderKey: true }
       );
     }
@@ -237,8 +249,8 @@ function renderDiligence(options = {}){
     const requestId = ++diligenceFilterRequestSeq;
     setElementHtmlWithRenderKey(
       body,
-      `<tr><td colspan="17" class="diligence-empty">${DILIGENCE_LOADING_MESSAGE}</td></tr>`,
-      'diligence-loading'
+      `<tr><td colspan="${getDiligenceColCount()}" class="diligence-empty">${DILIGENCE_LOADING_MESSAGE}</td></tr>`,
+      `diligence-loading::${getDiligenceColCount()}`
     );
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({

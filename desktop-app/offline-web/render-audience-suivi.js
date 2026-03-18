@@ -193,8 +193,9 @@ function orderSuiviRowsByCheckedSelection(rows){
 function renderSuivi(options = {}){
   if(!shouldRenderDeferredSection('suivi', options)) return;
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
-  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal, filterSuiviCheckedFirst ? 'checked-first' : 'default'].join('||');
-  syncPaginationFilterState('suivi', suiviFilterKey);
+  const suiviFilterCacheKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  const suiviRenderStateKey = [suiviFilterCacheKey, filterSuiviCheckedFirst ? 'checked-first' : 'default'].join('||');
+  syncPaginationFilterState('suivi', suiviRenderStateKey);
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
   if(!isManager() && getVisibleClients().length === 0){
@@ -202,6 +203,7 @@ function renderSuivi(options = {}){
     suiviVirtualLastRange = { start: -1, end: -1 };
     renderTableMessage(suiviBody, 10, SUIVI_NO_CLIENT_MESSAGE, 'suivi-no-client');
     renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+    updateSuiviCheckedCount();
     return;
   }
   const base = getSuiviBaseRowsCached();
@@ -224,20 +226,49 @@ function renderSuivi(options = {}){
       setElementHtmlWithRenderKey(
         suiviBody,
         pageData.rows.map(renderSuiviRowHtml).join(''),
-        `suivi-rows::${pageData.page}::${pageData.rows.length}::${filterSuiviCheckedFirst ? 'checked-first' : 'default'}`
+        [
+          'suivi-rows',
+          audienceRowsRawDataVersion,
+          suiviPrintSelectionVersion,
+          pageData.page,
+          pageData.rows.length,
+          suiviRenderStateKey
+        ].join('::'),
+        { trustRenderKey: true }
       );
     }
     renderPagination('suivi', pageData);
     updateSuiviCheckedCount();
     syncSuiviFilterOptions(base.rowsMeta);
   };
+  const queueFinalizeSuiviRender = (rows, expectedStateKey = suiviRenderStateKey, expectedRequestId = null)=>{
+    const run = ()=>{
+      const currentStateKey = [
+        $('filterGlobal')?.value?.toLowerCase() || '',
+        filterSuiviProcedure,
+        filterSuiviTribunal,
+        filterSuiviCheckedFirst ? 'checked-first' : 'default'
+      ].join('||');
+      if(currentStateKey !== expectedStateKey) return;
+      if(expectedRequestId !== null && expectedRequestId !== suiviFilterRequestSeq) return;
+      finalizeSuiviRender(rows);
+    };
+    if(!shouldDeferHeavySectionRender(rows.length, options)){
+      run();
+      return;
+    }
+    scheduleDeferredSectionRender('suivi', run, {
+      delayMs: 60,
+      onPending: ()=>renderTableMessage(suiviBody, 10, SUIVI_LOADING_MESSAGE, 'suivi-loading')
+    });
+  };
   let sortedRows = [];
-  if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
+  if(base === suiviFilteredRowsCacheSource && suiviFilterCacheKey === suiviFilteredRowsCacheKey){
     sortedRows = suiviFilteredRowsCacheOutput;
   }else if(noProcedureFilter && noTribunalFilter && noSearchFilter){
     sortedRows = base.sortedDefaultRows;
     suiviFilteredRowsCacheSource = base;
-    suiviFilteredRowsCacheKey = suiviFilterKey;
+    suiviFilteredRowsCacheKey = suiviFilterCacheKey;
     suiviFilteredRowsCacheOutput = sortedRows;
   }else if(!noSearchFilter && base.rawRows.length >= 1500 && !!getSuiviFilterWorker()){
     const narrowedRows = base.rawRows.filter(row=>{
@@ -266,11 +297,10 @@ function renderSuivi(options = {}){
         const currentStateKey = [
           $('filterGlobal')?.value?.toLowerCase() || '',
           filterSuiviProcedure,
-          filterSuiviTribunal,
-          filterSuiviCheckedFirst ? 'checked-first' : 'default'
+          filterSuiviTribunal
         ].join('||');
         if(requestId !== suiviFilterRequestSeq) return;
-        if(currentStateKey !== suiviFilterKey) return;
+        if(currentStateKey !== suiviFilterCacheKey) return;
         let nextRows;
         if(Array.isArray(filteredIndexes)){
           nextRows = filteredIndexes.map(idx=>narrowedRows[idx]).filter(Boolean);
@@ -296,9 +326,9 @@ function renderSuivi(options = {}){
           .slice()
           .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
         suiviFilteredRowsCacheSource = base;
-        suiviFilteredRowsCacheKey = suiviFilterKey;
+        suiviFilteredRowsCacheKey = suiviFilterCacheKey;
         suiviFilteredRowsCacheOutput = nextSortedRows;
-        finalizeSuiviRender(nextSortedRows);
+        queueFinalizeSuiviRender(nextSortedRows, suiviRenderStateKey, requestId);
       })
       .catch(()=>{
         if(requestId !== suiviFilterRequestSeq) return;
@@ -334,10 +364,10 @@ function renderSuivi(options = {}){
       .slice()
       .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
     suiviFilteredRowsCacheSource = base;
-    suiviFilteredRowsCacheKey = suiviFilterKey;
+    suiviFilteredRowsCacheKey = suiviFilterCacheKey;
     suiviFilteredRowsCacheOutput = sortedRows;
   }
-  finalizeSuiviRender(sortedRows);
+  queueFinalizeSuiviRender(sortedRows);
 }
 
 function renderAudience(options = {}){
@@ -393,7 +423,15 @@ function renderAudience(options = {}){
       setElementHtmlWithRenderKey(
         body,
         pageData.rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join(''),
-        `audience-rows::${pageData.page}::${pageData.rows.length}::${filterAudienceCheckedFirst ? 'checked-first' : 'default'}::${filterAudienceErrorsOnly ? 'errors' : 'all'}`
+        [
+          'audience-rows',
+          audienceRowsRawDataVersion,
+          audiencePrintSelectionVersion,
+          pageData.page,
+          pageData.rows.length,
+          audienceFilterStateKey
+        ].join('::'),
+        { trustRenderKey: true }
       );
     }
     renderPagination('audience', pageData);
@@ -403,6 +441,31 @@ function renderAudience(options = {}){
       updateAudienceCheckedCount();
     }
     queueSidebarSalleSessionsRender();
+  };
+  const queueFinalizeAudienceRender = (rows, expectedStateKey = audienceFilterStateKey, expectedRequestId = null)=>{
+    const run = ()=>{
+      const currentStateKey = [
+        $('filterAudience')?.value?.toLowerCase() || '',
+        filterAudienceColor,
+        filterAudienceProcedure,
+        filterAudienceTribunal,
+        filterAudienceDate,
+        filterAudienceErrorsOnly ? '1' : '0',
+        filterAudienceCheckedFirst ? 'checked-first' : 'default',
+        selectedAudienceColor
+      ].join('||');
+      if(currentStateKey !== expectedStateKey) return;
+      if(expectedRequestId !== null && expectedRequestId !== audienceFilterRequestSeq) return;
+      finalizeAudienceRender(rows);
+    };
+    if(!shouldDeferHeavySectionRender(rows.length, options)){
+      run();
+      return;
+    }
+    scheduleDeferredSectionRender('audience', run, {
+      delayMs: 60,
+      onPending: ()=>renderTableMessage(body, 13, AUDIENCE_LOADING_MESSAGE, 'audience-loading')
+    });
   };
 
   const baseRows = getAudienceRowsDedupedCached();
@@ -421,9 +484,9 @@ function renderAudience(options = {}){
   );
   if(!canUseWorker){
     if(exactMatchedRows){
-      finalizeAudienceRender(exactMatchedRows);
+      queueFinalizeAudienceRender(exactMatchedRows);
     }else{
-      finalizeAudienceRender(getAudienceRows());
+      queueFinalizeAudienceRender(getAudienceRows());
     }
     return;
   }
@@ -452,14 +515,14 @@ function renderAudience(options = {}){
       if(requestId !== audienceFilterRequestSeq) return;
       if(currentStateKey !== audienceFilterStateKey) return;
       if(!Array.isArray(filteredIndexes)){
-        finalizeAudienceRender(getAudienceRows());
+        queueFinalizeAudienceRender(getAudienceRows(), audienceFilterStateKey, requestId);
         return;
       }
-      finalizeAudienceRender(filteredIndexes.map(idx=>colorFilteredRows[idx]).filter(Boolean));
+      queueFinalizeAudienceRender(filteredIndexes.map(idx=>colorFilteredRows[idx]).filter(Boolean), audienceFilterStateKey, requestId);
     })
     .catch(()=>{
       if(requestId !== audienceFilterRequestSeq) return;
-      finalizeAudienceRender(getAudienceRows());
+      queueFinalizeAudienceRender(getAudienceRows(), audienceFilterStateKey, requestId);
     });
 }
 

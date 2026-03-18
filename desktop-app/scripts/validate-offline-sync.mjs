@@ -17,6 +17,7 @@ const pathsToCheck = [
   'render-audience-suivi.js',
   'render-diligence.js',
   'audience-ui-helpers.js',
+  'workers/export-xlsx.worker.js',
   'workers/diligence-filter.worker.js',
   'workers/suivi-filter.worker.js',
   'workers/audience-filter.worker.js',

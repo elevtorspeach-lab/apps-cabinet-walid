@@ -31,6 +31,8 @@
     </div>
 
     <button id="loginBtn" class="btn-success login-submit">Se connecter</button>
+    <p id="loginBootstrapHint" class="login-subtitle" style="display:none;"></p>
+    <button id="bootstrapSetupBtn" class="btn-primary login-submit" type="button" style="display:none;">Configurer le compte gestionnaire</button>
     <p id="errorMsg" class="error-msg">Nom d'utilisateur ou mot de passe incorrect</p>
   </div>
 </div>
@@ -611,7 +613,7 @@
               <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
               <label data-proc="Vérification de créance"><input type="checkbox" value="Vérification de créance" class="proc-check"> Vérification de créance</label>
               <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
-              <label data-proc="Declaration de creance"><input type="checkbox" value="Declaration de creance" class="proc-check"> Declaration de creance</label>
+              <label data-proc="Liquidation judiciaire"><input type="checkbox" value="Liquidation judiciaire" class="proc-check"> Liquidation judiciaire</label>
             </div>
             <div class="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">
@@ -872,10 +874,10 @@
 <div id="passwordSetupModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card password-setup-card">
     <div class="modal-head">
-      <h2><i class="fa-solid fa-key"></i> Sécuriser ce compte</h2>
+      <h2 id="passwordSetupTitle"><i class="fa-solid fa-key"></i> Sécuriser ce compte</h2>
     </div>
     <div class="modal-body password-setup-body">
-      <p class="password-setup-lead">
+      <p id="passwordSetupLead" class="password-setup-lead">
         Ce compte utilise encore un mot de passe de démarrage. Définissez maintenant un mot de passe fort pour continuer.
       </p>
       <div class="form-group full">
@@ -889,7 +891,7 @@
       <div id="passwordSetupError" class="error-msg password-setup-error">Veuillez définir un mot de passe valide.</div>
       <div class="password-setup-actions">
         <button id="passwordSetupSaveBtn" class="btn-success" type="button">
-          <i class="fa-solid fa-shield-halved"></i> Mettre à jour
+          <i class="fa-solid fa-shield-halved"></i> <span id="passwordSetupSaveLabel">Mettre à jour</span>
         </button>
         <button id="passwordSetupLogoutBtn" class="btn-danger" type="button">
           <i class="fa-solid fa-right-from-bracket"></i> Se déconnecter

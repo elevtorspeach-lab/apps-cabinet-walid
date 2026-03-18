@@ -1,7 +1,6 @@
 // ================== STATE ==================
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [] };
 const DEFAULT_MANAGER_USERNAME = 'walid';
-const DEFAULT_MANAGER_PASSWORD = '1234';
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -11,13 +10,16 @@ const PASSWORD_SALT_BYTES = 16;
 const PASSWORD_MIN_LENGTH = 10;
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 2 * 60 * 1000;
+const PASSWORD_SETUP_MODE_FORCED = 'forced';
+const PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL = 'bootstrap-local';
+const PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE = 'bootstrap-remote';
 
 function buildSeedUsers(){
   return [
     {
       id: 1,
       username: DEFAULT_MANAGER_USERNAME,
-      password: DEFAULT_MANAGER_PASSWORD,
+      password: '',
       passwordHash: '',
       passwordSalt: '',
       passwordVersion: 0,
@@ -121,6 +123,7 @@ let remoteSyncStreamConnected = false;
 let remoteSyncHealthCheckInFlight = false;
 let remoteSyncLastRecoveryRefreshAt = 0;
 let remoteSyncStreamRetryDelayMs = 0;
+let remoteBootstrapSetupRequired = false;
 let lastApiBaseSuccessAt = 0;
 let lastPersistedStateSignature = '';
 let lastLocalSnapshotSignature = '';
@@ -200,6 +203,7 @@ let diligenceVirtualRows = [];
 let diligenceVirtualLastRange = { start: -1, end: -1 };
 let diligenceVirtualRafId = null;
 let diligenceVirtualShowInjonctionColumns = false;
+let diligenceVirtualShowAssColumns = false;
 let diligenceRowsCache = null;
 let diligenceRowsCacheVersion = 0;
 let diligenceRowsCacheViewerKey = '';
@@ -332,7 +336,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.datePrevueExecution': 'Date prévue exécution',
   'procedureDetails.montantRecupere': 'Montant récupéré',
   'procedureDetails.instruction': 'Instruction',
-  'procedureDetails.declarationCreance': 'Déclaration de créance',
+  'procedureDetails.declarationCreance': 'Liquidation judiciaire',
   'procedureDetails.syndicName': 'Nom du syndic',
   'procedureDetails.dateNotification': 'Date notification',
   'procedureDetails.villeProcedure': 'Ville',
@@ -2765,6 +2769,10 @@ function previewSuiviSelectedRows(){
     alert('Cochez au moins une ligne pour afficher le fichier.');
     return;
   }
+  if(hasDesktopExportBridge()){
+    exportSuiviSelectedXLS({ openAfterExport: true }).catch(err=>console.error(err));
+    return;
+  }
   showExportPreviewModal({
     title: 'Aperçu Excel - Suivi des dossiers',
     subtitle: 'Lignes cochées prêtes à exporter',
@@ -3116,6 +3124,11 @@ async function loginRemoteSession(username, password){
       clearRemoteAuthSession();
       return { ok: false, reason: 'invalid' };
     }
+    if(res.status === 428){
+      clearRemoteAuthSession();
+      remoteBootstrapSetupRequired = true;
+      return { ok: false, reason: 'bootstrap_required' };
+    }
     if(!res.ok){
       throw new Error(`HTTP ${res.status}`);
     }
@@ -3124,6 +3137,7 @@ async function loginRemoteSession(username, password){
     if(!remoteAuthToken){
       return { ok: false, reason: 'invalid' };
     }
+    remoteBootstrapSetupRequired = false;
     markApiBaseHealthy(API_BASE);
     return { ok: true };
   }catch(err){
@@ -3159,11 +3173,14 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
   const startedAt = now();
   try{
     const res = await fetchWithTimeout(`${base}/health`, { cache: 'no-store' }, timeoutMs);
+    const payload = await res.clone().json().catch(()=>null);
+    remoteBootstrapSetupRequired = payload?.bootstrapSetupRequired === true;
     return {
       ok: !!res.ok,
       latencyMs: Math.max(0, now() - startedAt)
     };
   }catch(err){
+    remoteBootstrapSetupRequired = false;
     return {
       ok: false,
       latencyMs: null
@@ -4015,7 +4032,7 @@ function getProcedureShortLabel(procName){
     Nantissement: 'NANTI',
     Redressement: 'REDR',
     'Vérification de créance': 'VERIF',
-    'Declaration de creance': 'DECL',
+    'Liquidation judiciaire': 'LIQ',
     SFDC: 'SFDC',
     'S/bien': 'SBIEN',
     Injonction: 'INJ'
@@ -4524,7 +4541,7 @@ function parseProcedureToken(token){
   if(compact === 'nant' || compact === 'nantissement' || compact === 'nanti') return 'Nantissement';
   if(compact === 'redressement' || compact === 'redress' || compact === 'redr') return 'Redressement';
   if(compact === 'verificationdecreance' || compact === 'verificationcreance' || compact === 'verifcreance' || compact === 'verifdecreance' || compact === 'verif' || compact === 'creance') return 'Vérification de créance';
-  if(compact === 'liquidation' || compact === 'liq' || compact === 'declarationdecreance' || compact === 'declarationcreance' || compact === 'declcreance' || compact === 'decl') return 'Declaration de creance';
+  if(compact === 'liquidationjudiciaire' || compact === 'liquidation' || compact === 'liq' || compact === 'declarationdecreance' || compact === 'declarationcreance' || compact === 'declcreance' || compact === 'decl') return 'Liquidation judiciaire';
   if(compact === 'sfdc') return 'SFDC';
   if(compact === 'sbien') return 'S/bien';
   if(compact === 'inj' || compact === 'injonction') return 'Injonction';
@@ -5012,10 +5029,14 @@ function hasAnyStoredPassword(user){
   return hasStoredPasswordHash(user) || !!normalizeLoginPassword(user?.password || '');
 }
 
+function isBootstrapSetupRequiredForUsers(users){
+  const manager = (Array.isArray(users) ? users : []).find(
+    user=>String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  return !manager || !hasAnyStoredPassword(manager);
+}
+
 function getSeedBootstrapPasswordForUser(user){
-  const username = String(user?.username || '').trim().toLowerCase();
-  if(!username) return '';
-  if(username === DEFAULT_MANAGER_USERNAME) return DEFAULT_MANAGER_PASSWORD;
   return '';
 }
 
@@ -5236,9 +5257,52 @@ function clearPasswordSetupError(){
   errorMsg.style.display = 'none';
 }
 
-function openPasswordSetupModal(){
+function updateBootstrapSetupUi(options = {}){
+  const visible = options.visible === true;
+  const remote = options.remote === true;
+  const hint = $('loginBootstrapHint');
+  const btn = $('bootstrapSetupBtn');
+  const message = remote
+    ? 'Le serveur attend encore la configuration du mot de passe initial du compte gestionnaire.'
+    : 'Définissez un mot de passe initial fort pour activer le compte gestionnaire.';
+  if(hint){
+    hint.textContent = message;
+    hint.style.display = visible ? 'block' : 'none';
+  }
+  if(btn){
+    btn.dataset.mode = remote ? PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE : PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL;
+    btn.style.display = visible ? 'block' : 'none';
+  }
+}
+
+function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
   const modal = $('passwordSetupModal');
   if(!modal) return;
+  modal.dataset.mode = mode;
+  const title = $('passwordSetupTitle');
+  const lead = $('passwordSetupLead');
+  const saveLabel = $('passwordSetupSaveLabel');
+  if(mode === PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL){
+    if(title) title.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Initialiser le compte gestionnaire';
+    if(lead) lead.textContent = 'Aucun mot de passe initial n’est défini en local. Créez maintenant un mot de passe fort pour activer le compte gestionnaire.';
+    if(saveLabel) saveLabel.textContent = 'Initialiser le compte';
+    return;
+  }
+  if(mode === PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE){
+    if(title) title.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Initialiser le serveur';
+    if(lead) lead.textContent = 'Le serveur attend encore un mot de passe initial pour le compte gestionnaire. Définissez-le maintenant pour activer la connexion.';
+    if(saveLabel) saveLabel.textContent = 'Initialiser le serveur';
+    return;
+  }
+  if(title) title.innerHTML = '<i class="fa-solid fa-key"></i> Sécuriser ce compte';
+  if(lead) lead.textContent = 'Ce compte utilise encore un mot de passe de démarrage. Définissez maintenant un mot de passe fort pour continuer.';
+  if(saveLabel) saveLabel.textContent = 'Mettre à jour';
+}
+
+function openPasswordSetupModal(options = {}){
+  const modal = $('passwordSetupModal');
+  if(!modal) return;
+  configurePasswordSetupModal(options.mode || PASSWORD_SETUP_MODE_FORCED);
   if($('passwordSetupInput')) $('passwordSetupInput').value = '';
   if($('passwordSetupConfirmInput')) $('passwordSetupConfirmInput').value = '';
   clearPasswordSetupError();
@@ -5252,13 +5316,63 @@ function closePasswordSetupModal(){
   const modal = $('passwordSetupModal');
   if(!modal) return;
   modal.style.display = 'none';
+  modal.dataset.mode = PASSWORD_SETUP_MODE_FORCED;
   if($('passwordSetupInput')) $('passwordSetupInput').value = '';
   if($('passwordSetupConfirmInput')) $('passwordSetupConfirmInput').value = '';
   clearPasswordSetupError();
 }
 
+async function submitLocalBootstrapPasswordSetup(password){
+  USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+  const managerIndex = USERS.findIndex(
+    user=>String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  if(managerIndex === -1){
+    throw new Error('Compte gestionnaire introuvable.');
+  }
+  const updatedUser = await secureUserPassword(USERS[managerIndex], password, { requirePasswordChange: false });
+  USERS[managerIndex] = updatedUser;
+  USERS = ensureManagerUser(USERS);
+  await persistStateSliceNow('users', USERS, { source: 'bootstrap-password-setup-local' });
+  updateBootstrapSetupUi({ visible: false });
+  closePasswordSetupModal();
+  clearLoginError();
+  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('password')) $('password').value = '';
+  alert('Compte gestionnaire initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
+  $('password')?.focus();
+}
+
+async function submitRemoteBootstrapPasswordSetup(password){
+  if(LOCAL_ONLY_MODE){
+    throw new Error('Mode local uniquement.');
+  }
+  await resolveApiBase();
+  const res = await fetchWithTimeout(`${API_BASE}/auth/bootstrap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: DEFAULT_MANAGER_USERNAME,
+      password
+    })
+  }, API_STATE_SAVE_TIMEOUT_MS);
+  const payload = await res.json().catch(()=>({}));
+  if(!res.ok){
+    const message = String(payload?.message || `HTTP ${res.status}`);
+    throw new Error(message);
+  }
+  remoteBootstrapSetupRequired = false;
+  updateBootstrapSetupUi({ visible: false });
+  closePasswordSetupModal();
+  clearLoginError();
+  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('password')) $('password').value = '';
+  alert('Compte gestionnaire serveur initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
+  $('password')?.focus();
+}
+
 async function submitForcedPasswordChange(){
-  if(!currentUser) return;
+  const mode = String($('passwordSetupModal')?.dataset.mode || PASSWORD_SETUP_MODE_FORCED);
   const password = normalizeLoginPassword($('passwordSetupInput')?.value || '');
   const confirmPassword = normalizeLoginPassword($('passwordSetupConfirmInput')?.value || '');
   const passwordPolicyError = getPasswordPolicyError(password);
@@ -5270,14 +5384,26 @@ async function submitForcedPasswordChange(){
     showPasswordSetupError('La confirmation du mot de passe ne correspond pas.');
     return;
   }
-  const userIndex = USERS.findIndex(u=>u.id === currentUser.id);
-  if(userIndex === -1){
-    showPasswordSetupError('Compte introuvable. Reconnectez-vous.');
-    return;
-  }
   const currentSaveBtn = $('passwordSetupSaveBtn');
   if(currentSaveBtn) currentSaveBtn.disabled = true;
   try{
+    if(mode === PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL){
+      await submitLocalBootstrapPasswordSetup(password);
+      return;
+    }
+    if(mode === PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE){
+      await submitRemoteBootstrapPasswordSetup(password);
+      return;
+    }
+    if(!currentUser){
+      showPasswordSetupError('Compte introuvable. Reconnectez-vous.');
+      return;
+    }
+    const userIndex = USERS.findIndex(u=>u.id === currentUser.id);
+    if(userIndex === -1){
+      showPasswordSetupError('Compte introuvable. Reconnectez-vous.');
+      return;
+    }
     const updatedUser = await secureUserPassword(USERS[userIndex], password, { requirePasswordChange: false });
     USERS[userIndex] = updatedUser;
     USERS = ensureManagerUser(USERS);
@@ -6544,10 +6670,6 @@ function ensureManagerUser(users){
     validUsers[defaultManagerIdx].username = DEFAULT_MANAGER_USERNAME;
     validUsers[defaultManagerIdx].role = 'manager';
     validUsers[defaultManagerIdx].clientIds = [];
-    if(!hasAnyStoredPassword(validUsers[defaultManagerIdx])){
-      validUsers[defaultManagerIdx].password = DEFAULT_MANAGER_PASSWORD;
-      validUsers[defaultManagerIdx].requirePasswordChange = true;
-    }
     return validUsers;
   }
 
@@ -6555,7 +6677,7 @@ function ensureManagerUser(users){
   validUsers.unshift({
     id: Math.max(1, maxId + 1),
     username: DEFAULT_MANAGER_USERNAME,
-    password: DEFAULT_MANAGER_PASSWORD,
+    password: '',
     passwordHash: '',
     passwordSalt: '',
     passwordVersion: 0,
@@ -8865,7 +8987,7 @@ async function applyExcelImport(payload, options = {}){
   }
 
   const importIgnoredRows = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Nantissement', 'Redressement', 'Vérification de créance', 'Declaration de creance', 'SFDC', 'S/bien', 'Injonction']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction']);
   const defaultDossierProceduresWhenMissing = ['ASS', 'Restitution', 'SFDC'];
   let importedDossiersCount = 0;
   let linkedAudiencesCount = 0;
@@ -9960,6 +10082,11 @@ async function initApplication(){
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
+  const localBootstrapSetupRequired = LOCAL_ONLY_MODE && isBootstrapSetupRequiredForUsers(USERS);
+  updateBootstrapSetupUi({
+    visible: localBootstrapSetupRequired || (!LOCAL_ONLY_MODE && remoteBootstrapSetupRequired),
+    remote: !LOCAL_ONLY_MODE && remoteBootstrapSetupRequired
+  });
   const startupAudienceReconciliation = reconcileAudienceOrphanDossiers();
   if(startupAudienceReconciliation.matchedDossiers > 0){
     handleDossierDataChange({ audience: true });
@@ -9987,6 +10114,15 @@ async function initApplication(){
   );
   warmupExcelLibrariesOnIdle();
   showView('dashboard', { warmup: false });
+  if(localBootstrapSetupRequired){
+    setTimeout(()=>{
+      openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL });
+    }, 120);
+  }else if(!LOCAL_ONLY_MODE && remoteBootstrapSetupRequired){
+    setTimeout(()=>{
+      openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE });
+    }, 120);
+  }
   if(pendingLoginRetryAfterInit){
     setTimeout(()=>login(), 0);
   }
@@ -10030,6 +10166,10 @@ function setupEvents(){
   $('recycleLink')?.addEventListener('click', ()=>showView('recycle'));
 
   $('loginBtn').onclick = login;
+  $('bootstrapSetupBtn')?.addEventListener('click', ()=>{
+    const mode = String($('bootstrapSetupBtn')?.dataset.mode || PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL);
+    openPasswordSetupModal({ mode });
+  });
   $('username')?.addEventListener('keydown', (e)=>{
     if(e.key === 'Enter') login();
   });
@@ -10447,7 +10587,13 @@ async function login(){
       const remoteAuth = await loginRemoteSession(usernameInput, passwordInput);
       if(remoteAuth.ok){
         remoteLoginState = 'ok';
+        updateBootstrapSetupUi({ visible: false });
         await loadPersistedState();
+      }else if(remoteAuth.reason === 'bootstrap_required'){
+        updateBootstrapSetupUi({ visible: true, remote: true });
+        showLoginError('Configurez d’abord le mot de passe initial du compte gestionnaire.');
+        openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE });
+        return;
       }else if(remoteAuth.reason === 'invalid'){
         showLoginError(registerFailedLoginAttempt());
         return;
@@ -11321,7 +11467,7 @@ function renderProcedureBadges(procedureText){
     if(name === 'Nantissement') cls = 'proc-nantissement';
     if(name === 'Redressement') cls = 'proc-redressement';
     if(name === 'Vérification de créance') cls = 'proc-verification-creance';
-    if(name === 'Declaration de creance') cls = 'proc-declaration-creance';
+    if(name === 'Liquidation judiciaire') cls = 'proc-declaration-creance';
     if(name === 'SFDC') cls = 'proc-sfdc';
     if(name === 'S/bien') cls = 'proc-sbien';
     if(name === 'Injonction') cls = 'proc-injonction';
@@ -11523,7 +11669,7 @@ function editDossier(clientId, index){
   document.querySelectorAll('.proc-check').forEach(cb=>cb.checked=false);
   document.querySelectorAll('.checkbox-group label').forEach(l=>l.classList.remove('active'));
 
-  const standard = new Set(['ASS','Restitution','Nantissement','Redressement','Vérification de créance','Declaration de creance','SFDC','S/bien','Injonction']);
+  const standard = new Set(['ASS','Restitution','Nantissement','Redressement','Vérification de créance','Liquidation judiciaire','SFDC','S/bien','Injonction']);
   const procs = normalizeProcedures(d);
   procedureMontantGroups = normalizeProcedureMontantGroups(d.montantByProcedure, procs, d.montant || '');
   if(!hasMultipleAffectationDatesForSelection(procs)){
@@ -12242,23 +12388,26 @@ function getDiligenceAutoSizeWidthCh(field, text){
   const rawField = String(field || '').trim();
   const value = String(text || '').trim();
   const minByField = {
-    referenceClient: 14,
-    juge: 12,
-    attOrdOrOrdOk: 6,
-    executionNo: 10,
-    ville: 10,
-    attDelegationOuDelegat: 6,
-    huissier: 10,
-    sort: 8,
-    tribunal: 12
+    referenceClient: 18,
+    juge: 16,
+    attOrdOrOrdOk: 10,
+    executionNo: 14,
+    ville: 14,
+    attDelegationOuDelegat: 10,
+    huissier: 14,
+    sort: 12,
+    tribunal: 16
   };
   const maxByField = {
-    referenceClient: 24,
-    juge: 26,
-    executionNo: 28,
-    ville: 20,
-    huissier: 28,
-    tribunal: 28
+    referenceClient: 34,
+    juge: 34,
+    executionNo: 34,
+    ville: 26,
+    huissier: 34,
+    tribunal: 36,
+    sort: 18,
+    attOrdOrOrdOk: 14,
+    attDelegationOuDelegat: 16
   };
   const minCh = minByField[rawField] || 8;
   const maxCh = maxByField[rawField] || 22;
@@ -12582,7 +12731,7 @@ function getFilteredDiligenceRows(allRows){
   return orderedRows;
 }
 
-function exportDiligenceXLS(){
+function exportDiligenceXLS(options = {}){
   return runWithHeavyUiOperation(async ()=>{
     const dataset = await buildDiligenceSelectedExportDatasetAsync();
     if(!dataset.rows.length){
@@ -12595,7 +12744,8 @@ function exportDiligenceXLS(){
       subtitle: 'Diligence',
       sheetName: 'Diligence',
       colWidths: dataset.colWidths,
-      filename: 'diligence_export.xlsx'
+      filename: 'diligence_export.xlsx',
+      openAfterExport: options?.openAfterExport === true
     });
   });
 }
@@ -12606,55 +12756,51 @@ function getDiligenceExportColumnDefinitions(){
       key: 'clientName',
       header: 'Client',
       width: 24,
-      mandatory: true,
       getValue: (row)=>row?.clientName || ''
     },
     {
       key: 'referenceClient',
       header: 'Référence client',
       width: 26,
-      mandatory: true,
       getValue: (row)=>row?.dossier?.referenceClient || ''
     },
     {
       key: 'nom',
       header: 'Nom',
       width: 30,
-      mandatory: true,
       getValue: (row)=>row?.dossier?.debiteur || ''
     },
     {
       key: 'dateDepot',
       header: 'Date dépôt',
       width: 20,
-      mandatory: true,
       getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || ''
     },
     {
       key: 'referenceDossier',
       header: 'Référence dossier',
       width: 26,
-      mandatory: true,
       getValue: (row)=>row?.details?.referenceClient || ''
     },
     {
       key: 'juge',
       header: 'Juge',
       width: 28,
+      assOnly: true,
       getValue: (row)=>row?.details?.juge || ''
     },
     {
       key: 'sortAudience',
       header: 'Sort',
       width: 24,
+      assOnly: true,
       getValue: (row)=>String(row?.procedure || '').trim() === 'ASS' ? (row?.details?.sort || '') : ''
     },
     {
       key: 'ordonnance',
       header: 'Ordonnance',
       width: 18,
-      mandatory: true,
-      getValue: (row)=>getDiligenceOrdonnanceLabelFromDetails(row?.details) || 'ATT ORD'
+      getValue: (row)=>getDiligenceOrdonnanceLabelFromDetails(row?.details) || ''
     },
     {
       key: 'notificationNo',
@@ -12690,7 +12836,7 @@ function getDiligenceExportColumnDefinitions(){
       key: 'delegation',
       header: 'Délégation',
       width: 18,
-      getValue: (row)=>normalizeDiligenceAttOk(row?.details?.attDelegationOuDelegat || '') || 'att'
+      getValue: (row)=>normalizeDiligenceAttOk(row?.details?.attDelegationOuDelegat || '') || ''
     },
     {
       key: 'huissier',
@@ -12713,11 +12859,17 @@ function getDiligenceExportColumnDefinitions(){
   ];
 }
 
+function shouldShowDiligenceAssColumnsForRows(rows){
+  if(String(filterDiligenceProcedure || '').trim() === 'ASS') return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>String(row?.procedure || '').trim() === 'ASS');
+}
+
 function finalizeDiligenceExportDataset(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
-  const columns = getDiligenceExportColumnDefinitions();
+  const showAssColumns = shouldShowDiligenceAssColumnsForRows(sourceRows);
+  const columns = getDiligenceExportColumnDefinitions().filter((column)=>!column.assOnly || showAssColumns);
   const activeColumns = columns.filter((column)=>{
-    if(column.mandatory) return true;
     return sourceRows.some((row)=>{
       const value = typeof column.getValue === 'function' ? column.getValue(row) : '';
       return String(value || '').trim() !== '';
@@ -12783,13 +12935,17 @@ function previewDiligenceSelectedRows(){
     alert('Cochez au moins une ligne pour afficher le fichier.');
     return;
   }
+  if(hasDesktopExportBridge()){
+    exportDiligenceXLS({ openAfterExport: true }).catch(err=>console.error(err));
+    return;
+  }
   showExportPreviewModal({
     title: 'Aperçu Excel - Diligence',
     subtitle: 'Lignes cochées prêtes à exporter',
     headers: dataset.headers,
     rows: dataset.tableRows,
     exportLabel: 'Exporter Diligence Excel',
-    onExport: exportDiligenceXLS
+    onExport: ()=>exportDiligenceXLS({ openAfterExport: true })
   });
 }
 
@@ -13852,13 +14008,17 @@ function previewAudienceSelectedRows(){
     alert('Cochez les dossiers à afficher dans le fichier.');
     return;
   }
+  if(hasDesktopExportBridge()){
+    exportAudienceXLS({ openAfterExport: true }).catch(err=>console.error(err));
+    return;
+  }
   showExportPreviewModal({
     title: "Aperçu Excel - Export d'audience",
     subtitle: dataset.subtitle,
     headers: dataset.headers,
     rows: dataset.tableRows,
     exportLabel: "Exporter Audience Excel",
-    onExport: exportAudienceXLS
+    onExport: ()=>exportAudienceXLS({ openAfterExport: true })
   });
 }
 
@@ -14468,7 +14628,7 @@ async function exportAudienceRegularXLS(){
   });
 }
 
-async function exportAudienceXLS(){
+async function exportAudienceXLS(options = {}){
   return runWithHeavyUiOperation(async ()=>{
     const dataset = await buildAudienceSelectedExportDatasetAsync();
     if(!dataset.rows.length){
@@ -14482,7 +14642,8 @@ async function exportAudienceXLS(){
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
       colWidths: dataset.colWidths,
-      filename: 'audience_export.xlsx'
+      filename: 'audience_export.xlsx',
+      openAfterExport: options?.openAfterExport === true
     });
   });
 }
@@ -14816,7 +14977,7 @@ function getProcedureColorClass(procName){
   if(base === 'Nantissement') return 'proc-nantissement';
   if(base === 'Redressement') return 'proc-redressement';
   if(base === 'Vérification de créance') return 'proc-verification-creance';
-  if(base === 'Declaration de creance') return 'proc-declaration-creance';
+  if(base === 'Liquidation judiciaire') return 'proc-declaration-creance';
   if(base === 'SFDC') return 'proc-sfdc';
   if(base === 'S/bien') return 'proc-sbien';
   if(base === 'Injonction') return 'proc-injonction';
@@ -14990,10 +15151,10 @@ function renderProcedureDetails(forceList, forceDraft){
         ${tribunalFieldHtml}
       `;
     }
-    if(baseProc === 'Redressement' || baseProc === 'Declaration de creance'){
+    if(baseProc === 'Redressement' || baseProc === 'Liquidation judiciaire'){
       const fixedLabel = baseProc === 'Redressement'
-        ? 'Declaration de creance'
-        : 'Declaration de creance';
+        ? 'Liquidation judiciaire'
+        : 'Liquidation judiciaire';
       fieldsHtml = `
         <input type="text" data-field="declarationCreance" class="proc-fixed-input" value="${escapeAttr(fixedLabel)}" readonly>
         <input type="text" data-field="syndicName" placeholder="Nom du syndic">

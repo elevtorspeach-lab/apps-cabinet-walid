@@ -36,6 +36,11 @@ jobs:
           cp index.html dist/
           cp app.js dist/
           cp style.css dist/
+          cp state-persistence.js dist/
+          cp render-dashboard.js dist/
+          cp render-audience-suivi.js dist/
+          cp render-diligence.js dist/
+          cp audience-ui-helpers.js dist/
           cp -R vendor dist/vendor
           cp -R workers dist/workers
 

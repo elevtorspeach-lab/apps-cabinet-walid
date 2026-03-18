@@ -15,8 +15,8 @@ const SSL_DIR = path.join(__dirname, 'ssl');
 const SSL_KEY_FILE = process.env.SSL_KEY_FILE || path.join(SSL_DIR, 'local.key');
 const SSL_CERT_FILE = process.env.SSL_CERT_FILE || path.join(SSL_DIR, 'local.crt');
 const DEFAULT_MANAGER_USERNAME = 'walid';
-const DEFAULT_MANAGER_PASSWORD = '1234';
 const PASSWORD_HASH_ITERATIONS = 120000;
+const PASSWORD_MIN_LENGTH = 10;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -80,12 +80,16 @@ function hasStoredPasswordHash(user) {
   return !!String(user?.passwordHash || '').trim() && !!String(user?.passwordSalt || '').trim();
 }
 
+function hasAnyStoredPassword(user) {
+  return hasStoredPasswordHash(user) || !!normalizeLoginPassword(user?.password || '');
+}
+
 function buildBootstrapUsers() {
   return [
     {
       id: 1,
       username: DEFAULT_MANAGER_USERNAME,
-      password: DEFAULT_MANAGER_PASSWORD,
+      password: '',
       passwordHash: '',
       passwordSalt: '',
       passwordVersion: 0,
@@ -100,6 +104,78 @@ function buildBootstrapUsers() {
 function getAuthUsersFromState(state) {
   const users = Array.isArray(state?.users) ? state.users.filter((user) => user && typeof user === 'object') : [];
   return users.length ? users : buildBootstrapUsers();
+}
+
+function ensureManagerUser(users) {
+  const validUsers = Array.isArray(users) ? users.filter((user) => user && typeof user === 'object').map((user) => ({ ...user })) : [];
+  const existingUsernames = new Set(
+    validUsers.map((user) => String(user?.username || '').trim().toLowerCase()).filter(Boolean)
+  );
+  buildBootstrapUsers().forEach((seedUser) => {
+    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
+    if (!usernameKey || existingUsernames.has(usernameKey)) return;
+    validUsers.push({ ...seedUser });
+    existingUsernames.add(usernameKey);
+  });
+  const managerIndex = validUsers.findIndex(
+    (user) => String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  if (managerIndex >= 0) {
+    validUsers[managerIndex].username = DEFAULT_MANAGER_USERNAME;
+    validUsers[managerIndex].role = 'manager';
+    validUsers[managerIndex].clientIds = [];
+    return validUsers;
+  }
+  return validUsers;
+}
+
+function isBootstrapSetupRequired(state) {
+  const users = ensureManagerUser(getAuthUsersFromState(state));
+  const manager = users.find(
+    (user) => String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  return !manager || !hasAnyStoredPassword(manager);
+}
+
+function getPasswordPolicyError(password) {
+  const value = normalizeLoginPassword(password);
+  if (!value) return 'Password is required.';
+  if (value.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+  }
+  if (!/[a-z]/i.test(value) || !/\d/.test(value)) {
+    return 'Password must include at least one letter and one number.';
+  }
+  return '';
+}
+
+function secureServerUserPassword(user, rawPassword, options = {}) {
+  const normalizedPassword = normalizeLoginPassword(rawPassword);
+  const requirePasswordChange = options.requirePasswordChange === true;
+  const baseUser = user && typeof user === 'object' ? { ...user } : {};
+  if (!normalizedPassword) {
+    return {
+      ...baseUser,
+      requirePasswordChange
+    };
+  }
+  const passwordSalt = crypto.randomBytes(16).toString('hex');
+  const passwordHash = crypto.pbkdf2Sync(
+    normalizedPassword,
+    Buffer.from(passwordSalt, 'hex'),
+    PASSWORD_HASH_ITERATIONS,
+    32,
+    'sha256'
+  ).toString('hex');
+  return {
+    ...baseUser,
+    password: '',
+    passwordHash,
+    passwordSalt,
+    passwordVersion: 1,
+    passwordUpdatedAt: new Date().toISOString(),
+    requirePasswordChange
+  };
 }
 
 function verifyServerUserPassword(user, rawPassword) {
@@ -989,11 +1065,60 @@ function applyDossierPatch(currentState, body) {
 
 async function handleHealth(req, res) {
   await ensureDataFile();
-  res.json({ ok: true, service: 'cabinet-api', ts: new Date().toISOString() });
+  const state = await readState();
+  res.json({
+    ok: true,
+    service: 'cabinet-api',
+    ts: new Date().toISOString(),
+    bootstrapSetupRequired: isBootstrapSetupRequired(state)
+  });
 }
 
 app.get('/health', handleHealth);
 app.get('/api/health', handleHealth);
+
+app.post('/api/auth/bootstrap', async (req, res) => {
+  await ensureDataFile();
+  const state = await readState();
+  if (!isBootstrapSetupRequired(state)) {
+    return res.status(409).json({ ok: false, code: 'BOOTSTRAP_ALREADY_CONFIGURED', message: 'Bootstrap account is already configured.' });
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const username = String(body.username || DEFAULT_MANAGER_USERNAME).trim().toLowerCase();
+  const password = normalizeLoginPassword(body.password || '');
+  if (username !== DEFAULT_MANAGER_USERNAME) {
+    return res.status(400).json({ ok: false, code: 'INVALID_USERNAME', message: 'Bootstrap can only configure the manager account.' });
+  }
+  const passwordPolicyError = getPasswordPolicyError(password);
+  if (passwordPolicyError) {
+    return res.status(400).json({ ok: false, code: 'INVALID_PASSWORD', message: passwordPolicyError });
+  }
+  const users = ensureManagerUser(getAuthUsersFromState(state));
+  const managerIndex = users.findIndex(
+    (user) => String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  if (managerIndex === -1) {
+    return res.status(500).json({ ok: false, code: 'BOOTSTRAP_MANAGER_MISSING', message: 'Bootstrap manager account is missing.' });
+  }
+  users[managerIndex] = secureServerUserPassword(users[managerIndex], password, { requirePasswordChange: false });
+  const saved = await writeState(
+    {
+      ...state,
+      users
+    },
+    { previousState: state }
+  );
+  return res.json({
+    ok: true,
+    version: saved.version,
+    updatedAt: saved.updatedAt,
+    user: {
+      username: DEFAULT_MANAGER_USERNAME,
+      role: 'manager',
+      requirePasswordChange: false
+    }
+  });
+});
 
 app.post('/api/auth/login', async (req, res) => {
   await ensureDataFile();
@@ -1001,6 +1126,13 @@ app.post('/api/auth/login', async (req, res) => {
   const username = String(body.username || '').trim().toLowerCase();
   const password = normalizeLoginPassword(body.password || '');
   const state = await readState();
+  if (isBootstrapSetupRequired(state)) {
+    return res.status(428).json({
+      ok: false,
+      code: 'BOOTSTRAP_REQUIRED',
+      message: 'Initial manager password must be configured before login.'
+    });
+  }
   const user = getAuthUsersFromState(state).find(
     (entry) => String(entry?.username || '').trim().toLowerCase() === username
   );

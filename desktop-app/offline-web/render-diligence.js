@@ -1,88 +1,57 @@
-const DILIGENCE_EMPTY_MESSAGE = 'Aucun dossier SFDC/S-bien/Injonction trouvé.';
+const DILIGENCE_EMPTY_MESSAGE = 'Aucun dossier ASS/SFDC/S-bien/Injonction trouvé.';
 const DILIGENCE_LOADING_MESSAGE = 'Recherche diligence en cours...';
-const DILIGENCE_HEAD_HTML_DEFAULT = `
-  <th>Client</th>
-  <th>Référence client</th>
-  <th>Débiteur</th>
-  <th>Date dépôt</th>
-  <th>Référence dossier</th>
-  <th>Ordonnance</th>
-  <th>Execution N°</th>
-  <th>Ville</th>
-  <th>Délégation</th>
-  <th>Huissier</th>
-  <th>Sort</th>
-  <th>Tribunal</th>
-`;
-const DILIGENCE_HEAD_HTML_INJONCTION = `
-  <th>Client</th>
-  <th>Référence client</th>
-  <th>Débiteur</th>
-  <th>Date dépôt</th>
-  <th>Référence dossier</th>
-  <th>Ordonnance</th>
-  <th>Notification N°</th>
-  <th>Statut notification</th>
-  <th>Sort notification</th>
-  <th>Certificat non appel</th>
-  <th>Execution N°</th>
-  <th>Ville</th>
-  <th>Délégation</th>
-  <th>Huissier</th>
-  <th>Sort</th>
-  <th>Tribunal</th>
-`;
+function shouldShowDiligenceAssColumns(rows){
+  if(String(filterDiligenceProcedure || '').trim() === 'ASS') return true;
+  const list = Array.isArray(rows) ? rows : [];
+  return !!list.length && list.every(row=>String(row?.procedure || '').trim() === 'ASS');
+}
 
-function renderDiligenceRowHtml(row, showInjonctionColumns){
+function getDiligenceColCount(){
+  return diligenceVirtualShowAssColumns ? 17 : 15;
+}
+
+function buildDiligenceHeadHtml(){
+  return `
+    <th>Client</th>
+    <th>Référence client</th>
+    <th>Nom</th>
+    <th>Date dépôt</th>
+    <th>Référence dossier</th>
+    ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
+    <th>Ordonnance</th>
+    <th>Notification N°</th>
+    <th>Sort notification</th>
+    <th>Certificat non appel</th>
+    <th>Execution N°</th>
+    <th>Ville</th>
+    <th>Délégation</th>
+    <th>Huissier</th>
+    <th>Sort exécution</th>
+    <th>Tribunal</th>
+  `;
+}
+
+function renderDiligenceRowHtml(row){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
+  const isAssProcedure = String(row?.procedure || '').trim() === 'ASS';
   const isChecked = isDiligenceSelectedForPrint(row);
   const refClientValue = row.dossier?.referenceClient || '';
   const refValue = row.details?.referenceClient || '';
+  const judgeValue = row.details?.juge || '';
+  const sortValue = row.details?.sort || '';
   const ordValue = getDiligenceOrdonnanceStatus(
     row.details?.attOrdOrOrdOk || '',
     row.details?.notificationNo || ''
   );
   const notificationSortValue = row.details?.notificationSort || '';
   const notificationNoValue = row.details?.notificationNo || '';
-  const notificationStatusValue = row.details?.notificationStatus || '';
   const certificatNonAppelValue = row.details?.certificatNonAppelStatus || '';
   const executionValue = row.details?.executionNo || '';
   const villeValue = row.dossier?.ville || '';
   const delegationValue = row.details?.attDelegationOuDelegat || '';
   const huissierValue = row.details?.huissier || '';
-  const sortValue = row.details?.sort || '';
+  const executionSortValue = !isAssProcedure ? (row.details?.sort || '') : '';
   const tribunalValue = row.details?.tribunal || '';
-  if(showInjonctionColumns){
-    return `
-    <tr>
-      <td>
-        <label class="diligence-client-cell">
-          <input
-            type="checkbox"
-            class="diligence-print-check"
-            ${isChecked ? 'checked' : ''}
-            onchange="toggleDiligencePrintSelectionEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}', this.checked)">
-          <span>${escapeHtml(row.clientName || '-')}</span>
-        </label>
-      </td>
-      <td>${escapeHtml(refClientValue || '-')}</td>
-      <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
-      <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationStatus', notificationStatusValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationSort', notificationSortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attDelegationOuDelegat', delegationValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'huissier', huissierValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
-    </tr>
-  `;
-  }
   return `
     <tr>
       <td>
@@ -99,12 +68,17 @@ function renderDiligenceRowHtml(row, showInjonctionColumns){
       <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
       <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
+      ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'juge', judgeValue)}</td>` : ''}
+      ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>` : ''}
       <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
+      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationNo', notificationNoValue)}</td>
+      <td>${renderDiligenceEditableCell(row, procEncoded, 'notificationSort', notificationSortValue)}</td>
+      <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'attDelegationOuDelegat', delegationValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'huissier', huissierValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
+      <td>${!isAssProcedure ? renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue) : escapeHtml('-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
     </tr>
   `;
@@ -114,7 +88,7 @@ function renderDiligenceVirtualWindow(force = false){
   const body = $('diligenceBody');
   if(!body) return;
   const rows = Array.isArray(diligenceVirtualRows) ? diligenceVirtualRows : [];
-  const colCount = diligenceVirtualShowInjonctionColumns ? 16 : 12;
+  const colCount = getDiligenceColCount();
   if(!rows.length){
     diligenceVirtualLastRange = { start: -1, end: -1 };
     setElementHtmlWithRenderKey(
@@ -138,7 +112,7 @@ function renderDiligenceVirtualWindow(force = false){
     : '';
   const rowsHtml = rows
     .slice(start, end)
-    .map(row=>renderDiligenceRowHtml(row, diligenceVirtualShowInjonctionColumns))
+    .map(row=>renderDiligenceRowHtml(row))
     .join('');
   body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
   applyDiligenceAutoSizing(body);
@@ -195,14 +169,15 @@ function renderDiligence(options = {}){
   syncDiligenceTribunalFilter(allRows);
   const finalizeDiligenceRender = (rows)=>{
     const orderedRows = orderDiligenceRowsByCheckedSelection(rows);
-    const showInjonctionColumns = orderedRows.some(row=>String(row?.procedure || '').trim() === 'Injonction');
-    const colCount = showInjonctionColumns ? 16 : 12;
+    diligenceVirtualShowAssColumns = shouldShowDiligenceAssColumns(orderedRows);
+    const colCount = getDiligenceColCount();
 
     if(headRow){
       setElementHtmlWithRenderKey(
         headRow,
-        showInjonctionColumns ? DILIGENCE_HEAD_HTML_INJONCTION : DILIGENCE_HEAD_HTML_DEFAULT,
-        showInjonctionColumns ? 'diligence-head::injonction' : 'diligence-head::default'
+        buildDiligenceHeadHtml(),
+        `diligence-head::${diligenceVirtualShowAssColumns ? 'ass-columns' : 'compact-columns'}`,
+        { trustRenderKey: true }
       );
     }
 
@@ -226,21 +201,36 @@ function renderDiligence(options = {}){
         `diligence-empty::${colCount}`
       );
       renderPagination('diligence', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      updateDiligenceCheckedCount();
       return;
     }
 
     const pageData = paginateRows(orderedRows, 'diligence');
     const useVirtual = pageData.rows.length >= DILIGENCE_VIRTUAL_MIN_ROWS;
     diligenceVirtualRows = pageData.rows;
-    diligenceVirtualShowInjonctionColumns = showInjonctionColumns;
+    diligenceVirtualShowInjonctionColumns = false;
     diligenceVirtualLastRange = { start: -1, end: -1 };
     if(useVirtual){
       renderDiligenceVirtualWindow(true);
     }else{
-      body.innerHTML = pageData.rows.map(row=>renderDiligenceRowHtml(row, showInjonctionColumns)).join('');
+      setElementHtmlWithRenderKey(
+        body,
+        pageData.rows.map(row=>renderDiligenceRowHtml(row)).join(''),
+        [
+          'diligence-rows',
+          audienceRowsRawDataVersion,
+          diligencePrintSelectionVersion,
+          pageData.page,
+          pageData.rows.length,
+          'comprehensive',
+          diligenceFilterStateKey
+        ].join('::'),
+        { trustRenderKey: true }
+      );
       applyDiligenceAutoSizing(body);
     }
     renderPagination('diligence', pageData);
+    updateDiligenceCheckedCount();
   };
 
   if(diligenceQuery && allRows.length >= 1200 && !!getDiligenceFilterWorker()){
@@ -259,8 +249,8 @@ function renderDiligence(options = {}){
     const requestId = ++diligenceFilterRequestSeq;
     setElementHtmlWithRenderKey(
       body,
-      `<tr><td colspan="16" class="diligence-empty">${DILIGENCE_LOADING_MESSAGE}</td></tr>`,
-      'diligence-loading'
+      `<tr><td colspan="${getDiligenceColCount()}" class="diligence-empty">${DILIGENCE_LOADING_MESSAGE}</td></tr>`,
+      `diligence-loading::${getDiligenceColCount()}`
     );
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
