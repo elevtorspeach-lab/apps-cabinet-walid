@@ -202,7 +202,8 @@ function renderDiligence(options = {}){
       setElementHtmlWithRenderKey(
         headRow,
         showInjonctionColumns ? DILIGENCE_HEAD_HTML_INJONCTION : DILIGENCE_HEAD_HTML_DEFAULT,
-        showInjonctionColumns ? 'diligence-head::injonction' : 'diligence-head::default'
+        showInjonctionColumns ? 'diligence-head::injonction' : 'diligence-head::default',
+        { trustRenderKey: true }
       );
     }
 
@@ -237,7 +238,20 @@ function renderDiligence(options = {}){
     if(useVirtual){
       renderDiligenceVirtualWindow(true);
     }else{
-      body.innerHTML = pageData.rows.map(row=>renderDiligenceRowHtml(row, showInjonctionColumns)).join('');
+      setElementHtmlWithRenderKey(
+        body,
+        pageData.rows.map(row=>renderDiligenceRowHtml(row, showInjonctionColumns)).join(''),
+        [
+          'diligence-rows',
+          audienceRowsRawDataVersion,
+          diligencePrintSelectionVersion,
+          pageData.page,
+          pageData.rows.length,
+          showInjonctionColumns ? 'injonction' : 'default',
+          diligenceFilterStateKey
+        ].join('::'),
+        { trustRenderKey: true }
+      );
       applyDiligenceAutoSizing(body);
     }
     renderPagination('diligence', pageData);

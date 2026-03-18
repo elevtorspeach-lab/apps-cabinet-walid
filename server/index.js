@@ -878,6 +878,33 @@ async function persistJournalMutation(mutation) {
   }
 }
 
+async function persistJournalMutations(mutations) {
+  const safeMutations = (Array.isArray(mutations) ? mutations : [])
+    .filter((mutation) => mutation && typeof mutation === 'object');
+  if (!safeMutations.length) {
+    throw new Error('No mutations to persist.');
+  }
+  let saved = await readState();
+  for (const mutation of safeMutations) {
+    saved = applyMutationToState(saved, mutation);
+  }
+  setCachedState(saved);
+  const journalPayload = `${safeMutations.map((mutation) => JSON.stringify(mutation)).join('\n')}\n`;
+  try {
+    await fsp.appendFile(STATE_JOURNAL_FILE, journalPayload, 'utf8');
+    pendingJournalMutationCount += safeMutations.length;
+    if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
+      await writeStateSnapshot(saved, { clearJournal: true });
+    } else {
+      scheduleSnapshotFlush();
+    }
+    return saved;
+  } catch (err) {
+    await writeStateSnapshot(saved, { clearJournal: true });
+    return saved;
+  }
+}
+
 function applyDossierPatch(currentState, body) {
   const action = String(body?.action || '').trim().toLowerCase();
   const clientId = Number(body?.clientId);
@@ -1267,6 +1294,47 @@ app.post('/api/state/dossiers', async (req, res) => {
       ok: false,
       code: 'INVALID_DOSSIER_PATCH',
       message: err?.message || 'Invalid dossier patch request.'
+    });
+  }
+});
+
+app.post('/api/state/dossiers/batch', async (req, res) => {
+  try {
+    const result = await enqueueStateMutation(async () => {
+      await ensureDataFile();
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const sourceId = String(body?._sourceId || '').trim();
+      const patches = Array.isArray(body?.patches)
+        ? body.patches.filter((patch) => patch && typeof patch === 'object')
+        : [];
+      if (!patches.length) {
+        throw new Error('Missing dossier patches.');
+      }
+      const saved = await persistJournalMutations(
+        patches.map((patch) => ({
+          type: 'dossier',
+          body: patch
+        }))
+      );
+      broadcastStateUpdated({
+        ...saved,
+        sourceId,
+        patchKind: 'dossier-batch',
+        patch: { patches }
+      });
+      return { saved, count: patches.length };
+    });
+    res.json({
+      ok: true,
+      version: result.saved.version,
+      updatedAt: result.saved.updatedAt,
+      count: result.count
+    });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      code: 'INVALID_DOSSIER_PATCH_BATCH',
+      message: err?.message || 'Invalid dossier patch batch request.'
     });
   }
 });

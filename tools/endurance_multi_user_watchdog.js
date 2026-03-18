@@ -634,11 +634,6 @@ async function runImportAction(session, fixturePath, label) {
     }
   }, { timeout: 120000 });
   await waitForDataReady(session);
-  await session.page.evaluate(async () => {
-    if (typeof persistAppStateNow === 'function') {
-      await persistAppStateNow();
-    }
-  });
   return {
     type: 'import',
     label
@@ -661,7 +656,26 @@ async function runModifyExistingDossierAction(session, targetIndex, cycleIndex) 
           avancement: `watchdog-modify-${cycle}`
         };
         dossiers[dossierIndex] = next;
-        await persistAppStateNow();
+        if (typeof handleDossierDataChange === 'function') {
+          const previousAudienceImpact = typeof dossierHasAudienceImpact === 'function'
+            ? dossierHasAudienceImpact(current || {})
+            : false;
+          const nextAudienceImpact = typeof dossierHasAudienceImpact === 'function'
+            ? dossierHasAudienceImpact(next || {})
+            : false;
+          handleDossierDataChange({ audience: previousAudienceImpact || nextAudienceImpact });
+        }
+        if (typeof persistDossierPatchNow === 'function') {
+          await persistDossierPatchNow({
+            action: 'update',
+            clientId: Number(client.id),
+            dossierIndex,
+            targetClientId: Number(client.id),
+            dossier: next
+          }, { source: 'endurance-watchdog-modify' });
+        } else if (typeof persistAppStateNow === 'function') {
+          await persistAppStateNow();
+        }
         return {
           type: 'modify',
           clientId: Number(client.id),
