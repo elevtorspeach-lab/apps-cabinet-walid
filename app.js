@@ -337,7 +337,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.datePrevueExecution': 'Date prévue exécution',
   'procedureDetails.montantRecupere': 'Montant récupéré',
   'procedureDetails.instruction': 'Instruction',
-  'procedureDetails.declarationCreance': 'Liquidation judiciaire',
+  'procedureDetails.declarationCreance': 'Declaration',
   'procedureDetails.syndicName': 'Nom du syndic',
   'procedureDetails.dateNotification': 'Date notification',
   'procedureDetails.villeProcedure': 'Ville',
@@ -15170,9 +15170,7 @@ function renderProcedureDetails(forceList, forceDraft){
       `;
     }
     if(baseProc === 'Redressement' || baseProc === 'Liquidation judiciaire'){
-      const fixedLabel = baseProc === 'Redressement'
-        ? 'Liquidation judiciaire'
-        : 'Liquidation judiciaire';
+      const fixedLabel = 'Declaration';
       fieldsHtml = `
         <input type="text" data-field="declarationCreance" class="proc-fixed-input" value="${escapeAttr(fixedLabel)}" readonly>
         <input type="text" data-field="syndicName" placeholder="Nom du syndic">
