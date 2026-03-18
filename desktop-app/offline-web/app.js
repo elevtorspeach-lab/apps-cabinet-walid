@@ -124,6 +124,7 @@ let remoteSyncHealthCheckInFlight = false;
 let remoteSyncLastRecoveryRefreshAt = 0;
 let remoteSyncStreamRetryDelayMs = 0;
 let remoteBootstrapSetupRequired = false;
+let remoteServerReachable = false;
 let lastApiBaseSuccessAt = 0;
 let lastPersistedStateSignature = '';
 let lastLocalSnapshotSignature = '';
@@ -3121,10 +3122,12 @@ async function loginRemoteSession(username, password){
       body: JSON.stringify({ username, password })
     }, API_STATE_LOAD_TIMEOUT_MS);
     if(res.status === 401){
+      remoteServerReachable = true;
       clearRemoteAuthSession();
       return { ok: false, reason: 'invalid' };
     }
     if(res.status === 428){
+      remoteServerReachable = true;
       clearRemoteAuthSession();
       remoteBootstrapSetupRequired = true;
       return { ok: false, reason: 'bootstrap_required' };
@@ -3132,6 +3135,7 @@ async function loginRemoteSession(username, password){
     if(!res.ok){
       throw new Error(`HTTP ${res.status}`);
     }
+    remoteServerReachable = true;
     const payload = await res.json().catch(()=>({}));
     remoteAuthToken = String(payload?.token || '').trim();
     if(!remoteAuthToken){
@@ -3141,6 +3145,7 @@ async function loginRemoteSession(username, password){
     markApiBaseHealthy(API_BASE);
     return { ok: true };
   }catch(err){
+    remoteServerReachable = false;
     clearRemoteAuthSession();
     console.warn('Connexion serveur impossible pendant la connexion', err);
     return { ok: false, reason: 'unavailable' };
@@ -3162,6 +3167,7 @@ async function pingApiBase(base, timeoutMs = 3500){
 
 async function pingApiBaseWithLatency(base, timeoutMs = 3500){
   if(!base){
+    remoteServerReachable = false;
     return {
       ok: false,
       latencyMs: null
@@ -3173,6 +3179,7 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
   const startedAt = now();
   try{
     const res = await fetchWithTimeout(`${base}/health`, { cache: 'no-store' }, timeoutMs);
+    remoteServerReachable = !!res.ok;
     const payload = await res.clone().json().catch(()=>null);
     remoteBootstrapSetupRequired = payload?.bootstrapSetupRequired === true;
     return {
@@ -3180,6 +3187,7 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
       latencyMs: Math.max(0, now() - startedAt)
     };
   }catch(err){
+    remoteServerReachable = false;
     remoteBootstrapSetupRequired = false;
     return {
       ok: false,
@@ -5273,6 +5281,10 @@ function updateBootstrapSetupUi(options = {}){
     btn.dataset.mode = remote ? PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE : PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL;
     btn.style.display = visible ? 'block' : 'none';
   }
+}
+
+function shouldOfferLocalBootstrapSetup(){
+  return isBootstrapSetupRequiredForUsers(USERS) && (LOCAL_ONLY_MODE || !remoteServerReachable);
 }
 
 function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
@@ -10082,7 +10094,7 @@ async function initApplication(){
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
-  const localBootstrapSetupRequired = LOCAL_ONLY_MODE && isBootstrapSetupRequiredForUsers(USERS);
+  const localBootstrapSetupRequired = shouldOfferLocalBootstrapSetup();
   updateBootstrapSetupUi({
     visible: localBootstrapSetupRequired || (!LOCAL_ONLY_MODE && remoteBootstrapSetupRequired),
     remote: !LOCAL_ONLY_MODE && remoteBootstrapSetupRequired
@@ -10603,6 +10615,12 @@ async function login(){
     }
 
     USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+    if(remoteLoginState === 'unavailable' && shouldOfferLocalBootstrapSetup()){
+      updateBootstrapSetupUi({ visible: true, remote: false });
+      showLoginError('Le serveur est indisponible. Initialisez un mot de passe local pour utiliser la version web.');
+      openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL });
+      return;
+    }
     let userIndex = USERS.findIndex(
       x=>String(x.username || '').trim().toLowerCase() === usernameInput
     );
