@@ -325,19 +325,21 @@
               <thead>
                 <tr id="diligenceHeadRow">
                   <th>Client</th>
-                  <th>Débiteur</th>
+                  <th>Référence client</th>
+                  <th>Nom</th>
                   <th>Date dépôt</th>
                   <th>Référence dossier</th>
+                  <th>Juge</th>
+                  <th>Sort</th>
                   <th>Ordonnance</th>
-                  <th>Sort notification</th>
                   <th>Notification N°</th>
-                  <th>Statut notification</th>
+                  <th>Sort notification</th>
                   <th>Certificat non appel</th>
                   <th>Execution N°</th>
                   <th>Ville</th>
                   <th>Délégation</th>
                   <th>Huissier</th>
-                  <th>Sort</th>
+                  <th>Sort exécution</th>
                   <th>Tribunal</th>
                 </tr>
               </thead>
@@ -605,8 +607,11 @@
               <label data-proc="Restitution"><input type="checkbox" value="Restitution" class="proc-check"> Restitution</label>
               <label data-proc="Nantissement"><input type="checkbox" value="Nantissement" class="proc-check"> Nantissement</label>
               <label data-proc="SFDC"><input type="checkbox" value="SFDC" class="proc-check"> SFDC</label>
-              <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
               <label data-proc="Injonction"><input type="checkbox" value="Injonction" class="proc-check"> Injonction</label>
+              <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
+              <label data-proc="Vérification de créance"><input type="checkbox" value="Vérification de créance" class="proc-check"> Vérification de créance</label>
+              <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
+              <label data-proc="Declaration de creance"><input type="checkbox" value="Declaration de creance" class="proc-check"> Declaration de creance</label>
             </div>
             <div class="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">
@@ -684,9 +689,15 @@
         </div>
         <div class="audience-color-filter">
           <label for="filterSuiviTribunal">Tribunal</label>
-          <select id="filterSuiviTribunal">
-            <option value="all">Tous</option>
-          </select>
+          <input
+            type="text"
+            id="filterSuiviTribunal"
+            list="filterSuiviTribunalOptions"
+            placeholder=""
+            autocomplete="off"
+          />
+          <datalist id="filterSuiviTribunalOptions">
+          </datalist>
         </div>
         <label id="suiviCheckedCount" class="audience-checked-count" for="suiviPageSelectionToggle">
           <input id="suiviPageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page suivi">
@@ -828,9 +839,6 @@
       <div class="preview-modal-actions">
         <button id="exportPreviewExcelBtn" class="btn-success" type="button" style="display:none;">
           <i class="fa-regular fa-file-excel"></i> Exporter Excel
-        </button>
-        <button id="printExportPreviewBtn" class="btn-primary" type="button" style="display:none;">
-          <i class="fa-solid fa-print"></i> Imprimer
         </button>
         <button id="closeExportPreviewModalBtn" class="btn-danger" type="button">
           <i class="fa-solid fa-xmark"></i> Fermer

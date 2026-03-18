@@ -4,9 +4,41 @@ const path = require('path');
 const fs = require('fs/promises');
 
 const STATE_FILE_NAME = 'applicationversion1.json';
+const EXPORTS_DIR_NAME = 'Cabinet ARAQI Exports';
 
 function getDesktopStateFilePath() {
   return path.join(app.getPath('downloads'), STATE_FILE_NAME);
+}
+
+function sanitizeExportFilename(value) {
+  const fallback = 'cabinet_export.xlsx';
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  const sanitized = raw.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/\s+/g, ' ').trim();
+  return sanitized || fallback;
+}
+
+function getDesktopExportDirectoryPath() {
+  return path.join(app.getPath('downloads'), EXPORTS_DIR_NAME);
+}
+
+async function writeDesktopExportFile(payload) {
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const fileName = sanitizeExportFilename(safePayload.filename);
+  const bytes = safePayload.bytes;
+  if (!bytes) {
+    throw new Error('Missing export bytes');
+  }
+  const exportDir = getDesktopExportDirectoryPath();
+  await fs.mkdir(exportDir, { recursive: true });
+  const filePath = path.join(exportDir, fileName);
+  const tempPath = `${filePath}.tmp`;
+  const buffer = Buffer.isBuffer(bytes)
+    ? bytes
+    : Buffer.from(ArrayBuffer.isView(bytes) ? bytes : new Uint8Array(bytes));
+  await fs.writeFile(tempPath, buffer);
+  await fs.rename(tempPath, filePath);
+  return filePath;
 }
 
 async function writeDesktopState(payload) {
@@ -115,6 +147,12 @@ app.whenReady().then(() => {
         throw err;
       }
     }
+    const openError = await shell.openPath(filePath);
+    return { ok: !openError, filePath, error: openError || '' };
+  });
+
+  ipcMain.handle('desktop-export:save-open', async (_event, payload) => {
+    const filePath = await writeDesktopExportFile(payload);
     const openError = await shell.openPath(filePath);
     return { ok: !openError, filePath, error: openError || '' };
   });
