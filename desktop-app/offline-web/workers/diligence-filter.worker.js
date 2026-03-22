@@ -1,3 +1,11 @@
+function collectFiniteIndexes(items){
+  return items.map(item=>Number(item?.idx)).filter(Number.isFinite);
+}
+
+function matchesWorkerQuery(value, query){
+  return String(value || '').toLowerCase().includes(query);
+}
+
 self.addEventListener('message', (event)=>{
   const data = event?.data || {};
   if(String(data.type || '') !== 'diligence-filter') return;
@@ -8,20 +16,18 @@ self.addEventListener('message', (event)=>{
 
   let filteredIndexes;
   if(!query){
-    filteredIndexes = items.map(item=>Number(item?.idx)).filter(Number.isFinite);
+    filteredIndexes = collectFiniteIndexes(items);
   }else if(executionOnlyQuery){
-    filteredIndexes = items
-      .filter(item=>String(item?.executionNo || '').trim().length > 0)
-      .map(item=>Number(item?.idx))
-      .filter(Number.isFinite);
+    filteredIndexes = collectFiniteIndexes(
+      items.filter(item=>String(item?.executionNo || '').trim().length > 0)
+    );
   }else{
-    filteredIndexes = items
-      .filter(item=>{
+    filteredIndexes = collectFiniteIndexes(
+      items.filter(item=>{
         const values = Array.isArray(item?.values) ? item.values : [];
-        return values.some(value=>String(value || '').toLowerCase().includes(query));
+        return values.some(value=>matchesWorkerQuery(value, query));
       })
-      .map(item=>Number(item?.idx))
-      .filter(Number.isFinite);
+    );
   }
 
   self.postMessage({

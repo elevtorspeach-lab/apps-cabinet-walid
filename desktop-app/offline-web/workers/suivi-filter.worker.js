@@ -1,3 +1,11 @@
+function collectFiniteIndexes(items){
+  return items.map(item=>Number(item?.idx)).filter(Number.isFinite);
+}
+
+function matchesWorkerQuery(value, query){
+  return String(value || '').toLowerCase().includes(query);
+}
+
 self.addEventListener('message', (event)=>{
   const data = event?.data || {};
   if(String(data.type || '') !== 'suivi-filter') return;
@@ -7,12 +15,11 @@ self.addEventListener('message', (event)=>{
 
   let filteredIndexes;
   if(!query){
-    filteredIndexes = items.map(item=>Number(item?.idx)).filter(Number.isFinite);
+    filteredIndexes = collectFiniteIndexes(items);
   }else{
-    filteredIndexes = items
-      .filter(item=>String(item?.haystack || '').toLowerCase().includes(query))
-      .map(item=>Number(item?.idx))
-      .filter(Number.isFinite);
+    filteredIndexes = collectFiniteIndexes(
+      items.filter(item=>matchesWorkerQuery(item?.haystack, query))
+    );
   }
 
   self.postMessage({

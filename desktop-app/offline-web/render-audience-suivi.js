@@ -65,6 +65,40 @@ function buildAudienceRowsRenderKey(pageData, stateKey){
   ].join('::');
 }
 
+function buildAudienceRenderCacheKey(pageData, stateKey){
+  return [
+    buildAudienceRowsRenderKey(pageData, stateKey),
+    getCurrentClientAccessCacheKey()
+  ].join('||');
+}
+
+function buildSuiviRenderCacheKey(pageData, stateKey){
+  return [
+    buildSuiviRowsRenderKey(pageData, stateKey),
+    getCurrentClientAccessCacheKey()
+  ].join('||');
+}
+
+function buildAudienceRenderIdentityKey(stateKey){
+  return [
+    audienceRowsRawDataVersion,
+    audiencePrintSelectionVersion,
+    String(stateKey || ''),
+    getCurrentClientAccessCacheKey(),
+    Math.max(1, Number(paginationState?.audience) || 1)
+  ].join('||');
+}
+
+function buildSuiviRenderIdentityKey(stateKey){
+  return [
+    audienceRowsRawDataVersion,
+    suiviPrintSelectionVersion,
+    String(stateKey || ''),
+    getCurrentClientAccessCacheKey(),
+    Math.max(1, Number(paginationState?.suivi) || 1)
+  ].join('||');
+}
+
 function queueAudienceVirtualRender(){
   if(audienceVirtualRafId) return;
   audienceVirtualRafId = window.requestAnimationFrame(()=>{
@@ -72,6 +106,23 @@ function queueAudienceVirtualRender(){
     renderAudienceVirtualWindow();
   });
 }
+
+function getSidebarSalleRenderKey(){
+  return [
+    audienceRowsRawDataVersion,
+    salleAssignmentsVersion,
+    selectedSalleDay,
+    filterSalleTribunal,
+    filterSalleAudienceDate,
+    getCurrentClientAccessCacheKey()
+  ].join('||');
+}
+
+let lastQueuedSidebarSalleSessionsKey = '';
+let lastAudienceRenderCacheKey = '';
+let lastSuiviRenderCacheKey = '';
+let lastAudienceRenderIdentityKey = '';
+let lastSuiviRenderIdentityKey = '';
 
 function renderAudienceRowHtml(row, duplicateKeySet){
   const { c, d, procKey, p, key, draft } = row;
@@ -159,6 +210,15 @@ function renderAudienceVirtualWindow(force = false){
     : '';
   const rowsHtml = renderAudienceRowsHtml(rows.slice(start, end), audienceVirtualDuplicateKeySet);
   body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
+}
+
+function shouldQueueSidebarSalleSessionsRender(){
+  const key = getSidebarSalleRenderKey();
+  if(key === lastQueuedSidebarSalleSessionsKey){
+    return false;
+  }
+  lastQueuedSidebarSalleSessionsKey = key;
+  return true;
 }
 
 function renderSuiviRowHtml(row){
@@ -261,13 +321,23 @@ function renderSuivi(options = {}){
   syncPaginationFilterState('suivi', suiviRenderStateKey);
   const suiviBody = $('suiviBody');
   if(!suiviBody) return;
+  const suiviRenderIdentityKey = buildSuiviRenderIdentityKey(suiviRenderStateKey);
+  if(suiviRenderIdentityKey === lastSuiviRenderIdentityKey){
+    return;
+  }
   if(!isManager() && getVisibleClients().length === 0){
-    syncSuiviRenderedSelectionCache([], [], suiviRenderStateKey, 1);
-    suiviVirtualRows = [];
-    suiviVirtualLastRange = { start: -1, end: -1 };
-    renderSuiviTableMessage(suiviBody, SUIVI_NO_CLIENT_MESSAGE, 'suivi-no-client');
-    renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
-    updateSuiviCheckedCount();
+    const renderCacheKey = buildSuiviRenderCacheKey({ page: 1, rows: [] }, suiviRenderStateKey);
+    if(renderCacheKey !== lastSuiviRenderCacheKey){
+      syncSuiviRenderedSelectionCache([], [], suiviRenderStateKey, 1);
+      lastSuiviRenderCacheKey = renderCacheKey;
+      lastSuiviRenderIdentityKey = suiviRenderIdentityKey;
+      suiviVirtualRows = [];
+      suiviVirtualLastRange = { start: -1, end: -1 };
+      renderSuiviTableMessage(suiviBody, SUIVI_NO_CLIENT_MESSAGE, 'suivi-no-client');
+      renderPagination('suivi', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      updateSuiviCheckedCount();
+      return;
+    }
     return;
   }
   const base = getSuiviBaseRowsCached();
@@ -279,14 +349,26 @@ function renderSuivi(options = {}){
     const orderedRows = orderSuiviRowsByCheckedSelection(sortedRows);
     syncSuiviPrintSelection(base.sortedDefaultRows);
     const pageData = paginateRows(orderedRows, 'suivi');
+    const renderCacheKey = buildSuiviRenderCacheKey(pageData, suiviRenderStateKey);
+    const isSameRender = renderCacheKey === lastSuiviRenderCacheKey;
+    if(isSameRender){
+      return;
+    }
+    lastSuiviRenderIdentityKey = suiviRenderIdentityKey;
+    lastSuiviRenderCacheKey = renderCacheKey;
     syncSuiviRenderedSelectionCache(orderedRows, pageData.rows, suiviRenderStateKey, pageData.page);
     const useVirtual = pageData.rows.length >= SUIVI_VIRTUAL_MIN_ROWS;
     suiviVirtualRows = pageData.rows;
-    suiviVirtualLastRange = { start: -1, end: -1 };
     if(!pageData.rows.length){
+      suiviVirtualLastRange = { start: -1, end: -1 };
       renderSuiviTableMessage(suiviBody, SUIVI_EMPTY_MESSAGE, 'suivi-empty');
     }else if(useVirtual){
-      renderSuiviVirtualWindow(true);
+      if(isSameRender){
+        renderSuiviVirtualWindow(false);
+      }else{
+        suiviVirtualLastRange = { start: -1, end: -1 };
+        renderSuiviVirtualWindow(true);
+      }
     }else{
       setElementHtmlWithRenderKey(
         suiviBody,
@@ -430,19 +512,30 @@ function renderAudience(options = {}){
   );
   const body = $('audienceBody');
   if(!body){
-    if(shouldRefreshSalleSidebar) queueSidebarSalleSessionsRender();
+    if(shouldRefreshSalleSidebar && shouldQueueSidebarSalleSessionsRender()) queueSidebarSalleSessionsRender();
     return;
   }
   renderImportHistoryPanel('audienceImportHistory', 'audience');
+  const audienceRenderIdentityKey = buildAudienceRenderIdentityKey(audienceFilterStateKey);
+  if(audienceRenderIdentityKey === lastAudienceRenderIdentityKey){
+    if(shouldRefreshSalleSidebar && shouldQueueSidebarSalleSessionsRender()) queueSidebarSalleSessionsRender();
+    return;
+  }
   if(!isManager() && getVisibleClients().length === 0){
-    syncAudienceRenderedSelectionCache([], [], audienceFilterStateKey, 1);
-    audienceVirtualRows = [];
-    audienceVirtualDuplicateKeySet = new Set();
-    audienceVirtualLastRange = { start: -1, end: -1 };
-    renderAudienceTableMessage(body, AUDIENCE_NO_CLIENT_MESSAGE, 'audience-no-client');
-    renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
-    updateAudienceCheckedCount();
-    if(shouldRefreshSalleSidebar) queueSidebarSalleSessionsRender();
+    const renderCacheKey = buildAudienceRenderCacheKey({ page: 1, rows: [] }, audienceFilterStateKey);
+    if(renderCacheKey !== lastAudienceRenderCacheKey){
+      syncAudienceRenderedSelectionCache([], [], audienceFilterStateKey, 1);
+      lastAudienceRenderCacheKey = renderCacheKey;
+      lastAudienceRenderIdentityKey = audienceRenderIdentityKey;
+      audienceVirtualRows = [];
+      audienceVirtualDuplicateKeySet = new Set();
+      audienceVirtualLastRange = { start: -1, end: -1 };
+      renderAudienceTableMessage(body, AUDIENCE_NO_CLIENT_MESSAGE, 'audience-no-client');
+      renderPagination('audience', { totalRows: 0, page: 1, totalPages: 1, from: 0, to: 0 });
+      updateAudienceCheckedCount();
+      if(shouldRefreshSalleSidebar && shouldQueueSidebarSalleSessionsRender()) queueSidebarSalleSessionsRender();
+      return;
+    }
     return;
   }
 
@@ -452,15 +545,28 @@ function renderAudience(options = {}){
     const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
     const rows = getFilteredAudienceRows(allRows);
     const pageData = paginateRows(rows, 'audience');
+    const renderCacheKey = buildAudienceRenderCacheKey(pageData, audienceFilterStateKey);
+    const isSameRender = renderCacheKey === lastAudienceRenderCacheKey;
+    if(isSameRender){
+      if(shouldRefreshSalleSidebar && shouldQueueSidebarSalleSessionsRender()) queueSidebarSalleSessionsRender();
+      return;
+    }
+    lastAudienceRenderIdentityKey = audienceRenderIdentityKey;
+    lastAudienceRenderCacheKey = renderCacheKey;
     syncAudienceRenderedSelectionCache(rows, pageData.rows, audienceFilterStateKey, pageData.page);
     const useVirtual = shouldUseAudienceVirtualization(pageData.rows.length);
     audienceVirtualRows = pageData.rows;
     audienceVirtualDuplicateKeySet = duplicateKeySet;
-    audienceVirtualLastRange = { start: -1, end: -1 };
     if(!pageData.rows.length){
+      audienceVirtualLastRange = { start: -1, end: -1 };
       renderAudienceTableMessage(body, AUDIENCE_EMPTY_MESSAGE, 'audience-empty');
     }else if(useVirtual){
-      renderAudienceVirtualWindow(true);
+      if(isSameRender){
+        renderAudienceVirtualWindow(false);
+      }else{
+        audienceVirtualLastRange = { start: -1, end: -1 };
+        renderAudienceVirtualWindow(true);
+      }
     }else{
       setElementHtmlWithRenderKey(
         body,
@@ -475,7 +581,7 @@ function renderAudience(options = {}){
     }else{
       updateAudienceCheckedCount();
     }
-    if(shouldRefreshSalleSidebar) queueSidebarSalleSessionsRender();
+    if(shouldRefreshSalleSidebar && shouldQueueSidebarSalleSessionsRender()) queueSidebarSalleSessionsRender();
   };
   const queueFinalizeAudienceRender = (rows, expectedStateKey = audienceFilterStateKey, expectedRequestId = null)=>{
     const run = ()=>{

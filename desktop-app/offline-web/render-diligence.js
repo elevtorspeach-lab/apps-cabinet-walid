@@ -252,6 +252,7 @@ function renderDiligence(options = {}){
     const pageData = orderedRows.length
       ? paginateRows(orderedRows, 'diligence')
       : { rows: [], page: 1, totalPages: 1, from: 0, to: 0 };
+    syncDiligenceRenderedSelectionCache(orderedRows, pageData.rows, diligenceFilterStateKey, pageData.page);
     diligenceVirtualRows = pageData.rows;
     const colCount = getDiligenceColCount();
 

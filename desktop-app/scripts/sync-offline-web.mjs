@@ -17,6 +17,7 @@ const pathsToSync = [
   'render-audience-suivi.js',
   'render-diligence.js',
   'audience-ui-helpers.js',
+  'assets',
   'workers',
   'vendor'
 ];
