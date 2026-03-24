@@ -5,7 +5,7 @@ const STATUS_BADGE_CLASS_BY_VALUE = {
   'Suspension': 'status-suspension'
 };
 
-const AUDIENCE_ALLOWED_ROW_COLORS = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light']);
+const AUDIENCE_ALLOWED_ROW_COLORS = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
 
 function getStatusBadgeClass(status){
   const value = String(status || 'En cours');
@@ -32,7 +32,9 @@ function getAudienceStatusDerivedColor(status){
 }
 
 function getAudienceRowEffectiveColor(row){
+  const statusDerivedColor = getAudienceStatusDerivedColor(row?.d?.statut || '');
+  if(statusDerivedColor) return statusDerivedColor;
   const explicitColor = String(row?.p?.color || '').trim();
   if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
-  return getAudienceStatusDerivedColor(row?.d?.statut || '');
+  return '';
 }

@@ -4930,7 +4930,37 @@ function triggerBrowserDownloadFromBlob(blob, filename, options = {}){
   const browserTarget = options.browserDownloadTarget && !options.browserDownloadTarget.closed
     ? options.browserDownloadTarget
     : null;
+  const openInline = options.openInline === true;
   let a = null;
+  if(openInline){
+    try{
+      if(browserTarget && !browserTarget.closed){
+        browserTarget.location.href = url;
+        browserTarget.focus();
+      }else{
+        window.open(url, '_blank', 'noopener');
+      }
+    }catch(err){
+      console.warn('Ouverture directe du fichier impossible, fallback telechargement', err);
+      try{
+        const ownerDocument = browserTarget?.document || document;
+        a = ownerDocument.createElement('a');
+        a.href = url;
+        a.download = String(filename || 'export');
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        ownerDocument.body.appendChild(a);
+        a.click();
+      }catch(downloadErr){
+        console.warn('Telechargement direct impossible apres echec ouverture', downloadErr);
+      }
+    }
+    setTimeout(()=>{
+      try{ a?.remove(); }catch(_){}
+      try{ URL.revokeObjectURL(url); }catch(_){}
+    }, 60000);
+    return true;
+  }
   try{
     const ownerDocument = browserTarget?.document || document;
     a = ownerDocument.createElement('a');
@@ -5060,7 +5090,8 @@ async function saveBlobDirectOrDownload(blob, filename, options = {}){
     }
   }
   const fallback = ()=>triggerBrowserDownloadFromBlob(blob, filename, {
-    browserDownloadTarget: options.browserDownloadTarget || null
+    browserDownloadTarget: options.browserDownloadTarget || null,
+    openInline: options.browserOpenInline === true
   });
   if(options.direct !== true){
     fallback();
@@ -5095,7 +5126,7 @@ async function saveBlobDirectOrDownload(blob, filename, options = {}){
   return 'download';
 }
 
-async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', sheetName = 'Audience', colWidths = [], filename = 'audience_export.xlsx', preferWorker = false, openAfterExport = false, layoutPreset = 'default', browserDownloadTarget = null, preferredFileHandle = null }){
+async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', sheetName = 'Audience', colWidths = [], filename = 'audience_export.xlsx', preferWorker = false, openAfterExport = false, layoutPreset = 'default', browserDownloadTarget = null, browserOpenInline = false, preferredFileHandle = null }){
   const directExportHandlePromise = primeDirectExportDirectoryAccess();
   const rowCount = Array.isArray(rows) ? rows.length : 0;
   const useAudienceReferenceLayout = layoutPreset === 'audience-reference';
@@ -5116,6 +5147,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         preferredHandle: await directExportHandlePromise,
         openAfterExport,
         browserDownloadTarget,
+        browserOpenInline,
         preferredFileHandle
       });
       return;
@@ -5143,6 +5175,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       preferredHandle: await directExportHandlePromise,
       openAfterExport,
       browserDownloadTarget,
+      browserOpenInline,
       preferredFileHandle
     });
     return;
@@ -5150,6 +5183,28 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
 
   const colCount = headers.length;
   const lastColLetter = String.fromCharCode(64 + Math.max(1, colCount));
+  const audienceReferenceLayout = {
+    columnWidths: [14.77734375, 20.6640625, 16.33203125, 13.77734375, 16.77734375, 23.21875, 26.88671875],
+    rowHeights: {
+      1: 14.4,
+      2: 14.4,
+      3: 14.4,
+      4: 14.4,
+      5: 35.25,
+      6: 24,
+      7: 9.6,
+      8: 36.75
+    },
+    dataRowHeight: 35.25,
+    imageAnchor: {
+      tl: { col: 1.512, row: 0.154 },
+      br: { col: 6.183, row: 4.862 }
+    },
+    pageMargins: { left: 0, right: 0, top: 0, bottom: 0, header: 0, footer: 0 },
+    pageSetup: { orientation: 'landscape' },
+    columnAlignments: ['left', 'left', 'left', 'center', 'center', 'left', 'center'],
+    columnWrap: [true, true, false, false, false, false, false]
+  };
 
   if(useAudienceReferenceLayout && colCount === 7){
     try{
@@ -5160,40 +5215,22 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         const templateSheet = templateWorkbook.getWorksheet('Audience') || templateWorkbook.worksheets[0];
         if(!templateSheet) throw new Error('Feuille template audience introuvable');
         const sampleRow = templateSheet.getRow(9);
-        const sampleStyles = Array.from({ length: colCount }, (_, index)=>{
-          const cell = sampleRow.getCell(index + 1);
-          return {
-            font: cell.font ? JSON.parse(JSON.stringify(cell.font)) : null,
-            fill: cell.fill ? JSON.parse(JSON.stringify(cell.fill)) : null,
-            alignment: cell.alignment ? JSON.parse(JSON.stringify(cell.alignment)) : null,
-            border: cell.border ? JSON.parse(JSON.stringify(cell.border)) : null,
-            numFmt: cell.numFmt || ''
-          };
-        });
         const sampleRowHeight = Number(sampleRow.height || 35.25);
-        const existingRowsToDelete = Math.max(0, Number(templateSheet.rowCount || 0) - 8);
+        const existingRowsToDelete = Math.max(0, Number(templateSheet.rowCount || 0) - 9);
         if(existingRowsToDelete > 0){
-          templateSheet.spliceRows(9, existingRowsToDelete);
+          templateSheet.spliceRows(10, existingRowsToDelete);
         }
-        if(rows.length){
-          const preparedRows = rows.map(row=>Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill(''));
-          templateSheet.spliceRows(9, 0, ...preparedRows);
+        if(rows.length > 1){
+          templateSheet.duplicateRow(9, rows.length - 1, true);
         }
         templateSheet.getCell('A6').value = subtitleText;
         templateSheet.views = [{ showGridLines: false }];
-        await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 9), async (rowIndex)=>{
+        await runChunked(rows, async (row, index)=>{
+          const rowIndex = index + 9;
           const sheetRow = templateSheet.getRow(rowIndex);
+          sheetRow.values = Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill('');
           sheetRow.height = sampleRowHeight;
-          for(let c = 1; c <= colCount; c++){
-            const cell = sheetRow.getCell(c);
-            const style = sampleStyles[c - 1];
-            if(style?.font) cell.font = JSON.parse(JSON.stringify(style.font));
-            if(style?.fill) cell.fill = JSON.parse(JSON.stringify(style.fill));
-            if(style?.alignment) cell.alignment = JSON.parse(JSON.stringify(style.alignment));
-            if(style?.border) cell.border = JSON.parse(JSON.stringify(style.border));
-            if(style?.numFmt) cell.numFmt = style.numFmt;
-          }
-        }, { chunkSize: 40 });
+        }, { chunkSize: 120 });
         await yieldToMainThread();
         const templateBuffer = await promiseWithTimeout(
           templateWorkbook.xlsx.writeBuffer(),
@@ -5208,6 +5245,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
           preferredHandle: await directExportHandlePromise,
           openAfterExport,
           browserDownloadTarget,
+          browserOpenInline,
           preferredFileHandle
         });
         return;
@@ -5217,28 +5255,22 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     }
   }
 
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(sheetName);
+  let workbook = new ExcelJS.Workbook();
+  let sheet = workbook.addWorksheet(sheetName);
 
   if(useAudienceReferenceLayout && colCount === 7){
     try{
-      const referenceColWidths = [14.78, 20.66, 16.33, 13.78, 16.78, 23.22, 26.89];
-      const referenceColumnAlignments = ['left', 'left', 'left', 'center', 'center', 'left', 'center'];
-      const referenceColumnWrap = [true, true, false, false, false, false, false];
       sheet.views = [{ showGridLines: false }];
-      sheet.columns = referenceColWidths.map(width=>({ width }));
+      sheet.pageSetup = { ...audienceReferenceLayout.pageSetup };
+      sheet.pageMargins = { ...audienceReferenceLayout.pageMargins };
+      sheet.columns = audienceReferenceLayout.columnWidths.map(width=>({ width }));
 
       sheet.mergeCells(`A5:${lastColLetter}5`);
       sheet.mergeCells(`A6:${lastColLetter}6`);
       sheet.getCell('A6').value = subtitleText;
-      sheet.getRow(1).height = 20;
-      sheet.getRow(2).height = 20;
-      sheet.getRow(3).height = 20;
-      sheet.getRow(4).height = 20;
-      sheet.getRow(5).height = 35.25;
-      sheet.getRow(6).height = 24;
-      sheet.getRow(7).height = 9.6;
-      sheet.getRow(8).height = 36.75;
+      Object.entries(audienceReferenceLayout.rowHeights).forEach(([rowNumber, height])=>{
+        sheet.getRow(Number(rowNumber)).height = Number(height);
+      });
 
       headers.forEach((header, index)=>{
         sheet.getRow(8).getCell(index + 1).value = header;
@@ -5247,7 +5279,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         const rowNumber = index + 9;
         const sheetRow = sheet.getRow(rowNumber);
         sheetRow.values = Array.isArray(row) ? row : [];
-        sheetRow.height = 35.25;
+        sheetRow.height = audienceReferenceLayout.dataRowHeight;
       }, { chunkSize: 80 });
 
       const thinBorder = {
@@ -5286,15 +5318,15 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       await runChunked(rows, async (row, index)=>{
         const rowIndex = index + 9;
         const sheetRow = sheet.getRow(rowIndex);
-        sheetRow.height = 35.25;
+        sheetRow.height = audienceReferenceLayout.dataRowHeight;
         for(let c = 1; c <= colCount; c++){
           const cell = sheetRow.getCell(c);
           cell.value = Array.isArray(row) ? (row[c - 1] ?? '') : '';
           cell.font = { name: 'Calibri', size: 12, color: { argb: 'FF111111' } };
           cell.alignment = {
-            horizontal: referenceColumnAlignments[c - 1] || 'left',
+            horizontal: audienceReferenceLayout.columnAlignments[c - 1] || 'left',
             vertical: 'middle',
-            wrapText: referenceColumnWrap[c - 1] === true
+            wrapText: audienceReferenceLayout.columnWrap[c - 1] === true
           };
           cell.border = thinBorder;
         }
@@ -5306,11 +5338,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
           base64: headerImageDataUrl,
           extension: 'jpeg'
         });
-        sheet.addImage(imageId, {
-          tl: { col: 1.502, row: 0.21 },
-          ext: { width: 604, height: 117 },
-          editAs: 'oneCell'
-        });
+        sheet.addImage(imageId, { ...audienceReferenceLayout.imageAnchor, editAs: 'oneCell' });
       }
 
       await yieldToMainThread();
@@ -5327,13 +5355,15 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         preferredHandle: await directExportHandlePromise,
         openAfterExport,
         browserDownloadTarget,
+        browserOpenInline,
         preferredFileHandle
       });
       return;
     }catch(err){
       console.warn('Export audience avec logo impossible', err);
-      alert("Export d'audience avec logo impossible. Rechargez l'application puis réessayez.");
-      return;
+      // Reset the workbook before falling back to the generic export layout.
+      workbook = new ExcelJS.Workbook();
+      sheet = workbook.addWorksheet(sheetName);
     }
   }
 
@@ -5404,6 +5434,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     preferredHandle: await directExportHandlePromise,
     openAfterExport,
     browserDownloadTarget,
+    browserOpenInline,
     preferredFileHandle
   });
 }
@@ -6784,7 +6815,7 @@ function deleteAudienceImportBatch(batchId){
         }else if(op && op.beforeProc === null){
           delete details[procKey];
         }else{
-          ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'instruction', 'color'].forEach(field=>{
+          ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'instruction', 'color', 'attOrdOrOrdOk'].forEach(field=>{
             delete proc[field];
           });
           delete proc._missingGlobal;
@@ -7957,7 +7988,7 @@ function findAudienceOrphanClient(){
 }
 
 function mergeAudienceProcedureFields(targetProc, sourceProc){
-  const fields = ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'color', 'instruction'];
+  const fields = ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'color', 'instruction', 'attOrdOrOrdOk'];
   let sourceHasAudienceData = false;
   let targetHasAudienceData = false;
   let changed = false;
@@ -9596,7 +9627,7 @@ function startRemoteSyncStream(){
   }
 }
 
-function parseExcelData(rows){
+function parseExcelData(rows, sheet = null){
   const dossierHeaderKeys = {
     client: ['client', 'clients', 'nom client', 'nom clients'],
     affectation: ['affectation', 'date affectation', 'date d affectation'],
@@ -9647,7 +9678,10 @@ function parseExcelData(rows){
       'execution inj',
       'execution injonction'
     ],
+    dateDepot: ['date depot', 'date depôt', 'date dépôt', 'date depot '],
     sort: ['sort'],
+    sortExecution: ['sort execution', 'sort exécution', 'sort exec', 'sort exéc'],
+    sortOrd: ['sort ord', 'sort ordonnance', 'ordonnance', 'statut ordonnance'],
     tribunal: ['tribunal', 'trib', 'tr'],
     statut: ['statut', 'status', 'etat', 'état']
   };
@@ -9663,6 +9697,121 @@ function parseExcelData(rows){
     tribunal: ['tribunal'],
     dateDepot: ['date depot', 'date depôt', 'date depot '],
     statut: ['statut', 'status', 'etat', 'état']
+  };
+  const normalizeImportColorHex = (value)=>{
+    const raw = String(value || '').trim().replace(/^#/, '').toUpperCase();
+    if(!raw) return '';
+    if(/^[0-9A-F]{8}$/.test(raw)) return raw.slice(2);
+    if(/^[0-9A-F]{6}$/.test(raw)) return raw;
+    return '';
+  };
+  const parseImportHexRgb = (value)=>{
+    const hex = normalizeImportColorHex(value);
+    if(!hex) return null;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if(!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null;
+    return { hex, r, g, b };
+  };
+  const importFillDescriptors = [
+    { color: 'blue', hex: 'E3F0FF', ordonnanceStatus: '' },
+    { color: 'green', hex: 'E8F8EE', ordonnanceStatus: 'att' },
+    { color: 'green', hex: 'D99694', ordonnanceStatus: 'att' },
+    { color: 'red', hex: 'FDEAEA', ordonnanceStatus: '' },
+    { color: 'yellow', hex: 'FFF9DB', ordonnanceStatus: 'ok' },
+    { color: 'document-ok', hex: 'F4EDC9', ordonnanceStatus: '' },
+    { color: 'yellow', hex: '77933C', ordonnanceStatus: 'ok' },
+    { color: 'purple-dark', hex: 'EDE6FF', ordonnanceStatus: '' },
+    { color: 'purple-light', hex: 'F5EEFF', ordonnanceStatus: '' }
+  ].map(item=>({
+    ...item,
+    rgb: parseImportHexRgb(item.hex)
+  }));
+  const getCellFillHex = (rowIndex, colIndex)=>{
+    if(!sheet || typeof XLSX === 'undefined' || !XLSX?.utils?.encode_cell) return '';
+    if(!Number.isInteger(rowIndex) || !Number.isInteger(colIndex) || rowIndex < 0 || colIndex < 0) return '';
+    const cellRef = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+    const cell = sheet[cellRef];
+    if(!cell || typeof cell !== 'object') return '';
+    const directCandidates = [
+      cell?.s?.fgColor?.rgb,
+      cell?.s?.bgColor?.rgb,
+      cell?.s?.fill?.fgColor?.rgb,
+      cell?.s?.fill?.bgColor?.rgb,
+      cell?.s?.fgColor?.rawRgb,
+      cell?.s?.fill?.fgColor?.rawRgb
+    ];
+    for(const candidate of directCandidates){
+      const normalized = normalizeImportColorHex(candidate);
+      if(normalized) return normalized;
+    }
+    return '';
+  };
+  const getImportFillDescriptor = (fillHex)=>{
+    const rgb = parseImportHexRgb(fillHex);
+    if(!rgb) return null;
+    const maxChannel = Math.max(rgb.r, rgb.g, rgb.b);
+    const minChannel = Math.min(rgb.r, rgb.g, rgb.b);
+    const chroma = maxChannel - minChannel;
+    if(maxChannel >= 245 && chroma <= 12) return null;
+    if(rgb.g >= 150 && rgb.g >= rgb.r + 10 && rgb.g >= rgb.b + 10){
+      return { color: 'green', ordonnanceStatus: 'att', distance: 0 };
+    }
+    if(rgb.r >= 210 && rgb.g >= 190 && rgb.b <= 235 && rgb.r >= rgb.b + 12 && rgb.g >= rgb.b + 6){
+      return { color: 'yellow', ordonnanceStatus: 'ok', distance: 0 };
+    }
+    let best = null;
+    importFillDescriptors.forEach(descriptor=>{
+      if(!descriptor.rgb) return;
+      const distance = Math.sqrt(
+        ((rgb.r - descriptor.rgb.r) ** 2)
+        + ((rgb.g - descriptor.rgb.g) ** 2)
+        + ((rgb.b - descriptor.rgb.b) ** 2)
+      );
+      if(!best || distance < best.distance){
+        best = {
+          color: descriptor.color,
+          ordonnanceStatus: descriptor.ordonnanceStatus,
+          distance
+        };
+      }
+    });
+    if(!best) return null;
+    if(best.distance <= 48) return best;
+    if(best.distance <= 85 && chroma >= 16) return best;
+    return null;
+  };
+  const getOrdonnanceStatusFromFill = (rowIndex, colIndex)=>{
+    const descriptor = getImportFillDescriptor(getCellFillHex(rowIndex, colIndex));
+    return String(descriptor?.ordonnanceStatus || '').trim();
+  };
+  const getAudienceImportRowMeta = (rowIndex, colIndexes = [])=>{
+    const hits = new Map();
+    colIndexes.forEach(colIndex=>{
+      if(!Number.isInteger(colIndex) || colIndex < 0) return;
+      const descriptor = getImportFillDescriptor(getCellFillHex(rowIndex, colIndex));
+      if(!descriptor) return;
+      const key = `${descriptor.color || ''}::${descriptor.ordonnanceStatus || ''}`;
+      const previous = hits.get(key) || {
+        color: descriptor.color,
+        ordonnanceStatus: descriptor.ordonnanceStatus,
+        hits: 0,
+        distanceTotal: 0
+      };
+      previous.hits += 1;
+      previous.distanceTotal += Number(descriptor.distance) || 0;
+      hits.set(key, previous);
+    });
+    const ranked = [...hits.values()].sort((a, b)=>{
+      if(b.hits !== a.hits) return b.hits - a.hits;
+      return a.distanceTotal - b.distanceTotal;
+    });
+    const best = ranked[0] || null;
+    return {
+      color: String(best?.color || '').trim(),
+      ordonnanceStatus: String(best?.ordonnanceStatus || '').trim()
+    };
   };
   const referenceHints = {};
   const registerReferenceHint = (rawRef, procName, extras = {})=>{
@@ -9688,7 +9837,8 @@ function parseExcelData(rows){
     const idxSfdc = getColIndex(map, dossierHeaderKeys.refSfdc);
     const idxInjonction = getColIndex(map, dossierHeaderKeys.refInjonction);
     const idxExecution = getColIndex(map, dossierHeaderKeys.executionNo);
-    const idxSort = getColIndex(map, dossierHeaderKeys.sort);
+    const idxSortExecution = getColIndex(map, dossierHeaderKeys.sortExecution);
+    const idxSort = idxSortExecution !== -1 ? idxSortExecution : getColIndex(map, dossierHeaderKeys.sort);
     if(idxAssign === -1 && idxRest === -1 && idxSfdc === -1 && idxInjonction === -1) continue;
     for(let j=i+1; j<rows.length; j++){
       const row = rows[j] || [];
@@ -9747,7 +9897,10 @@ function parseExcelData(rows){
       notificationSort: getColIndex(dossierColMap, dossierHeaderKeys.notificationSort),
       notificationNo: getColIndex(dossierColMap, dossierHeaderKeys.notificationNo),
       executionNo: getColIndex(dossierColMap, dossierHeaderKeys.executionNo),
+      dateDepot: getColIndex(dossierColMap, dossierHeaderKeys.dateDepot),
+      sortExecution: getColIndex(dossierColMap, dossierHeaderKeys.sortExecution),
       sort: getColIndex(dossierColMap, dossierHeaderKeys.sort),
+      sortOrd: getColIndex(dossierColMap, dossierHeaderKeys.sortOrd),
       tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal),
       statut: getColIndex(dossierColMap, dossierHeaderKeys.statut)
     };
@@ -9781,6 +9934,7 @@ function parseExcelData(rows){
       const notificationSort = idx.notificationSort !== -1 ? String(row[idx.notificationSort] || '').trim() : '';
       const notificationNo = idx.notificationNo !== -1 ? String(row[idx.notificationNo] || '').trim() : '';
       const tribunal = idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '';
+      const dateDepot = idx.dateDepot !== -1 ? parseExcelDateValue(row[idx.dateDepot]) : '';
       const immatriculation = idx.immatriculation !== -1 ? String(row[idx.immatriculation] || '').trim() : '';
       const boiteNo = idx.boiteNo !== -1 ? String(row[idx.boiteNo] || '').trim() : '';
       const caution = idx.caution !== -1 ? String(row[idx.caution] || '').trim() : '';
@@ -9802,7 +9956,16 @@ function parseExcelData(rows){
       const dateAffectation = String(affectationValues[0] || '').trim();
       const dateAffectationExtra = String(affectationValues[1] || '').trim();
       const executionNo = idx.executionNo !== -1 ? String(row[idx.executionNo] || '').trim() : '';
+      const sortExecution = idx.sortExecution !== -1
+        ? String(row[idx.sortExecution] || '').trim()
+        : (idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '');
       const sort = idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '';
+      let sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
+      if(!sortOrd && idx.sortOrd !== -1){
+        const statusFromFill = getOrdonnanceStatusFromFill(j, idx.sortOrd);
+        if(statusFromFill === 'att') sortOrd = 'att ord';
+        if(statusFromFill === 'ok') sortOrd = 'ord ok';
+      }
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
       const isEmptyDossierRow = !refClient && !debiteur && !clientName && !procedureText && !type && !montant && !dateAffectation;
       if(isEmptyDossierRow) break;
@@ -9854,7 +10017,10 @@ function parseExcelData(rows){
         notificationSort,
         notificationNo,
         executionNo,
+        dateDepot,
+        sortExecution,
         sort,
+        sortOrd,
         tribunal,
         statutRaw
       });
@@ -9891,6 +10057,18 @@ function parseExcelData(rows){
       const debiteur = idx.debiteur !== -1 ? String(row[idx.debiteur] || '').trim() : '';
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
       if(!refDossier && !debiteur && !refClient) break;
+      const importColorMeta = getAudienceImportRowMeta(j, [
+        idx.refClient,
+        idx.debiteur,
+        idx.refDossier,
+        idx.procedure,
+        idx.audience,
+        idx.juge,
+        idx.sort,
+        idx.tribunal,
+        idx.dateDepot,
+        idx.statut
+      ]);
       audiences.push({
         rowNumber: j + 1,
         refClient,
@@ -9902,6 +10080,8 @@ function parseExcelData(rows){
         sort: idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '',
         tribunal: idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '',
         dateDepot: idx.dateDepot !== -1 ? parseExcelDateValue(row[idx.dateDepot]) : '',
+        importedColor: importColorMeta.color,
+        importedOrdonnanceStatus: importColorMeta.ordonnanceStatus,
         statutRaw: idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '',
         hasStatutColumn: idx.statut !== -1
       });
@@ -10789,15 +10969,22 @@ async function applyExcelImport(payload, options = {}){
     setProcRef('SFDC', sfdcReference);
     setProcRef('Injonction', injonctionReference);
     const executionNoValue = String(row.executionNo || '').trim();
+    const importedDateDepotValue = normalizeDateDDMMYYYY(row.dateDepot || '') || String(row.dateDepot || '').trim();
     const notificationSortValue = String(row.notificationSort || '').trim();
     const notificationNoValue = String(row.notificationNo || '').trim();
-    const sortValue = String(row.sort || '').trim();
+    const sortValue = String(row.sortExecution || row.sort || '').trim();
+    const sortOrdValue = String(row.sortOrd || '').trim();
     const tribunalValue = String(row.tribunal || '').trim();
     const assignProcedureMeta = (proc, refValue)=>{
-      if(!(executionNoValue || sortValue || tribunalValue || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))) || !String(refValue || '').trim()) return;
+      if(
+        !(executionNoValue || importedDateDepotValue || sortValue || sortOrdValue || tribunalValue || (proc === 'Injonction' && (notificationSortValue || notificationNoValue)))
+        || !String(refValue || '').trim()
+      ) return;
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
       if(executionNoValue) dossier.procedureDetails[proc].executionNo = executionNoValue;
+      if(importedDateDepotValue) dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
+      if(sortOrdValue) dossier.procedureDetails[proc].attOrdOrOrdOk = sortOrdValue;
       if(tribunalValue) dossier.procedureDetails[proc].tribunal = tribunalValue;
       if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
       if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
@@ -10833,13 +11020,16 @@ async function applyExcelImport(payload, options = {}){
       if(sharedReferenceCandidate && !String(dossier.procedureDetails[proc].referenceClient || '').trim()){
         dossier.procedureDetails[proc].referenceClient = sharedReferenceCandidate;
       }
+      if(importedDateDepotValue && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
+        dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
+      }
       let procDate = normalizedPrimaryDate || normalizedSecondaryDate;
       if(hasDualDates){
         procDate = idx === 0
           ? normalizedPrimaryDate
           : normalizedSecondaryDate;
       }
-      if(procDate){
+      if(procDate && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
         dossier.procedureDetails[proc].dateDepot = procDate;
       }
     });
@@ -11049,6 +11239,11 @@ async function applyExcelImport(payload, options = {}){
     if(row.tribunal) p.tribunal = row.tribunal;
     // In audience import files, "date depot" corresponds to procedure "Dépôt le".
     if(row.dateDepot) p.depotLe = row.dateDepot;
+    const importedAudienceColor = String(row.importedColor || '').trim();
+    if(importedAudienceColor) p.color = importedAudienceColor;
+    const importedOrdonnanceStatus = String(row.importedOrdonnanceStatus || '').trim();
+    if(importedOrdonnanceStatus === 'att') p.attOrdOrOrdOk = 'att ord';
+    if(importedOrdonnanceStatus === 'ok') p.attOrdOrOrdOk = 'ord ok';
     if(row.hasStatutColumn === true){
       const importedStatus = normalizeImportedDossierStatus(row.statutRaw || '');
       dossier.statut = importedStatus.statut || 'En cours';
@@ -11127,7 +11322,7 @@ async function handleExcelImportFile(file, options = {}){
     const buffer = await file.arrayBuffer();
     updateImportProgress('Analyse de la feuille...', 1, 3);
     setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
     const sheetName = workbook.SheetNames[0];
     if(!sheetName){
       throw new Error('Le fichier Excel ne contient aucune feuille.');
@@ -11145,7 +11340,7 @@ async function handleExcelImportFile(file, options = {}){
     if(!Array.isArray(rows)){
       throw new Error('Format de feuille non reconnu.');
     }
-    const parsed = parseExcelData(rows);
+    const parsed = parseExcelData(rows, sheet);
     updateImportProgress('Fusion des données...', 2, 3);
     setSyncStatus('syncing', 'Import Excel: fusion des données...');
     await applyExcelImport(parsed, {
@@ -11357,6 +11552,7 @@ async function exportBackupExcelImportable(){
       audienceGreen: 'FFE8F8EE',
       audienceRed: 'FFFDEAEA',
       audienceYellow: 'FFFFF9DB',
+      audienceDocumentOk: 'FFF4EDC9',
       audiencePurpleDark: 'FFEDE6FF',
       audiencePurpleLight: 'FFF5EEFF',
       rowAlt: 'FFF8FAFC'
@@ -11366,6 +11562,7 @@ async function exportBackupExcelImportable(){
       green: palette.audienceGreen,
       red: palette.audienceRed,
       yellow: palette.audienceYellow,
+      'document-ok': palette.audienceDocumentOk,
       'purple-dark': palette.audiencePurpleDark,
       'purple-light': palette.audiencePurpleLight
     };
@@ -11621,6 +11818,17 @@ function setupEvents(){
     closeExportPreviewModal();
   });
   $('addClientBtn').onclick = ()=>addClient($('clientName').value);
+  $('selectClient')?.addEventListener('change', ()=>{
+    if(creationPinnedClientId && String($('selectClient')?.value || '') !== String(creationPinnedClientId)){
+      creationPinnedClientId = '';
+    }
+    updateCreationPinnedClientUi();
+  });
+  $('unlockCreationClientBtn')?.addEventListener('click', ()=>{
+    creationPinnedClientId = '';
+    updateCreationPinnedClientUi();
+    $('selectClient')?.focus();
+  });
   $('deleteAllClientsBtn')?.addEventListener('click', deleteAllClients);
   $('importExcelBtn')?.addEventListener('click', ()=> $('importExcelInput')?.click());
   $('exportBackupExcelBtn')?.addEventListener('click', ()=>{
@@ -11823,7 +12031,13 @@ function setupEvents(){
     renderAudienceAutocompleteSuggestions();
   });
   $('diligenceProcedureFilter')?.addEventListener('change', (e)=>{
-    filterDiligenceProcedure = e.target.value;
+    const nextProcedure = String(e.target?.value || 'all');
+    const procedureChanged = nextProcedure !== filterDiligenceProcedure;
+    filterDiligenceProcedure = nextProcedure;
+    if(procedureChanged){
+      resetDiligenceAuxFilters();
+      paginationState.diligence = 1;
+    }
     renderDiligence();
   });
   $('diligenceSortFilter')?.addEventListener('change', (e)=>{
@@ -11966,14 +12180,8 @@ function setupEvents(){
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
   $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
   $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS());
-  $('exportAudienceDetailBtn')?.addEventListener('click', async ()=>{
-    const preferredFileHandle = await primeBrowserSaveFileHandle('audience_export.xlsx', {
-      description: "Export d'audience Excel"
-    });
-    if(preferredFileHandle === false) return;
-    return exportAudienceXLS({
-      preferredFileHandle: preferredFileHandle || null
-    });
+  $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
+    return exportAudienceXLS({ useFilteredRowsWhenNoSelection: true });
   });
   $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
   $('calendarPrevBtn')?.addEventListener('click', ()=>{
@@ -12417,6 +12625,26 @@ async function addClient(name){
   goToCreation(newClient.id);
 }
 
+function updateCreationPinnedClientUi(){
+  const selectClient = $('selectClient');
+  const hint = $('creationClientHint');
+  const changeBtn = $('unlockCreationClientBtn');
+  const pinnedId = String(creationPinnedClientId || '').trim();
+  const pinnedClient = pinnedId
+    ? AppState.clients.find(client=>String(client?.id || '') === pinnedId)
+    : null;
+  if(selectClient) selectClient.disabled = false;
+  if(changeBtn) changeBtn.style.display = pinnedClient ? 'inline-flex' : 'none';
+  if(!hint) return;
+  if(!pinnedClient){
+    hint.style.display = 'none';
+    hint.innerHTML = '';
+    return;
+  }
+  hint.style.display = 'flex';
+  hint.innerHTML = `Client sélectionné automatiquement: <strong>${escapeHtml(pinnedClient.name || '-')}</strong>. Vous pouvez le changer si besoin.`;
+}
+
 function updateClientDropdown(options = {}){
   if(!shouldRenderClientDropdown(options)) return;
   const selectClient = $('selectClient');
@@ -12456,7 +12684,8 @@ function updateClientDropdown(options = {}){
   ].join('::');
   setElementHtmlWithRenderKey(selectClient, markup, renderKey, { trustRenderKey: true });
   if(currentValue) selectClient.value = currentValue;
-  selectClient.disabled = !!creationPinnedClientId;
+  selectClient.disabled = false;
+  updateCreationPinnedClientUi();
 }
 
 function renderClients(options = {}){
@@ -13269,6 +13498,7 @@ function computeAudienceRowContentScore(row){
 function editDossier(clientId, index){
   if(!canEditData()) return alert('Accès refusé');
   clearCreationReferenceClientError();
+  creationPinnedClientId = '';
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client) return;
   if(!canEditClient(client)) return alert('Accès refusé');
@@ -13395,8 +13625,9 @@ function resetCreationForm(clientId = ''){
   if(selectClient){
     const selectedClientId = clientId ? String(clientId) : String(creationPinnedClientId || '');
     selectClient.value = selectedClientId;
-    selectClient.disabled = !!creationPinnedClientId;
+    selectClient.disabled = false;
   }
+  updateCreationPinnedClientUi();
   const addBtn = $('addDossierBtn');
   if(addBtn) addBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Créer le Dossier';
 }
@@ -14152,6 +14383,21 @@ function getDiligenceRowsScopedForAuxFilters(rows){
   const list = Array.isArray(rows) ? rows : [];
   if(filterDiligenceProcedure === 'all') return list;
   return list.filter(row=>matchesDiligenceProcedureFilter(row?.procedure, filterDiligenceProcedure));
+}
+
+function resetDiligenceAuxFilters(){
+  filterDiligenceSort = 'all';
+  filterDiligenceDelegation = 'all';
+  filterDiligenceOrdonnance = 'all';
+  filterDiligenceTribunal = 'all';
+  const sortSelect = $('diligenceSortFilter');
+  if(sortSelect) sortSelect.value = 'all';
+  const delegationSelect = $('diligenceDelegationFilter');
+  if(delegationSelect) delegationSelect.value = 'all';
+  const ordonnanceSelect = $('diligenceOrdonnanceFilter');
+  if(ordonnanceSelect) ordonnanceSelect.value = 'all';
+  const tribunalSelect = $('diligenceTribunalFilter');
+  if(tribunalSelect) tribunalSelect.value = 'all';
 }
 
 function syncDiligenceProcedureFilter(rows){
@@ -16125,7 +16371,7 @@ function getFilteredAudienceRows(allRows = null){
 
 function applyColorToSelectedAudienceRows(color){
   const targetColor = String(color || '').trim();
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light']);
+  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
   if(!allowed.has(targetColor) || !audiencePrintSelection.size) return false;
   const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   let changed = false;
@@ -16279,8 +16525,10 @@ function getSelectedAudienceRowsForExport(){
   return out;
 }
 
-function buildAudienceSelectedExportDatasetBase(){
-  const audienceRows = getSelectedAudienceRowsForExport();
+function buildAudienceSelectedExportDatasetBase(rowsOverride = null){
+  const audienceRows = Array.isArray(rowsOverride)
+    ? rowsOverride.slice()
+    : getSelectedAudienceRowsForExport();
   const headers = [
     'Client',
     'Adversaire',
@@ -16319,16 +16567,41 @@ function buildAudienceSelectedExportTableRow(row){
   ];
 }
 
-function buildAudienceSelectedExportDataset(){
-  const dataset = buildAudienceSelectedExportDatasetBase();
+function getAudienceRowsForDetailedExportFallback(){
+  const selectedRows = getSelectedAudienceRowsForExport();
+  if(selectedRows.length) return selectedRows;
+  return getAudienceRowsForRegularExport();
+}
+
+function buildAudienceSelectedExportDataset(rowsOverride = null){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: dataset.rows.map((row)=>buildAudienceSelectedExportTableRow(row))
   };
 }
 
-async function buildAudienceSelectedExportDatasetAsync(){
-  const dataset = buildAudienceSelectedExportDatasetBase();
+function openAudienceExcelFilePreviewWindow(){
+  const exportRows = getAudienceRowsForDetailedExportFallback();
+  const dataset = buildAudienceSelectedExportDataset(exportRows);
+  if(!dataset.rows.length){
+    alert("Aucune ligne d'audience à afficher dans le fichier.");
+    return;
+  }
+  const browserDownloadTarget = primeBrowserDownloadTarget('Ouverture du fichier Excel...');
+  exportAudienceXLS({
+    openAfterExport: true,
+    browserDownloadTarget,
+    browserOpenInline: true,
+    useFilteredRowsWhenNoSelection: true
+  }).catch(err=>{
+    console.error(err);
+    alert("Ouverture du fichier Excel impossible.");
+  });
+}
+
+async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: await mapChunked(
@@ -16340,13 +16613,16 @@ async function buildAudienceSelectedExportDatasetAsync(){
 }
 
 function previewAudienceSelectedRows(){
-  const dataset = buildAudienceSelectedExportDataset();
+  const dataset = buildAudienceSelectedExportDataset(getAudienceRowsForDetailedExportFallback());
   if(!dataset.rows.length){
-    alert('Cochez les dossiers à afficher dans le fichier.');
+    alert("Aucune ligne d'audience à afficher dans le fichier.");
     return;
   }
   if(hasDesktopExportBridge()){
-    exportAudienceXLS({ openAfterExport: true }).catch(err=>console.error(err));
+    exportAudienceXLS({
+      openAfterExport: true,
+      useFilteredRowsWhenNoSelection: true
+    }).catch(err=>console.error(err));
     return;
   }
   showExportPreviewModal({
@@ -16354,8 +16630,8 @@ function previewAudienceSelectedRows(){
     subtitle: dataset.subtitle,
     headers: dataset.headers,
     rows: dataset.tableRows,
-    exportLabel: "Exporter Audience Excel",
-    onExport: ()=>exportAudienceXLS({ openAfterExport: true })
+    exportLabel: "Voir le fichier Excel",
+    onExport: openAudienceExcelFilePreviewWindow
   });
 }
 
@@ -16749,11 +17025,14 @@ function getAudienceRowsRawCached(){
           : '';
         const explicitColor = String(p?.color || '').trim();
         const dossierStatus = String(d?.statut || '').trim();
-        const effectiveColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(explicitColor)
-          ? explicitColor
-          : (
-            dossierStatus === 'Soldé' ? 'purple-dark'
-            : (dossierStatus === 'Arrêt définitif' ? 'purple-light' : '')
+        const statusDerivedColor = dossierStatus === 'Soldé'
+          ? 'purple-dark'
+          : (dossierStatus === 'Arrêt définitif' ? 'purple-light' : '');
+        const effectiveColor = statusDerivedColor
+          || (
+            ['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light'].includes(explicitColor)
+              ? explicitColor
+              : ''
           );
         const audienceDateDisplay = formatAudienceDateDisplayValue(draft?.dateAudience || p?.audience || '');
         const sortMeta = {
@@ -17090,65 +17369,16 @@ async function exportAudienceRegularXLS(){
       alert('Aucune ligne à exporter.');
       return;
     }
-
-  const headers = [
-    'Client',
-    'Adversaire',
-    'Date dépôt',
-    'N° Dossier',
-    'Juge',
-    'Audience',
-    'Sort',
-    'Tribunal'
-  ];
-
-  const mapAudienceRegularExportRow = (r)=>{
-    const p = r.p;
-    const d = r.d;
-    const draft = r.draft;
-    const dossierRef = getAudienceRowDraftReferenceValue(r);
-    const jugeValue = String(draft.juge || p.juge || '').trim();
-    const audienceDateValue = normalizeDateDDMMYYYY(draft.dateAudience || p.audience || '')
-      || String(draft.dateAudience || p.audience || '').trim();
-    const sortValue = String(draft.sort || p.sort || '').trim();
-    return [
-      r.c.name || '',
-      d.debiteur || '',
-      getAudienceDateDepotDisplayValue(r),
-      dossierRef || '-',
-      jugeValue || '-',
-      audienceDateValue || '-',
-      sortValue,
-      p.tribunal || ''
-    ];
-  };
-  const colWidths = [{ wch: 22 }, { wch: 28 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 28 }, { wch: 46 }];
-  const useCsvFastPath = audienceRows.length >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD;
-
-    if(useCsvFastPath){
-      const csvBlob = await createMappedCsvBlobChunked({
-      headers,
-      items: audienceRows,
-      mapRow: mapAudienceRegularExportRow,
-      progressLabel: 'Export audience CSV',
-      chunkSize: 240
-      });
-    await saveBlobDirectOrDownload(csvBlob, 'export_audience_standard.csv');
-    return;
-  }
-
-  const rows = await mapChunked(audienceRows, async (r)=>mapAudienceRegularExportRow(r), {
-    chunkSize: 120,
-    onProgress: makeProgressReporter('Export audience')
-  });
-
+    const dataset = await buildAudienceSelectedExportDatasetAsync(audienceRows);
     await exportAudienceWorkbookXlsxStyled({
-      headers,
-      rows,
-      subtitle: 'Export standard',
-      sheetName: 'Export',
-      colWidths,
+      headers: dataset.headers,
+      rows: dataset.tableRows,
+      subtitle: dataset.subtitle,
+      sheetName: 'Audience',
+      colWidths: dataset.colWidths,
       filename: 'export_audience_standard.xlsx'
+      ,
+      layoutPreset: 'audience-reference'
     });
   });
 }
@@ -17156,7 +17386,10 @@ async function exportAudienceRegularXLS(){
 async function exportAudienceXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = await buildAudienceSelectedExportDatasetAsync();
+    let dataset = await buildAudienceSelectedExportDatasetAsync();
+    if(!dataset.rows.length && options?.useFilteredRowsWhenNoSelection === true){
+      dataset = await buildAudienceSelectedExportDatasetAsync(getAudienceRowsForRegularExport());
+    }
     if(!dataset.rows.length){
       alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
       return;
@@ -17172,6 +17405,7 @@ async function exportAudienceXLS(options = {}){
       await saveBlobDirectOrDownload(csvBlob, 'audience_export.csv', {
         openAfterExport: options?.openAfterExport === true,
         browserDownloadTarget: options?.browserDownloadTarget || null,
+        browserOpenInline: options?.browserOpenInline === true,
         preferredFileHandle: options?.preferredFileHandle || null
       });
       return;
@@ -17187,6 +17421,7 @@ async function exportAudienceXLS(options = {}){
       layoutPreset: 'audience-reference',
       openAfterExport: options?.openAfterExport === true,
       browserDownloadTarget: options?.browserDownloadTarget || null,
+      browserOpenInline: options?.browserOpenInline === true,
       preferredFileHandle: options?.preferredFileHandle || null
     });
   });
@@ -17207,7 +17442,7 @@ function setAudienceColor(ci, di, procKey, checked){
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   if(!dossier) return;
   const p = getAudienceProcedure(ci, di, procKey);
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light']);
+  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
   if(!checked){
     p.color = '';
     if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){

@@ -5160,40 +5160,22 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         const templateSheet = templateWorkbook.getWorksheet('Audience') || templateWorkbook.worksheets[0];
         if(!templateSheet) throw new Error('Feuille template audience introuvable');
         const sampleRow = templateSheet.getRow(9);
-        const sampleStyles = Array.from({ length: colCount }, (_, index)=>{
-          const cell = sampleRow.getCell(index + 1);
-          return {
-            font: cell.font ? JSON.parse(JSON.stringify(cell.font)) : null,
-            fill: cell.fill ? JSON.parse(JSON.stringify(cell.fill)) : null,
-            alignment: cell.alignment ? JSON.parse(JSON.stringify(cell.alignment)) : null,
-            border: cell.border ? JSON.parse(JSON.stringify(cell.border)) : null,
-            numFmt: cell.numFmt || ''
-          };
-        });
         const sampleRowHeight = Number(sampleRow.height || 35.25);
-        const existingRowsToDelete = Math.max(0, Number(templateSheet.rowCount || 0) - 8);
+        const existingRowsToDelete = Math.max(0, Number(templateSheet.rowCount || 0) - 9);
         if(existingRowsToDelete > 0){
-          templateSheet.spliceRows(9, existingRowsToDelete);
+          templateSheet.spliceRows(10, existingRowsToDelete);
         }
-        if(rows.length){
-          const preparedRows = rows.map(row=>Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill(''));
-          templateSheet.spliceRows(9, 0, ...preparedRows);
+        if(rows.length > 1){
+          templateSheet.duplicateRow(9, rows.length - 1, true);
         }
         templateSheet.getCell('A6').value = subtitleText;
         templateSheet.views = [{ showGridLines: false }];
-        await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 9), async (rowIndex)=>{
+        await runChunked(rows, async (row, index)=>{
+          const rowIndex = index + 9;
           const sheetRow = templateSheet.getRow(rowIndex);
+          sheetRow.values = Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill('');
           sheetRow.height = sampleRowHeight;
-          for(let c = 1; c <= colCount; c++){
-            const cell = sheetRow.getCell(c);
-            const style = sampleStyles[c - 1];
-            if(style?.font) cell.font = JSON.parse(JSON.stringify(style.font));
-            if(style?.fill) cell.fill = JSON.parse(JSON.stringify(style.fill));
-            if(style?.alignment) cell.alignment = JSON.parse(JSON.stringify(style.alignment));
-            if(style?.border) cell.border = JSON.parse(JSON.stringify(style.border));
-            if(style?.numFmt) cell.numFmt = style.numFmt;
-          }
-        }, { chunkSize: 40 });
+        }, { chunkSize: 120 });
         await yieldToMainThread();
         const templateBuffer = await promiseWithTimeout(
           templateWorkbook.xlsx.writeBuffer(),
@@ -11966,14 +11948,8 @@ function setupEvents(){
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
   $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
   $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS());
-  $('exportAudienceDetailBtn')?.addEventListener('click', async ()=>{
-    const preferredFileHandle = await primeBrowserSaveFileHandle('audience_export.xlsx', {
-      description: "Export d'audience Excel"
-    });
-    if(preferredFileHandle === false) return;
-    return exportAudienceXLS({
-      preferredFileHandle: preferredFileHandle || null
-    });
+  $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
+    return exportAudienceXLS({ useFilteredRowsWhenNoSelection: true });
   });
   $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
   $('calendarPrevBtn')?.addEventListener('click', ()=>{
@@ -16319,16 +16295,22 @@ function buildAudienceSelectedExportTableRow(row){
   ];
 }
 
-function buildAudienceSelectedExportDataset(){
-  const dataset = buildAudienceSelectedExportDatasetBase();
+function getAudienceRowsForDetailedExportFallback(){
+  const selectedRows = getSelectedAudienceRowsForExport();
+  if(selectedRows.length) return selectedRows;
+  return getAudienceRowsForRegularExport();
+}
+
+function buildAudienceSelectedExportDataset(rowsOverride = null){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: dataset.rows.map((row)=>buildAudienceSelectedExportTableRow(row))
   };
 }
 
-async function buildAudienceSelectedExportDatasetAsync(){
-  const dataset = buildAudienceSelectedExportDatasetBase();
+async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: await mapChunked(
@@ -16340,13 +16322,16 @@ async function buildAudienceSelectedExportDatasetAsync(){
 }
 
 function previewAudienceSelectedRows(){
-  const dataset = buildAudienceSelectedExportDataset();
+  const dataset = buildAudienceSelectedExportDataset(getAudienceRowsForDetailedExportFallback());
   if(!dataset.rows.length){
-    alert('Cochez les dossiers à afficher dans le fichier.');
+    alert("Aucune ligne d'audience à afficher dans le fichier.");
     return;
   }
   if(hasDesktopExportBridge()){
-    exportAudienceXLS({ openAfterExport: true }).catch(err=>console.error(err));
+    exportAudienceXLS({
+      openAfterExport: true,
+      useFilteredRowsWhenNoSelection: true
+    }).catch(err=>console.error(err));
     return;
   }
   showExportPreviewModal({
@@ -17090,65 +17075,16 @@ async function exportAudienceRegularXLS(){
       alert('Aucune ligne à exporter.');
       return;
     }
-
-  const headers = [
-    'Client',
-    'Adversaire',
-    'Date dépôt',
-    'N° Dossier',
-    'Juge',
-    'Audience',
-    'Sort',
-    'Tribunal'
-  ];
-
-  const mapAudienceRegularExportRow = (r)=>{
-    const p = r.p;
-    const d = r.d;
-    const draft = r.draft;
-    const dossierRef = getAudienceRowDraftReferenceValue(r);
-    const jugeValue = String(draft.juge || p.juge || '').trim();
-    const audienceDateValue = normalizeDateDDMMYYYY(draft.dateAudience || p.audience || '')
-      || String(draft.dateAudience || p.audience || '').trim();
-    const sortValue = String(draft.sort || p.sort || '').trim();
-    return [
-      r.c.name || '',
-      d.debiteur || '',
-      getAudienceDateDepotDisplayValue(r),
-      dossierRef || '-',
-      jugeValue || '-',
-      audienceDateValue || '-',
-      sortValue,
-      p.tribunal || ''
-    ];
-  };
-  const colWidths = [{ wch: 22 }, { wch: 28 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 28 }, { wch: 46 }];
-  const useCsvFastPath = audienceRows.length >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD;
-
-    if(useCsvFastPath){
-      const csvBlob = await createMappedCsvBlobChunked({
-      headers,
-      items: audienceRows,
-      mapRow: mapAudienceRegularExportRow,
-      progressLabel: 'Export audience CSV',
-      chunkSize: 240
-      });
-    await saveBlobDirectOrDownload(csvBlob, 'export_audience_standard.csv');
-    return;
-  }
-
-  const rows = await mapChunked(audienceRows, async (r)=>mapAudienceRegularExportRow(r), {
-    chunkSize: 120,
-    onProgress: makeProgressReporter('Export audience')
-  });
-
+    const dataset = await buildAudienceSelectedExportDatasetAsync(audienceRows);
     await exportAudienceWorkbookXlsxStyled({
-      headers,
-      rows,
-      subtitle: 'Export standard',
-      sheetName: 'Export',
-      colWidths,
+      headers: dataset.headers,
+      rows: dataset.tableRows,
+      subtitle: dataset.subtitle,
+      sheetName: 'Audience',
+      colWidths: dataset.colWidths,
       filename: 'export_audience_standard.xlsx'
+      ,
+      layoutPreset: 'audience-reference'
     });
   });
 }
@@ -17156,7 +17092,10 @@ async function exportAudienceRegularXLS(){
 async function exportAudienceXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = await buildAudienceSelectedExportDatasetAsync();
+    let dataset = await buildAudienceSelectedExportDatasetAsync();
+    if(!dataset.rows.length && options?.useFilteredRowsWhenNoSelection === true){
+      dataset = await buildAudienceSelectedExportDatasetAsync(getAudienceRowsForRegularExport());
+    }
     if(!dataset.rows.length){
       alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
       return;
