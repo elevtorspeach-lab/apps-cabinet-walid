@@ -18167,7 +18167,17 @@ function updateAudienceDraft(key, field, value){
     ? String(dossier?.referenceClient || '')
     : getAudienceProcedureFieldValue(p, field);
   if(field === 'refClient'){
-    if(dossier) dossier.referenceClient = String(value || '').trim();
+    const nextRefClient = String(value || '').trim();
+    if(dossier){
+      dossier.referenceClient = nextRefClient;
+      const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+        ? dossier.procedureDetails
+        : {};
+      Object.values(details).forEach((procDetails)=>{
+        if(!procDetails || typeof procDetails !== 'object' || !procDetails._refClientMismatch) return;
+        procDetails._refClientProvided = nextRefClient;
+      });
+    }
     refreshAudienceRefClientMismatchFlags(dossier);
   }else{
     applyAudienceFieldToProcedure(p, field, value);
