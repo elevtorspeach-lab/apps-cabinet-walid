@@ -38,3 +38,15 @@ function getAudienceRowEffectiveColor(row){
   if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
   return '';
 }
+
+function getAudienceRowOrdonnanceStatus(row){
+  return normalizeDiligenceOrdonnance(row?.p?.attOrdOrOrdOk || '');
+}
+
+function audienceRowMatchesColorFilter(row, color){
+  const targetColor = String(color || '').trim();
+  if(!targetColor || targetColor === 'all') return true;
+  if(targetColor === 'green') return getAudienceRowOrdonnanceStatus(row) === 'att';
+  if(targetColor === 'yellow') return getAudienceRowOrdonnanceStatus(row) === 'ok';
+  return getAudienceRowEffectiveColor(row) === targetColor;
+}

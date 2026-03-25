@@ -60,6 +60,7 @@ let audienceAutocompleteActiveIndex = -1;
 let audienceAutocompleteHideTimer = null;
 let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
+let filterSuiviAttDepotOnly = false;
 let filterSuiviCheckedFirst = false;
 let suiviTribunalAliasMap = new Map();
 let suiviTribunalLabelMap = new Map();
@@ -245,6 +246,7 @@ let diligenceVirtualRows = [];
 let diligenceVirtualLastRange = { start: -1, end: -1 };
 let diligenceVirtualRafId = null;
 let diligenceVirtualShowInjonctionColumns = false;
+let diligenceVirtualCompactProcedureMode = 'mixed';
 let diligenceVirtualShowAssColumns = false;
 let diligenceVirtualShowCommandementColumns = false;
 let diligenceRowsCache = null;
@@ -1078,6 +1080,9 @@ function invalidateDerivedCaches(options = {}){
     dashboardSnapshotCacheVersion = -1;
     dashboardSnapshotCacheUserKey = '';
   }
+  dashboardAudienceMetricsCache = null;
+  dashboardAudienceMetricsCacheVersion = -1;
+  dashboardAudienceMetricsCacheUserKey = '';
   suiviBaseRowsCache = null;
   suiviFilterOptionsRowsMetaRef = null;
   suiviFilteredRowsCacheSource = null;
@@ -2802,7 +2807,7 @@ function makeSuiviPrintKey(clientId, dossierIndex){
 
 function getSuiviRenderStateKey(){
   const q = $('filterGlobal')?.value?.toLowerCase() || '';
-  const suiviFilterCacheKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  const suiviFilterCacheKey = [q, filterSuiviProcedure, filterSuiviTribunal, filterSuiviAttDepotOnly ? 'att-depot' : 'all'].join('||');
   return [suiviFilterCacheKey, filterSuiviCheckedFirst ? 'checked-first' : 'default'].join('||');
 }
 
@@ -2992,20 +2997,22 @@ function setAllFilteredSuiviRowsForPrint(checked){
 function getFilteredSuiviRowsForSelection(){
   const q = normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || '');
   const base = getSuiviBaseRowsCached();
-  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  const suiviFilterKey = [q, filterSuiviProcedure, filterSuiviTribunal, filterSuiviAttDepotOnly ? 'att-depot' : 'all'].join('||');
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noAttDepotFilter = filterSuiviAttDepotOnly !== true;
   const noSearchFilter = !q;
   if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
     return suiviFilteredRowsCacheOutput;
   }
-  if(noProcedureFilter && noTribunalFilter && noSearchFilter){
+  if(noProcedureFilter && noTribunalFilter && noAttDepotFilter && noSearchFilter){
     return base.sortedDefaultRows;
   }
   return base.rawRows.filter(row=>{
     const tribunalKeys = row.tribunalKeys || [];
     if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
     if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+    if(!noAttDepotFilter && row?.hasPendingDepot !== true) return false;
     if(noSearchFilter) return true;
     const haystack = row.__suiviHaystack
       || (row.__suiviHaystack = buildSuiviSearchHaystack(
@@ -3066,7 +3073,9 @@ function buildSuiviSelectedExportDatasetBase(){
   const procedureReferenceColumns = [
     { label: 'Référence ASS', procedureName: 'ASS', width: 26 },
     { label: 'Référence Restitution', procedureName: 'Restitution', width: 30 },
-    { label: 'Référence Nantissement', procedureName: 'Nantissement', width: 30 }
+    { label: 'Référence Nantissement', procedureName: 'Nantissement', width: 30 },
+    { label: 'Référence SFDC', procedureName: 'SFDC', width: 30 },
+    { label: 'Référence Injonction', procedureName: 'Injonction', width: 30 }
   ].filter(column=>rows.some(row=>getProcedureReference(row.d, column.procedureName)));
   const headers = [
     ...baseHeaders,
@@ -5704,6 +5713,10 @@ function normalizeReferenceValue(value){
     .toUpperCase();
 }
 
+function areEquivalentClientReferences(a, b){
+  return normalizeReferenceValue(a) === normalizeReferenceValue(b);
+}
+
 function normalizeDossierReferenceValue(value){
   const raw = String(value || '')
     .normalize('NFKC')
@@ -5891,15 +5904,34 @@ function normalizeImportHistoryEntries(rawEntries){
 }
 
 function splitReferenceValues(value){
+  const DOSSIER_REF_PATTERN = /^\d+\/\d+\/\d{2,4}$/;
+  const dossierRefs = [];
   const rawChunks = String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u061C]/g, '')
     .replace(/\r\n/g, '\n')
-    .split(/[,;|+\n]+/)
+    .replace(
+      /\d+\s*[\\\/⁄∕／]\s*\d+\s*[\\\/⁄∕／]\s*\d{2,4}/g,
+      (match)=>{
+        const normalizedMatch = normalizeReferenceValue(match);
+        if(!normalizedMatch) return ' ';
+        const token = `DOSSIERREFTOKEN${dossierRefs.length}END`;
+        dossierRefs.push(normalizedMatch);
+        return ` ${token} `;
+      }
+    )
+    .split(/(?:[,;|+_&\n]+|\s+[xX×]\s+|\s+-\s+)/)
     .map(v=>String(v || '').trim())
     .filter(Boolean);
 
-  const DOSSIER_REF_PATTERN = /^\d+\/\d+\/\d{2,4}$/;
   const out = [];
   rawChunks.forEach(chunk=>{
+    const dossierTokenMatch = chunk.match(/^DOSSIERREFTOKEN(\d+)END$/);
+    if(dossierTokenMatch){
+      const dossierRef = dossierRefs[Number(dossierTokenMatch[1])];
+      if(dossierRef) out.push(dossierRef);
+      return;
+    }
     const normalizedChunk = normalizeReferenceValue(chunk);
     if(!normalizedChunk) return;
     if(DOSSIER_REF_PATTERN.test(normalizedChunk)){
@@ -5915,6 +5947,10 @@ function splitReferenceValues(value){
       .forEach(v=>out.push(v));
   });
   return out;
+}
+
+function isAudienceOrdonnanceColorSuppressed(procData){
+  return String(procData?._suppressAudienceOrdonnanceColor || '').trim() === '1';
 }
 
 function parseExcelDateValue(value){
@@ -10111,6 +10147,7 @@ function parseExcelData(rows, sheet = null){
       dateDepot: getColIndex(dossierColMap, dossierHeaderKeys.dateDepot),
       sortExecution: getColIndex(dossierColMap, dossierHeaderKeys.sortExecution),
       sort: getColIndex(dossierColMap, dossierHeaderKeys.sort),
+      sortOrd: getColIndex(dossierColMap, dossierHeaderKeys.sortOrd),
       tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal),
       statut: getColIndex(dossierColMap, dossierHeaderKeys.statut)
     };
@@ -10173,6 +10210,7 @@ function parseExcelData(rows, sheet = null){
         ? String(row[idx.sortExecution] || '').trim()
         : (idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '');
       const sort = idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '';
+      const sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
       const isEmptyDossierRow = !refClient && !debiteur && !clientName && !procedureText && !type && !montant && !dateAffectation;
       if(isEmptyDossierRow) break;
@@ -10244,6 +10282,7 @@ function parseExcelData(rows, sheet = null){
         dateDepot,
         sortExecution,
         sort,
+        sortOrd,
         tribunal,
         statutRaw
       });
@@ -10282,20 +10321,7 @@ function parseExcelData(rows, sheet = null){
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
       if(!refDossier && !debiteur && !refClient) break;
       const sortOrdText = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
-      const importColorMeta = idx.sortOrd !== -1
-        ? getAudienceOrdonnanceMetaFromValue(sortOrdText)
-        : getAudienceImportRowMeta(j, [
-          idx.refClient,
-          idx.debiteur,
-          idx.refDossier,
-          idx.procedure,
-          idx.audience,
-          idx.juge,
-          idx.sort,
-          idx.tribunal,
-          idx.dateDepot,
-          idx.statut
-        ]);
+      const importColorMeta = getAudienceOrdonnanceMetaFromValue(sortOrdText);
       audiences.push({
         rowNumber: j + 1,
         refClient,
@@ -10798,6 +10824,52 @@ function resetAudienceFiltersUi(){
   if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
   const errBtn = $('audienceErrorsBtn');
   if(errBtn) errBtn.classList.remove('active');
+}
+
+function resetSuiviFiltersUi(){
+  filterSuiviProcedure = 'all';
+  filterSuiviTribunal = 'all';
+  filterSuiviCheckedFirst = false;
+  filterSuiviAttDepotOnly = false;
+  if($('filterGlobal')) $('filterGlobal').value = '';
+  if($('filterSuiviProcedure')) $('filterSuiviProcedure').value = 'all';
+  if($('filterSuiviTribunal')) $('filterSuiviTribunal').value = '';
+  if($('filterSuiviCheckedOrder')) $('filterSuiviCheckedOrder').value = 'default';
+}
+
+function openDashboardAudienceErrorsView(){
+  resetAudienceFiltersUi();
+  filterAudienceErrorsOnly = true;
+  const errBtn = $('audienceErrorsBtn');
+  if(errBtn) errBtn.classList.add('active');
+  paginationState.audience = 1;
+  showView('audience', { force: true });
+}
+
+function openDashboardAudienceAttSortView(){
+  resetAudienceFiltersUi();
+  filterAudienceColor = 'blue';
+  if($('filterAudienceColor')) $('filterAudienceColor').value = 'blue';
+  paginationState.audience = 1;
+  showView('audience', { force: true });
+}
+
+function openDashboardSuiviAttDepotView(){
+  resetSuiviFiltersUi();
+  filterSuiviAttDepotOnly = true;
+  paginationState.suivi = 1;
+  showView('suivi', { force: true });
+}
+
+function bindDashboardShortcutCard(cardId, handler){
+  const card = $(cardId);
+  if(!card || typeof handler !== 'function') return;
+  card.addEventListener('click', handler);
+  card.addEventListener('keydown', (e)=>{
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    handler();
+  });
 }
 
 async function applyExcelImport(payload, options = {}){
@@ -11327,10 +11399,18 @@ async function applyExcelImport(payload, options = {}){
     const notificationSortValue = String(row.notificationSort || '').trim();
     const notificationNoValue = String(row.notificationNo || '').trim();
     const sortValue = String(row.sortExecution || row.sort || '').trim();
+    const importedOrdonnanceStatus = normalizeDiligenceOrdonnance(row.sortOrd || '');
     const tribunalValue = String(row.tribunal || '').trim();
     const assignProcedureMeta = (proc, refValue)=>{
       if(
-        !(executionNoValue || importedDateDepotValue || sortValue || tribunalValue || (proc === 'Injonction' && (notificationSortValue || notificationNoValue)))
+        !(
+          executionNoValue
+          || importedDateDepotValue
+          || sortValue
+          || tribunalValue
+          || ((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus)
+          || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))
+        )
         || !String(refValue || '').trim()
       ) return;
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
@@ -11338,6 +11418,9 @@ async function applyExcelImport(payload, options = {}){
       if(importedDateDepotValue) dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
       if(tribunalValue) dossier.procedureDetails[proc].tribunal = tribunalValue;
+      if((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus){
+        dossier.procedureDetails[proc].attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
+      }
       if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
       if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
     };
@@ -11597,10 +11680,13 @@ async function applyExcelImport(payload, options = {}){
     }
     const importedAudienceColor = String(row.importedColor || '').trim();
     if(row.hasSortOrdColumn === true){
-      p._disableAudienceRowColor = importedAudienceColor ? '' : '1';
-      p.color = importedAudienceColor || '';
-    }else if(importedAudienceColor){
-      p.color = importedAudienceColor;
+      if(isAudienceOrdonnanceColorSuppressed(p)){
+        p._disableAudienceRowColor = '1';
+        p.color = '';
+      }else{
+        p._disableAudienceRowColor = importedAudienceColor ? '' : '1';
+        p.color = importedAudienceColor || '';
+      }
     }
     const importedOrdonnanceStatus = String(row.importedOrdonnanceStatus || '').trim();
     if(importedOrdonnanceStatus === 'att') p.attOrdOrOrdOk = 'att ord';
@@ -12139,7 +12225,10 @@ function setupEvents(){
     resetCreationForm();
     showView('creation');
   };
-  $('suiviLink').onclick = ()=>showView('suivi');
+  $('suiviLink').onclick = ()=>{
+    filterSuiviAttDepotOnly = false;
+    showView('suivi');
+  };
   $('audienceLink').onclick = ()=>showView('audience');
   $('diligenceLink').onclick = ()=>showView('diligence');
   $('salleLink').onclick = ()=>showView('salle');
@@ -12290,7 +12379,10 @@ function setupEvents(){
 
   $('searchClientInput')?.addEventListener('input', renderClientsDebounced);
 
-  $('filterGlobal')?.addEventListener('input', renderSuiviDebounced);
+  $('filterGlobal')?.addEventListener('input', ()=>{
+    filterSuiviAttDepotOnly = false;
+    renderSuiviDebounced();
+  });
   $('suiviBody')?.addEventListener('click', (e)=>{
     const btn = e.target.closest('button[data-action]');
     if(!btn) return;
@@ -12303,84 +12395,38 @@ function setupEvents(){
     if(action === 'delete') deleteDossier(clientId, dossierIndex);
   });
   $('filterSuiviProcedure')?.addEventListener('change', (e)=>{
+    filterSuiviAttDepotOnly = false;
     filterSuiviProcedure = e.target.value;
     renderSuivi();
   });
   $('filterSuiviTribunal')?.addEventListener('change', (e)=>{
+    filterSuiviAttDepotOnly = false;
     applySuiviTribunalFilterFromInput(e.target.value, { allowApproximate: true });
   });
   $('filterSuiviTribunal')?.addEventListener('keydown', (e)=>{
     if(e.key !== 'Enter') return;
     e.preventDefault();
+    filterSuiviAttDepotOnly = false;
     applySuiviTribunalFilterFromInput(e.target.value, { allowApproximate: true });
   });
   $('filterSuiviTribunal')?.addEventListener('input', (e)=>{
     if(String(e.target?.value || '').trim()) return;
+    filterSuiviAttDepotOnly = false;
     applySuiviTribunalFilterFromInput('', { allowApproximate: false });
   });
   $('filterSuiviCheckedOrder')?.addEventListener('change', (e)=>{
     filterSuiviCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderSuivi();
   });
+  bindDashboardShortcutCard('dashboardAudienceErrorsCard', openDashboardAudienceErrorsView);
+  bindDashboardShortcutCard('dashboardAttSortCard', openDashboardAudienceAttSortView);
+  bindDashboardShortcutCard('dashboardAttDepotCard', openDashboardSuiviAttDepotView);
   $('selectAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(true));
   $('clearAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(false));
   $('suiviPageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredSuiviRowsForPrint(!!e.target?.checked));
   $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('previewSuiviBtn')?.addEventListener('click', previewSuiviSelectedRows);
-  $('filterAudience')?.addEventListener('input', ()=>{
-    renderAudienceAutocompleteSuggestions();
-    renderAudienceDebounced();
-  });
-  $('filterAudience')?.addEventListener('focus', ()=>{
-    renderAudienceAutocompleteSuggestions();
-  });
-  $('filterAudience')?.addEventListener('blur', ()=>{
-    if(audienceAutocompleteHideTimer){
-      clearTimeout(audienceAutocompleteHideTimer);
-    }
-    audienceAutocompleteHideTimer = setTimeout(()=>{
-      hideAudienceAutocompleteSuggestions();
-      audienceAutocompleteHideTimer = null;
-    }, 120);
-  });
-  $('filterAudience')?.addEventListener('keydown', (e)=>{
-    if(e.key === 'Escape'){
-      hideAudienceAutocompleteSuggestions();
-      return;
-    }
-    if(!audienceAutocompleteItems.length) return;
-    if(e.key === 'ArrowDown'){
-      e.preventDefault();
-      setAudienceAutocompleteActiveIndex(audienceAutocompleteActiveIndex + 1);
-      return;
-    }
-    if(e.key === 'ArrowUp'){
-      e.preventDefault();
-      setAudienceAutocompleteActiveIndex(audienceAutocompleteActiveIndex - 1);
-      return;
-    }
-    if(e.key === 'Enter' && audienceAutocompleteActiveIndex >= 0){
-      e.preventDefault();
-      applyAudienceAutocompleteSuggestion(audienceAutocompleteActiveIndex);
-    }
-  });
-  $('filterAudienceSuggestions')?.addEventListener('mousedown', (e)=>{
-    const btn = e.target.closest('button[data-index]');
-    if(!btn) return;
-    e.preventDefault();
-    const index = Number(btn.dataset.index);
-    if(Number.isFinite(index)){
-      applyAudienceAutocompleteSuggestion(index);
-    }
-  });
-  $('filterAudienceSuggestions')?.addEventListener('mousemove', (e)=>{
-    const btn = e.target.closest('button[data-index]');
-    if(!btn) return;
-    const index = Number(btn.dataset.index);
-    if(Number.isFinite(index)){
-      setAudienceAutocompleteActiveIndex(index);
-    }
-  });
+  $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
   $('audienceErrorsBtn')?.addEventListener('click', ()=>{
     filterAudienceErrorsOnly = !filterAudienceErrorsOnly;
     const btn = $('audienceErrorsBtn');
@@ -12391,7 +12437,6 @@ function setupEvents(){
     const colorSel = $('filterAudienceColor');
     if(colorSel) colorSel.value = 'all';
     renderAudience();
-    renderAudienceAutocompleteSuggestions();
   });
   $('diligenceProcedureFilter')?.addEventListener('change', (e)=>{
     const nextProcedure = String(e.target?.value || 'all');
@@ -12513,12 +12558,10 @@ function setupEvents(){
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
     filterAudienceColor = e.target.value;
     renderAudience();
-    renderAudienceAutocompleteSuggestions();
   });
   $('filterAudienceProcedure')?.addEventListener('change', (e)=>{
     filterAudienceProcedure = e.target.value;
     renderAudience();
-    renderAudienceAutocompleteSuggestions();
   });
   $('filterAudienceTribunal')?.addEventListener('change', (e)=>{
     applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true });
@@ -12534,12 +12577,10 @@ function setupEvents(){
   $('filterAudienceDate')?.addEventListener('change', (e)=>{
     filterAudienceDate = String(e.target?.value || '').trim();
     renderAudience();
-    renderAudienceAutocompleteSuggestions();
   });
   $('filterAudienceCheckedOrder')?.addEventListener('change', (e)=>{
     filterAudienceCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderAudience();
-    renderAudienceAutocompleteSuggestions();
   });
 
   $('saveAudienceBtn')?.addEventListener('click', saveAllAudience);
@@ -13482,6 +13523,7 @@ function getSuiviBaseRowsCached(){
         index,
         procSource,
         procSet,
+        hasPendingDepot: false,
         __suiviPairKey: '',
         __suiviRefParts: undefined,
         tribunalLabels: [...new Set(tribunalLabels)],
@@ -13497,6 +13539,7 @@ function getSuiviBaseRowsCached(){
   rawRows.forEach(row=>{
     row.__suiviPairKey = buildSuiviRefDebiteurKey(row);
     row.__suiviRefParts = parseSuiviReferenceParts(row?.d?.referenceClient || '');
+    row.hasPendingDepot = hasSuiviPendingDepotRow(row);
     const tribunalKeys = [...new Set((row.tribunalLabels || [])
       .map(label=>resolveSuiviTribunalFilterKey(label))
       .filter(Boolean))];
@@ -13859,7 +13902,8 @@ function getAudienceRowsByExactQuery(rows, query){
     audienceExactSearchIndexCacheInput = sourceRows;
     audienceExactSearchIndexCacheOutput = index;
   }
-  return index.get(exactQuery) || [];
+  const matchedRows = index.get(exactQuery);
+  return Array.isArray(matchedRows) && matchedRows.length ? matchedRows : null;
 }
 
 function computeAudienceRowContentScore(row){
@@ -14704,7 +14748,10 @@ function isDiligenceCommandementProcedure(procedure){
 function matchesDiligenceProcedureFilter(procedure, filterValue){
   const activeFilter = String(filterValue || 'all').trim() || 'all';
   if(activeFilter === 'all') return true;
-  return getDiligenceProcedureFilterValue(procedure) === getDiligenceProcedureFilterValue(activeFilter);
+  const procedureValue = typeof procedure === 'object' && procedure
+    ? String(procedure.procedureFilterValue || procedure.procedure || '').trim()
+    : procedure;
+  return getDiligenceProcedureFilterValue(procedureValue) === getDiligenceProcedureFilterValue(activeFilter);
 }
 
 function isDiligenceExecutionProcedure(procedure){
@@ -16449,6 +16496,26 @@ function normalizeProcedures(d){
   return [...new Set(cleaned)];
 }
 
+function getSelectedDossierProcedures(d){
+  let list = [];
+  if(Array.isArray(d?.procedureList)) list = d.procedureList;
+  else if(typeof d?.procedureList === 'string') list = d.procedureList.split(',');
+
+  if(!list.length){
+    if(Array.isArray(d?.procedure)) list = d.procedure;
+    else if(typeof d?.procedure === 'string') list = d.procedure.split(',');
+  }
+
+  if(!list.length && d?.procedure) list = [String(d.procedure)];
+
+  return [...new Set(
+    list
+      .map(v=>parseProcedureToken(v))
+      .map(v=>String(v || '').trim())
+      .filter(Boolean)
+  )];
+}
+
 function syncProcedureCheckboxes(procList){
   const toMatchKey = (value)=>{
     const normalized = parseProcedureToken(value);
@@ -16541,6 +16608,100 @@ function getDashboardAttSortCount(){
   return count;
 }
 
+function getSuiviRequiredProcedureFields(procName, details){
+  const baseProc = getProcedureBaseName(parseProcedureToken(procName));
+  const procDetails = details && typeof details === 'object' ? details : {};
+  if(baseProc === 'Commandement'){
+    return [
+      'dateDepot',
+      'executionNo',
+      'notifConservateur',
+      'notifDebiteur',
+      'refExpertise',
+      'ord',
+      'expert',
+      'sort',
+      'dateVente'
+    ];
+  }
+  if(baseProc === 'SFDC' || baseProc === 'S/bien'){
+    return [
+      'dateDepot',
+      'depotLe',
+      'referenceClient',
+      'attOrdOrOrdOk',
+      'executionNo',
+      'attDelegationOuDelegat',
+      'huissier',
+      'sort',
+      'tribunal'
+    ];
+  }
+  if(baseProc === 'Injonction'){
+    const fields = [
+      'dateDepot',
+      'depotLe',
+      'referenceClient',
+      'attOrdOrOrdOk',
+      'notificationSort',
+      'notificationNo',
+      'notificationStatus',
+      'certificatNonAppelStatus',
+      'executionNo',
+      'huissier',
+      'sort',
+      'tribunal'
+    ];
+    const notificationStatus = String(procDetails.notificationStatus || '').trim().toLowerCase();
+    if(notificationStatus === 'notifier' || notificationStatus === 'nb'){
+      fields.push('dateNotification');
+    }
+    return fields;
+  }
+  if(baseProc === 'Redressement' || baseProc === 'Liquidation judiciaire'){
+    return [
+      'syndicName',
+      'notificationStatus',
+      'dateNotification',
+      'villeProcedure'
+    ];
+  }
+  return [
+    'dateDepot',
+    'depotLe',
+    'referenceClient',
+    'audience',
+    'juge',
+    'sort',
+    'tribunal'
+  ];
+}
+
+function isSuiviProcedurePendingDepot(procName, details){
+  const procDetails = details && typeof details === 'object' ? details : {};
+  const requiredFields = getSuiviRequiredProcedureFields(procName, procDetails);
+  if(!requiredFields.length) return false;
+  return requiredFields.some((field)=>{
+    const value = procDetails[field];
+    return !String(value || '').trim();
+  });
+}
+
+function hasSuiviPendingDepotRow(row){
+  const dossier = row?.d;
+  if(!dossier || typeof dossier !== 'object') return false;
+  const procedures = getSelectedDossierProcedures(dossier);
+  if(!procedures.length) return false;
+  const detailsMap = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  return procedures.some(procName=>isSuiviProcedurePendingDepot(procName, detailsMap[procName]));
+}
+
+function getDashboardAttDepotCount(){
+  return getSuiviBaseRowsCached().sortedDefaultRows.filter(row=>row?.hasPendingDepot === true).length;
+}
+
 function getDashboardSnapshot(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
@@ -16581,6 +16742,7 @@ function getDashboardAudienceMetrics(){
   }
   const metrics = {
     attSortCount: getDashboardAttSortCount(),
+    attDepotCount: getDashboardAttDepotCount(),
     audienceErrors: getAudienceErrorDossierCount()
   };
   dashboardAudienceMetricsCache = metrics;
@@ -16781,6 +16943,7 @@ function toggleAudienceSelectionAndColorEncoded(ci, di, procKeyEncoded, checked)
 }
 
 function getActiveAudiencePriorityColor(){
+  if(filterAudienceColor && filterAudienceColor !== 'all') return 'all';
   const activeBtn = document.querySelector('.color-btn[data-color].active');
   const color = String(activeBtn?.dataset?.color || '').trim();
   return color || selectedAudienceColor || 'all';
@@ -16900,7 +17063,7 @@ function getFilteredAudienceRows(allRows = null){
     const matched = [];
     const others = [];
     rows.forEach(row=>{
-      if((row?.__effectiveColor || getAudienceRowEffectiveColor(row)) === priorityColor){
+      if(audienceRowMatchesColorFilter(row, priorityColor)){
         matched.push(row);
       }else{
         others.push(row);
@@ -16928,7 +17091,7 @@ function getFilteredAudienceRows(allRows = null){
   const decorated = filtered.map(row=>{
     const bucket = getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet);
     const colorMatch = (!filterAudienceErrorsOnly && priorityColor && priorityColor !== 'all')
-      ? ((row?.__effectiveColor || getAudienceRowEffectiveColor(row)) === priorityColor ? 1 : 0)
+      ? (audienceRowMatchesColorFilter(row, priorityColor) ? 1 : 0)
       : 0;
     const sortMeta = buildAudienceSortMeta(row);
     return { row, bucket, colorMatch, sortMeta };
@@ -17208,7 +17371,7 @@ function previewAudienceSelectedRows(){
     subtitle: dataset.subtitle,
     headers: dataset.headers,
     rows: dataset.tableRows,
-    exportLabel: 'Ouvrir le fichier Excel',
+    exportLabel: 'Aperçu Excel',
     onExport: openAudienceExcelFilePreviewWindow
   });
 }
@@ -17694,7 +17857,7 @@ function getAudienceRows(options = {}){
     : null;
   if(exactMatchedRows){
     const out = exactMatchedRows.filter(row=>{
-      if(!ignoreColor && filterAudienceColor !== 'all' && (row?.__effectiveColor || getAudienceRowEffectiveColor(row)) !== filterAudienceColor) return false;
+      if(!ignoreColor && filterAudienceColor !== 'all' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
       return true;
     });
     audienceRowsViewCacheSource = baseRows;
@@ -17703,7 +17866,7 @@ function getAudienceRows(options = {}){
     return out;
   }
   const out = baseRows.filter(row=>{
-    if(!ignoreColor && filterAudienceColor !== 'all' && (row?.__effectiveColor || getAudienceRowEffectiveColor(row)) !== filterAudienceColor) return false;
+    if(!ignoreColor && filterAudienceColor !== 'all' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
     if(!ignoreSearch && q){
       const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft));
       if(!haystack.includes(q)) return false;
@@ -17754,7 +17917,7 @@ function getAudienceAutocompleteSuggestions(query){
   const baseRows = getAudienceRowsDedupedCached();
   const colorFilteredRows = filterAudienceColor === 'all'
     ? baseRows
-    : baseRows.filter(row=>String(row?.p?.color || '').trim() === filterAudienceColor);
+    : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
   const scopedRows = getFilteredAudienceRows(colorFilteredRows);
   const suggestions = [];
   for(const row of scopedRows){
@@ -18026,7 +18189,13 @@ function setAudienceColor(ci, di, procKey, checked){
   const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
   if(!checked){
     detachAudienceImportBatchOwnership(p);
-    delete p._disableAudienceRowColor;
+    if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
+      p._disableAudienceRowColor = '1';
+      p._suppressAudienceOrdonnanceColor = '1';
+    }else{
+      delete p._disableAudienceRowColor;
+      delete p._suppressAudienceOrdonnanceColor;
+    }
     p.color = '';
     if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
       dossier.statut = 'En cours';
@@ -18041,6 +18210,7 @@ function setAudienceColor(ci, di, procKey, checked){
   }
   detachAudienceImportBatchOwnership(p);
   delete p._disableAudienceRowColor;
+  delete p._suppressAudienceOrdonnanceColor;
   p.color = selectedAudienceColor;
   if(selectedAudienceColor === 'purple-dark') dossier.statut = 'Soldé';
   if(selectedAudienceColor === 'purple-light') dossier.statut = 'Arrêt définitif';
@@ -18185,7 +18355,10 @@ function updateAudienceDraft(key, field, value){
   const after = field === 'refClient'
     ? String(dossier?.referenceClient || '')
     : getAudienceProcedureFieldValue(p, field);
-  if(before !== after){
+  const hasMeaningfulChange = field === 'refClient'
+    ? !areEquivalentClientReferences(before, after)
+    : before !== after;
+  if(hasMeaningfulChange){
     detachAudienceImportBatchOwnership(p);
   }
   const fieldMap = {
@@ -18195,7 +18368,7 @@ function updateAudienceDraft(key, field, value){
     juge: 'procedureDetails.juge',
     sort: 'procedureDetails.sort'
   };
-  if(fieldMap[field]){
+  if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
       source: 'audience',
       field: fieldMap[field],
@@ -18214,22 +18387,40 @@ function updateAudienceDraftFromEncoded(keyEncoded, field, value){
 }
 
 function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
-  if(!inputEl) return;
+  if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
   if(!raw){
     updateAudienceDraft(key, 'dateAudience', '');
     inputEl.value = '';
-    return;
+    return true;
   }
   const normalized = normalizeDateDDMMYYYY(raw);
   if(!normalized){
     alert('Date d’audience invalide. Utilisez le format jj/mm/aaaa.');
     inputEl.focus();
-    return;
+    return false;
   }
   inputEl.value = normalized;
   updateAudienceDraft(key, 'dateAudience', normalized);
+  return true;
+}
+
+function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event){
+  if(!event || event.key !== 'Enter') return;
+  event.preventDefault();
+  if(!inputEl) return;
+  const key = decodeURIComponent(String(keyEncoded));
+  const targetField = String(field || '').trim();
+  if(targetField === 'dateAudience'){
+    if(!normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl)) return;
+  }else{
+    updateAudienceDraft(key, targetField, inputEl.value);
+  }
+  saveAllAudience({ clearDraft: false, rerender: true });
+  if(typeof inputEl.blur === 'function'){
+    inputEl.blur();
+  }
 }
 
 function saveAllAudience(options = {}){

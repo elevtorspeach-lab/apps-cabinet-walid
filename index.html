@@ -107,12 +107,17 @@
           <h3>Dossiers Clôture</h3>
           <p id="dossiersTermines">0</p>
         </div>
-        <div class="stat-card orange">
+        <div id="dashboardAttSortCard" class="stat-card orange is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-hourglass-half fa-2x"></i>
           <h3>Dossiers Att sort</h3>
           <p id="dossiersAttSort">0</p>
         </div>
-        <div class="stat-card red">
+        <div id="dashboardAttDepotCard" class="stat-card amber is-clickable" role="button" tabindex="0">
+          <i class="fa-solid fa-folder-open fa-2x"></i>
+          <h3>ATT Depot</h3>
+          <p id="dossiersAttDepot">0</p>
+        </div>
+        <div id="dashboardAudienceErrorsCard" class="stat-card red is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-triangle-exclamation fa-2x"></i>
           <h3>Erreurs Audience</h3>
           <p id="audienceErrorsCount">0</p>
@@ -189,7 +194,6 @@
           <i class="fa-solid fa-filter"></i>
           <input type="text" id="filterAudience" placeholder="Filter global (date / client / réf client / réf dossier)..." autocomplete="off" />
         </div>
-        <div id="filterAudienceSuggestions" class="audience-search-suggestions" role="listbox" hidden></div>
       </div>
 
       <div class="audience-color-filter">

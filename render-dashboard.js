@@ -133,6 +133,7 @@ function queueDashboardHeavyRender(options = {}){
     animateDashboardMetric('dossiersEnCours', snapshot.enCours, metricOptions);
     animateDashboardMetric('dossiersTermines', snapshot.clotureCount, metricOptions);
     if($('dossiersAttSort')) animateDashboardMetric('dossiersAttSort', audienceMetrics ? audienceMetrics.attSortCount : 0, metricOptions);
+    if($('dossiersAttDepot')) animateDashboardMetric('dossiersAttDepot', audienceMetrics ? audienceMetrics.attDepotCount : 0, metricOptions);
     if($('audienceErrorsCount')) animateDashboardMetric('audienceErrorsCount', audienceMetrics ? audienceMetrics.audienceErrors : 0, metricOptions);
     if(nextOptions.includeAudienceMetrics !== false){
       queueDashboardCalendarRender();
