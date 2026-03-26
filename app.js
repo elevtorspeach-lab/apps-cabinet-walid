@@ -14860,6 +14860,11 @@ function getDiligenceProcedureFilterValue(procedure){
   return getProcedureBaseName(String(procedure || '').trim());
 }
 
+function getDiligenceRowProcedureFilterValue(row){
+  if(!row || typeof row !== 'object') return '';
+  return getDiligenceProcedureFilterValue(row.procedureFilterValue || row.procedure || '');
+}
+
 function isDiligenceAssProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'ASS';
 }
@@ -14872,9 +14877,9 @@ function matchesDiligenceProcedureFilter(procedure, filterValue){
   const activeFilter = String(filterValue || 'all').trim() || 'all';
   if(activeFilter === 'all') return true;
   const procedureValue = typeof procedure === 'object' && procedure
-    ? String(procedure.procedureFilterValue || procedure.procedure || '').trim()
-    : procedure;
-  return getDiligenceProcedureFilterValue(procedureValue) === getDiligenceProcedureFilterValue(activeFilter);
+    ? getDiligenceRowProcedureFilterValue(procedure)
+    : getDiligenceProcedureFilterValue(procedure);
+  return procedureValue === getDiligenceProcedureFilterValue(activeFilter);
 }
 
 function isDiligenceExecutionProcedure(procedure){
@@ -14960,7 +14965,7 @@ function getDiligenceRows(){
 function getDiligenceRowsScopedForAuxFilters(rows){
   const list = Array.isArray(rows) ? rows : [];
   if(filterDiligenceProcedure === 'all') return list;
-  return list.filter(row=>matchesDiligenceProcedureFilter(row?.procedure, filterDiligenceProcedure));
+  return list.filter(row=>matchesDiligenceProcedureFilter(row, filterDiligenceProcedure));
 }
 
 function resetDiligenceAuxFilters(){
@@ -14987,7 +14992,7 @@ function syncDiligenceProcedureFilter(rows){
   }
   const set = new Set();
   rows.forEach(r=>{
-    const procedureValue = getDiligenceProcedureFilterValue(r.procedure);
+    const procedureValue = getDiligenceRowProcedureFilterValue(r);
     if(procedureValue) set.add(procedureValue);
   });
   const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
@@ -15742,7 +15747,7 @@ function getFilteredDiligenceRows(allRows){
     return diligenceFilteredRowsCacheOutput;
   }
   const filteredRows = allRows.filter(row=>{
-    if(!matchesDiligenceProcedureFilter(row.procedure, filterDiligenceProcedure)) return false;
+    if(!matchesDiligenceProcedureFilter(row, filterDiligenceProcedure)) return false;
     if(filterDiligenceSort !== 'all' && row.sort !== filterDiligenceSort) return false;
     if(filterDiligenceDelegation !== 'all' && row.delegation !== filterDiligenceDelegation) return false;
     if(
