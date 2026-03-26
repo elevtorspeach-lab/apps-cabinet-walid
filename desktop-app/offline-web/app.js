@@ -4213,23 +4213,20 @@ function normalizeImportedDossierStatus(value){
   const raw = String(value || '').trim();
   const loose = normalizeLooseText(raw).toLowerCase();
   if(!loose) return { statut: 'En cours', detail: '' };
-  const knownStatuses = [
-    { label: 'Arrêt définitif', key: 'arrêt définitif' },
-    { label: 'Arrêt définitif', key: 'arret definitif' },
-    { label: 'Suspension', key: 'suspension' },
-    { label: 'Clôture', key: 'clôture' },
-    { label: 'Clôture', key: 'cloture' },
-    { label: 'Soldé', key: 'soldé' },
-    { label: 'Soldé', key: 'solde' },
-    { label: 'En cours', key: 'en cours' }
-  ];
-  for(const item of knownStatuses){
-    if(!loose.startsWith(item.key)) continue;
-    const detail = raw
-      .slice(item.key.length)
-      .replace(/^[\s\-–—/:;,.|]+/g, '')
-      .trim();
-    return { statut: item.label, detail };
+  const normalizedStatuses = new Map([
+    ['arrêt définitif', 'Arrêt définitif'],
+    ['arret definitif', 'Arrêt définitif'],
+    ['arrêt', 'Arrêt définitif'],
+    ['arret', 'Arrêt définitif'],
+    ['suspension', 'Suspension'],
+    ['clôture', 'Clôture'],
+    ['cloture', 'Clôture'],
+    ['soldé', 'Soldé'],
+    ['solde', 'Soldé'],
+    ['en cours', 'En cours']
+  ]);
+  if(normalizedStatuses.has(loose)){
+    return { statut: normalizedStatuses.get(loose) || 'En cours', detail: '' };
   }
   return { statut: 'En cours', detail: raw };
 }
@@ -16101,8 +16098,9 @@ function getFilteredAudienceRows(allRows = null){
 
 function applyColorToSelectedAudienceRows(color){
   const targetColor = String(color || '').trim();
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light']);
+  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light', 'closed']);
   if(!allowed.has(targetColor) || !audiencePrintSelection.size) return false;
+  const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
   const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   let changed = false;
   let lastClientId = null;
@@ -16114,10 +16112,10 @@ function applyColorToSelectedAudienceRows(color){
     const client = AppState.clients?.[row.ci];
     if(!dossier || !client) return;
     const p = getAudienceProcedure(row.ci, row.di, row.procKey);
-    if(String(p?.color || '').trim() === targetColor) return;
-    p.color = targetColor;
-    if(targetColor === 'purple-dark') dossier.statut = 'Soldé';
-    if(targetColor === 'purple-light') dossier.statut = 'Arrêt définitif';
+    if(String(p?.color || '').trim() === appliedColor) return;
+    p.color = appliedColor;
+    if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
+    if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
     changed = true;
     lastClientId = client.id;
     lastDossier = dossier;
@@ -16732,14 +16730,6 @@ function getAudienceRowsRawCached(){
         const duplicateKey = (refDossier && procedureNorm && debiteurNorm)
           ? `${procedureNorm}__${debiteurNorm}__${refDossier}`
           : '';
-        const explicitColor = String(p?.color || '').trim();
-        const dossierStatus = String(d?.statut || '').trim();
-        const effectiveColor = ['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light'].includes(explicitColor)
-          ? explicitColor
-          : (
-            dossierStatus === 'Soldé' ? 'purple-dark'
-            : (dossierStatus === 'Arrêt définitif' ? 'purple-light' : '')
-          );
         const audienceDateDisplay = formatAudienceDateDisplayValue(draft?.dateAudience || p?.audience || '');
         const sortMeta = {
           ref: refDossier,
@@ -16762,9 +16752,9 @@ function getAudienceRowsRawCached(){
           __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
           __rowReference: refDossier,
           __sortMeta: sortMeta,
-          __audienceDateDisplay: audienceDateDisplay,
-          __effectiveColor: effectiveColor
+          __audienceDateDisplay: audienceDateDisplay
         };
+        row.__effectiveColor = getAudienceRowEffectiveColor(row);
         rows.push(row);
       });
     });
@@ -17146,7 +17136,7 @@ function setAudienceColor(ci, di, procKey, checked){
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   if(!dossier) return;
   const p = getAudienceProcedure(ci, di, procKey);
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light']);
+  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'purple-dark', 'purple-light', 'closed']);
   if(!checked){
     p.color = '';
     if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
@@ -17160,9 +17150,10 @@ function setAudienceColor(ci, di, procKey, checked){
     queueAudienceColorBatchUpdate({ persist: false, dashboard: true, suivi: false });
     return;
   }
-  p.color = selectedAudienceColor;
-  if(selectedAudienceColor === 'purple-dark') dossier.statut = 'Soldé';
-  if(selectedAudienceColor === 'purple-light') dossier.statut = 'Arrêt définitif';
+  const appliedColor = selectedAudienceColor === 'closed' ? 'purple-dark' : selectedAudienceColor;
+  p.color = appliedColor;
+  if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
+  if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
   markAudienceColorCachesDirty();
   queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
 }

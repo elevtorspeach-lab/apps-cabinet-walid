@@ -5,7 +5,7 @@ const SUIVI_EMPTY_MESSAGE = 'Aucun dossier trouvé avec ces filtres.';
 const SUIVI_LOADING_MESSAGE = 'Recherche dossier en cours...';
 const SUIVI_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
 const AUDIENCE_TABLE_COL_COUNT = 13;
-const SUIVI_TABLE_COL_COUNT = 10;
+const SUIVI_TABLE_COL_COUNT = 11;
 
 function getAudienceVirtualWindow(rowsLength){
   return getVirtualWindowByContainer('audienceTableContainer', rowsLength);
@@ -224,6 +224,8 @@ function shouldQueueSidebarSalleSessionsRender(){
 function renderSuiviRowHtml(row){
   const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
   const isChecked = isSuiviSelectedForPrint(row);
+  const dossierType = String(row?.d?.type || '').trim() || '-';
+  const referenceClient = String(row?.d?.referenceClient || '').trim() || '-';
   return `
     <tr>
       <td data-label="Sélection">
@@ -233,9 +235,10 @@ function renderSuiviRowHtml(row){
           ${isChecked ? 'checked' : ''}
           onchange="toggleSuiviPrintSelection(${row.c.id}, ${row.index}, this.checked)">
       </td>
+      <td data-label="Type" class="suivi-type-cell">${escapeHtml(dossierType)}</td>
       <td data-label="Client">${escapeHtml(row.c.name)}</td>
       <td data-label="Date d’affectation">${escapeHtml(displayDateAffectation)}</td>
-      <td data-label="Référence Client">${escapeHtml(row.d.referenceClient || '-')}</td>
+      <td data-label="Référence Client" class="suivi-reference-client-cell">${escapeHtml(referenceClient)}</td>
       <td class="procedure-cell" data-label="Procédure">${renderProcedureBadges(row.procSource)}</td>
       <td data-label="Débiteur">${escapeHtml(row.d.debiteur || '-')}</td>
       <td data-label="Montant">${escapeHtml(row.d.montant || '-')}</td>

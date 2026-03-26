@@ -92,17 +92,17 @@
     <div id="dashboardSection" class="section">
       <h1><i class="fa-solid fa-chart-pie"></i> Tableau de bord</h1>
       <div class="stats-container">
-        <div id="totalClientsCard" class="stat-card blue">
+        <div id="totalClientsCard" class="stat-card blue is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-users fa-2x"></i>
           <h3>Total Clients</h3>
           <p id="totalClients">0</p>
         </div>
-        <div class="stat-card green">
+        <div id="dashboardEnCoursCard" class="stat-card green is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-spinner fa-2x"></i>
           <h3>Dossiers en cours</h3>
           <p id="dossiersEnCours">0</p>
         </div>
-        <div class="stat-card purple">
+        <div id="dashboardClotureCard" class="stat-card purple is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-check fa-2x"></i>
           <h3>Dossiers Clôture</h3>
           <p id="dossiersTermines">0</p>
@@ -156,8 +156,7 @@
           <button class="color-btn green" data-color="green">ATT ORD</button>
           <button class="color-btn yellow" data-color="yellow">ORD OK</button>
           <button class="color-btn document-ok" data-color="document-ok">Document OK</button>
-          <button class="color-btn purple-dark" data-color="purple-dark">Soldé</button>
-          <button class="color-btn purple-light" data-color="purple-light">Arrêt définitif</button>
+          <button class="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
         </div>
       </div>
 
@@ -204,8 +203,7 @@
           <option value="green">ATT ORD</option>
           <option value="yellow">ORD OK</option>
           <option value="document-ok">Document OK</option>
-          <option value="purple-dark">Soldé</option>
-          <option value="purple-light">Arrêt définitif</option>
+          <option value="closed">Soldé / Arrêt définitif</option>
         </select>
       </div>
 
@@ -784,6 +782,7 @@
           <thead>
             <tr>
               <th>Sélection</th>
+              <th>Type</th>
               <th>Client</th>
               <th>Date d’affectation</th>
               <th>Référence Client</th>

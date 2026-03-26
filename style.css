@@ -1767,6 +1767,11 @@ tr:hover{background:#f1f5f9}
     font-size:11px;
     margin-bottom:4px;
   }
+  #suiviSection tbody td[data-label="Type"]{
+    font-size:16px;
+    font-weight:700;
+    color:#29448b;
+  }
   #suiviSection tbody td[data-label="Référence Client"],
   #suiviSection tbody td[data-label="Débiteur"],
   #suiviSection tbody td[data-label="Montant"],
@@ -4056,6 +4061,19 @@ td[data-label="Actions"] .btn-danger{
 
 #diligenceSection tbody td{
   border-bottom:1px solid rgba(15,23,42,.28);
+}
+
+#suiviSection td.suivi-reference-client-cell{
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  line-height:1.35;
+  min-width:0;
+}
+
+#suiviSection td.suivi-type-cell{
+  white-space:normal;
+  min-width:110px;
 }
 }
 

@@ -5,7 +5,7 @@ const SUIVI_EMPTY_MESSAGE = 'Aucun dossier trouvé avec ces filtres.';
 const SUIVI_LOADING_MESSAGE = 'Recherche dossier en cours...';
 const SUIVI_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
 const AUDIENCE_TABLE_COL_COUNT = 13;
-const SUIVI_TABLE_COL_COUNT = 10;
+const SUIVI_TABLE_COL_COUNT = 11;
 
 function getAudienceVirtualWindow(rowsLength){
   return getVirtualWindowByContainer('audienceTableContainer', rowsLength);
@@ -28,7 +28,13 @@ function renderSuiviRowsHtml(rows){
 }
 
 function getSuiviFilterCacheKey(query){
-  return [query, filterSuiviProcedure, filterSuiviTribunal, filterSuiviAttDepotOnly ? 'att-depot' : 'all'].join('||');
+  return [
+    query,
+    filterSuiviProcedure,
+    filterSuiviTribunal,
+    filterSuiviStatus,
+    filterSuiviAttDepotOnly ? 'att-depot' : 'all'
+  ].join('||');
 }
 
 function getSuiviRenderStateKey(filterCacheKey){
@@ -36,11 +42,11 @@ function getSuiviRenderStateKey(filterCacheKey){
 }
 
 function getCurrentSuiviRenderStateKey(){
-  return getSuiviRenderStateKey(getSuiviFilterCacheKey($('filterGlobal')?.value?.toLowerCase() || ''));
+  return getSuiviRenderStateKey(getSuiviFilterCacheKey(normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || '')));
 }
 
 function getCurrentSuiviFilterCacheKey(){
-  return getSuiviFilterCacheKey($('filterGlobal')?.value?.toLowerCase() || '');
+  return getSuiviFilterCacheKey(normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || ''));
 }
 
 function buildSuiviRowsRenderKey(pageData, stateKey){
@@ -227,6 +233,8 @@ function shouldQueueSidebarSalleSessionsRender(){
 function renderSuiviRowHtml(row){
   const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
   const isChecked = isSuiviSelectedForPrint(row);
+  const dossierType = String(row?.d?.type || '').trim() || '-';
+  const referenceClient = String(row?.d?.referenceClient || '').trim() || '-';
   return `
     <tr>
       <td data-label="Sélection">
@@ -236,9 +244,10 @@ function renderSuiviRowHtml(row){
           ${isChecked ? 'checked' : ''}
           onchange="toggleSuiviPrintSelection(${row.c.id}, ${row.index}, this.checked)">
       </td>
+      <td data-label="Type" class="suivi-type-cell">${escapeHtml(dossierType)}</td>
       <td data-label="Client">${escapeHtml(row.c.name)}</td>
       <td data-label="Date d’affectation">${escapeHtml(displayDateAffectation)}</td>
-      <td data-label="Référence Client">${escapeHtml(row.d.referenceClient || '-')}</td>
+      <td data-label="Référence Client" class="suivi-reference-client-cell">${escapeHtml(referenceClient)}</td>
       <td class="procedure-cell" data-label="Procédure">${renderProcedureBadges(row.procSource)}</td>
       <td data-label="Débiteur">${escapeHtml(row.d.debiteur || '-')}</td>
       <td data-label="Montant">${escapeHtml(row.d.montant || '-')}</td>
@@ -318,7 +327,7 @@ function orderSuiviRowsByCheckedSelection(rows){
 
 function renderSuivi(options = {}){
   if(!shouldRenderDeferredSection('suivi', options)) return;
-  const q = $('filterGlobal')?.value?.toLowerCase() || '';
+  const q = normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || '');
   const suiviFilterCacheKey = getSuiviFilterCacheKey(q);
   const suiviRenderStateKey = getSuiviRenderStateKey(suiviFilterCacheKey);
   syncPaginationFilterState('suivi', suiviRenderStateKey);
@@ -347,6 +356,7 @@ function renderSuivi(options = {}){
   suiviTribunalAliasMap = base.tribunalState.aliasMap;
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noStatusFilter = filterSuiviStatus === 'all';
   const noAttDepotFilter = filterSuiviAttDepotOnly !== true;
   const noSearchFilter = !q;
   const finalizeSuiviRender = (sortedRows)=>{
@@ -404,7 +414,7 @@ function renderSuivi(options = {}){
   let sortedRows = [];
   if(base === suiviFilteredRowsCacheSource && suiviFilterCacheKey === suiviFilteredRowsCacheKey){
     sortedRows = suiviFilteredRowsCacheOutput;
-  }else if(noProcedureFilter && noTribunalFilter && noAttDepotFilter && noSearchFilter){
+  }else if(noProcedureFilter && noTribunalFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
     sortedRows = base.sortedDefaultRows;
     suiviFilteredRowsCacheSource = base;
     suiviFilteredRowsCacheKey = suiviFilterCacheKey;
@@ -414,6 +424,7 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+      if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return false;
       if(!noAttDepotFilter && row?.hasPendingDepot !== true) return false;
       return true;
     });
@@ -477,6 +488,7 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return;
+      if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return;
       if(!noAttDepotFilter && row?.hasPendingDepot !== true) return;
       if(!noSearchFilter){
         const haystack = row.__suiviHaystack

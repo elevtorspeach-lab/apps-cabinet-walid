@@ -31,22 +31,44 @@ function getAudienceStatusDerivedColor(status){
   return '';
 }
 
-function getAudienceRowEffectiveColor(row){
-  const statusDerivedColor = getAudienceStatusDerivedColor(row?.d?.statut || '');
-  if(statusDerivedColor) return statusDerivedColor;
-  const explicitColor = String(row?.p?.color || '').trim();
-  if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
-  return '';
+function getAudienceRowOrdonnanceSourceValue(row){
+  return String(row?.draft?.sort ?? row?.p?.sort ?? '').trim();
 }
 
 function getAudienceRowOrdonnanceStatus(row){
-  return normalizeDiligenceOrdonnance(row?.p?.attOrdOrOrdOk || '');
+  const sortStatus = normalizeDiligenceOrdonnance(getAudienceRowOrdonnanceSourceValue(row));
+  return sortStatus || '';
+}
+
+function getAudienceRowOrdonnanceColor(row){
+  const status = getAudienceRowOrdonnanceStatus(row);
+  if(status === 'att') return 'green';
+  if(status === 'ok') return 'yellow';
+  return '';
+}
+
+function getAudienceRowEffectiveColor(row){
+  const statusDerivedColor = getAudienceStatusDerivedColor(row?.d?.statut || '');
+  if(statusDerivedColor) return statusDerivedColor;
+  if(String(row?.p?._disableAudienceRowColor || '').trim() === '1') return '';
+  if(String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1') return '';
+  const ordonnanceColor = getAudienceRowOrdonnanceColor(row);
+  if(ordonnanceColor) return ordonnanceColor;
+  const explicitColor = String(row?.p?.color || '').trim();
+  if(explicitColor === 'green' || explicitColor === 'yellow') return '';
+  if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
+  return '';
 }
 
 function audienceRowMatchesColorFilter(row, color){
   const targetColor = String(color || '').trim();
   if(!targetColor || targetColor === 'all') return true;
-  if(targetColor === 'green') return getAudienceRowOrdonnanceStatus(row) === 'att';
-  if(targetColor === 'yellow') return getAudienceRowOrdonnanceStatus(row) === 'ok';
+  if(targetColor === 'closed'){
+    const effectiveColor = getAudienceRowEffectiveColor(row);
+    return effectiveColor === 'purple-dark' || effectiveColor === 'purple-light';
+  }
+  if(targetColor === 'green' || targetColor === 'yellow'){
+    return getAudienceRowOrdonnanceColor(row) === targetColor;
+  }
   return getAudienceRowEffectiveColor(row) === targetColor;
 }
