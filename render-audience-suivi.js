@@ -135,6 +135,8 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const canEdit = canEditClient(c) && canEditData();
   const canView = Number.isFinite(Number(row?.c?.id)) && Number.isFinite(Number(row?.di));
   const safeColor = getAudienceRowEffectiveColor(row);
+  const resolvedStatus = String(row?.__resolvedStatus || d?.statut || 'En cours').trim() || 'En cours';
+  const resolvedStatusDetail = String(row?.__resolvedStatusDetail || d?.statutDetails || '').trim();
   const duplicateKey = buildAudienceDuplicateKey(row);
   const isDuplicate = !!(duplicateKey && duplicateKeySet.has(duplicateKey));
   const hasError = isAudienceRowInvalid(row, duplicateKeySet);
@@ -178,7 +180,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
-      <td data-label="Statut">${renderStatusDisplay(d.statut || 'En cours', d.statutDetails || '')}</td>
+      <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
       <td data-label="Actions">
         <div class="table-actions">
           <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>

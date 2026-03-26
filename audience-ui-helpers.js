@@ -32,7 +32,11 @@ function getAudienceStatusDerivedColor(status){
 }
 
 function getAudienceRowOrdonnanceSourceValue(row){
-  return String(row?.draft?.sort ?? row?.p?.sort ?? '').trim();
+  const draftSort = String(row?.draft?.sort ?? '').trim();
+  if(normalizeDiligenceOrdonnance(draftSort)) return draftSort;
+  const audienceSort = String(row?.p?.sort ?? '').trim();
+  if(normalizeDiligenceOrdonnance(audienceSort)) return audienceSort;
+  return String(row?.p?.attOrdOrOrdOk ?? '').trim();
 }
 
 function getAudienceRowOrdonnanceStatus(row){
@@ -48,7 +52,7 @@ function getAudienceRowOrdonnanceColor(row){
 }
 
 function getAudienceRowEffectiveColor(row){
-  const statusDerivedColor = getAudienceStatusDerivedColor(row?.d?.statut || '');
+  const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   if(statusDerivedColor) return statusDerivedColor;
   if(String(row?.p?._disableAudienceRowColor || '').trim() === '1') return '';
   if(String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1') return '';

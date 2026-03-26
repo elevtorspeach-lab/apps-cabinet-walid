@@ -527,80 +527,93 @@
 
           <div class="creation-priority-banner full">
             <i class="fa-solid fa-bolt"></i>
-            <span>Champs prioritaires: Référence Client, Date d’affectation, Ville, Adresse, Montant et Débiteur.</span>
+            <span>Champs prioritaires: Client, Référence Client, Date d’affectation et Débiteur.</span>
           </div>
 
-          <div class="form-group">
-            <label>Client</label>
-            <select id="selectClient"></select>
-          </div>
+          <div class="creation-form-layout full">
+            <div class="creation-form-row creation-form-row-two creation-form-row-top">
+              <div class="form-group creation-layout-card creation-client-card creation-priority-field">
+                <label>Client <span class="creation-priority-badge">Prioritaire</span></label>
+                <select id="selectClient"></select>
+                <div class="creation-client-card-subtitle">Sélectionnez le client principal du dossier.</div>
+              </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Référence Client <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="referenceClientInput" placeholder="Référence client"/>
-            <div id="referenceClientError" class="creation-field-error">Cette référence client existe déjà.</div>
-          </div>
+              <div class="form-group creation-layout-card creation-priority-field">
+                <label>Date d’affectation <span class="creation-priority-badge">Prioritaire</span></label>
+                <input type="text" id="dateAffectation" placeholder="jj/mm/aaaa" inputmode="numeric" autocomplete="off"/>
+              </div>
+            </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Date d’affectation <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="dateAffectation" placeholder="jj/mm/aaaa" inputmode="numeric" autocomplete="off"/>
-          </div>
+            <div class="creation-form-row creation-form-row-three">
+              <div class="form-group creation-layout-card">
+                <label>Type</label>
+                <input type="text" id="typeInput" placeholder="Type"/>
+              </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Ville <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="villeInput" placeholder="Ville"/>
-          </div>
+              <div class="form-group creation-layout-card creation-priority-field">
+                <label>Référence Client <span class="creation-priority-badge">Prioritaire</span></label>
+                <input type="text" id="referenceClientInput" placeholder="Référence client"/>
+                <div id="referenceClientError" class="creation-field-error">Cette référence client existe déjà.</div>
+              </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Adresse <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="adresseInput" placeholder="Adresse"/>
-          </div>
+              <div class="form-group creation-layout-card creation-priority-field">
+                <label>Débiteur <span class="creation-priority-badge">Prioritaire</span></label>
+                <input type="text" id="debiteurInput" placeholder="Nom du débiteur"/>
+              </div>
+            </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Montant <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="montantInput" inputmode="decimal" placeholder="Montant"/>
-          </div>
+            <div class="creation-form-row creation-form-row-three">
+              <div class="form-group creation-layout-card">
+                <label>Adresse</label>
+                <input type="text" id="adresseInput" placeholder="Adresse"/>
+              </div>
 
-          <div class="form-group creation-priority-field">
-            <label>Débiteur <span class="creation-priority-badge">Prioritaire</span></label>
-            <input type="text" id="debiteurInput" placeholder="Nom du débiteur"/>
-          </div>
+              <div class="form-group creation-layout-card">
+                <label>Ville</label>
+                <input type="text" id="villeInput" placeholder="Ville"/>
+              </div>
 
-          <div class="form-group">
-            <label>WW</label>
-            <input type="text" id="wwInput" placeholder="WW"/>
-          </div>
+              <div class="form-group creation-layout-card">
+                <label>Montant</label>
+                <input type="text" id="montantInput" inputmode="decimal" placeholder="Montant"/>
+              </div>
+            </div>
 
-          <div class="form-group">
-            <label>Marque</label>
-            <input type="text" id="marqueInput" placeholder="Marque"/>
-          </div>
+            <div class="creation-form-row creation-form-row-four">
+              <div class="form-group creation-layout-card">
+                <label>Caution</label>
+                <input type="text" id="cautionInput" placeholder="Caution"/>
+              </div>
 
-          <div class="form-group">
-            <label>Type</label>
-            <input type="text" id="typeInput" placeholder="Type"/>
-          </div>
+              <div class="form-group creation-layout-card">
+                <label>Adresse de caution</label>
+                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution"/>
+              </div>
 
-          <div class="form-group">
-            <label>Caution</label>
-            <input type="text" id="cautionInput" placeholder="Caution"/>
-          </div>
+              <div class="form-group creation-layout-card">
+                <label>Ville de caution</label>
+                <input type="text" id="cautionVilleInput" placeholder="Ville de caution"/>
+              </div>
 
-          <div class="form-group">
-            <label>Adresse de caution</label>
-            <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution"/>
-          </div>
+              <div class="form-group creation-layout-card">
+                <label>CIN de caution / RC</label>
+                <div class="caution-cin-rc-row">
+                  <input type="text" id="cautionCinInput" placeholder="CIN de caution"/>
+                  <input type="text" id="cautionRcInput" placeholder="RC"/>
+                </div>
+              </div>
+            </div>
 
-          <div class="form-group">
-            <label>Ville de caution</label>
-            <input type="text" id="cautionVilleInput" placeholder="Ville de caution"/>
-          </div>
+            <div class="creation-form-row creation-form-row-two">
+              <div class="form-group creation-layout-card">
+                <label>WW</label>
+                <input type="text" id="wwInput" placeholder="WW"/>
+              </div>
 
-          <div class="form-group">
-            <label>CIN de caution / RC</label>
-            <div class="caution-cin-rc-row">
-              <input type="text" id="cautionCinInput" placeholder="CIN de caution"/>
-              <input type="text" id="cautionRcInput" placeholder="RC"/>
+              <div class="form-group creation-layout-card">
+                <label>Marque</label>
+                <input type="text" id="marqueInput" placeholder="Marque"/>
+              </div>
             </div>
           </div>
 

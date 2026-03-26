@@ -4351,6 +4351,12 @@ function normalizeImportedDossierStatus(value){
   const normalizedStatuses = new Map([
     ['arrêt définitif', 'Arrêt définitif'],
     ['arret definitif', 'Arrêt définitif'],
+    ['arrêt definitive', 'Arrêt définitif'],
+    ['arret definitive', 'Arrêt définitif'],
+    ['arrêt defentif', 'Arrêt définitif'],
+    ['arret defentif', 'Arrêt définitif'],
+    ['arrêt defentive', 'Arrêt définitif'],
+    ['arret defentive', 'Arrêt définitif'],
     ['arrêt', 'Arrêt définitif'],
     ['arret', 'Arrêt définitif'],
     ['suspension', 'Suspension'],
@@ -8244,6 +8250,94 @@ function getDossierDebiteurKey(dossier){
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
+}
+
+function getDossierProcedureAudienceReferenceKeys(dossier, procKey){
+  const refs = new Set();
+  const normalizedProcKey = parseProcedureToken(procKey || '');
+  const pushRef = (value)=>{
+    splitReferenceValues(value).forEach(part=>{
+      const key = normalizeReferenceForAudienceLookup(part);
+      if(key) refs.add(key);
+    });
+  };
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  if(normalizedProcKey && details[normalizedProcKey]){
+    pushRef(details[normalizedProcKey]?.referenceClient || '');
+  }
+  if(!refs.size){
+    pushRef(dossier?.referenceClient || '');
+  }
+  if(!refs.size){
+    getDossierAudienceReferenceKeys(dossier).forEach(ref=>refs.add(ref));
+  }
+  return refs;
+}
+
+function getAudiencePurpleStatusSnapshot(dossier){
+  const normalizedStatus = normalizeLooseText(String(dossier?.statut || '').trim()).toLowerCase();
+  if(!normalizedStatus) return null;
+  const detail = String(dossier?.statutDetails || '').trim();
+  if(
+    normalizedStatus === 'arrêt'
+    || normalizedStatus === 'arret'
+    || normalizedStatus.startsWith('arrêt definitif')
+    || normalizedStatus.startsWith('arret definitif')
+    || normalizedStatus.startsWith('arrêt definitive')
+    || normalizedStatus.startsWith('arret definitive')
+    || normalizedStatus.startsWith('arrêt defentif')
+    || normalizedStatus.startsWith('arret defentif')
+    || normalizedStatus.startsWith('arrêt defentive')
+    || normalizedStatus.startsWith('arret defentive')
+  ){
+    return { statut: 'Arrêt définitif', detail, priority: 2 };
+  }
+  if(normalizedStatus.startsWith('soldé') || normalizedStatus.startsWith('solde')){
+    return { statut: 'Soldé', detail, priority: 1 };
+  }
+  return null;
+}
+
+function buildAudienceClosedStatusLookup(){
+  const lookup = new Map();
+  AppState.clients.forEach(client=>{
+    (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
+      const snapshot = getAudiencePurpleStatusSnapshot(dossier);
+      if(!snapshot) return;
+      normalizeProcedures(dossier).forEach(procKey=>{
+        if(!isAudienceProcedure(procKey)) return;
+        getDossierProcedureAudienceReferenceKeys(dossier, procKey).forEach(refKey=>{
+          const lookupKey = `${procKey}::${refKey}`;
+          const existing = lookup.get(lookupKey);
+          if(!existing || snapshot.priority > existing.priority){
+            lookup.set(lookupKey, snapshot);
+          }
+        });
+      });
+    });
+  });
+  return lookup;
+}
+
+function resolveAudienceRowStatusSnapshot(row, closedStatusLookup){
+  const currentStatus = String(row?.d?.statut || 'En cours').trim() || 'En cours';
+  const currentDetail = String(row?.d?.statutDetails || '').trim();
+  const directSnapshot = getAudiencePurpleStatusSnapshot(row?.d);
+  if(directSnapshot){
+    return { statut: directSnapshot.statut, detail: directSnapshot.detail || currentDetail };
+  }
+  const refKey = String(row?.__rowReference || '').trim();
+  const procKey = parseProcedureToken(row?.procKey || '');
+  if(!refKey || !procKey || !(closedStatusLookup instanceof Map)){
+    return { statut: currentStatus, detail: currentDetail };
+  }
+  const linkedSnapshot = closedStatusLookup.get(`${procKey}::${refKey}`);
+  if(linkedSnapshot){
+    return { statut: linkedSnapshot.statut, detail: linkedSnapshot.detail || currentDetail };
+  }
+  return { statut: currentStatus, detail: currentDetail };
 }
 
 function chooseAudienceProcedureTarget(globalDossier, orphanProcKey){
@@ -17878,6 +17972,7 @@ function getAudienceRowsRawCached(){
     return audienceRowsRawCache;
   }
   const rows = [];
+  const closedStatusLookup = buildAudienceClosedStatusLookup();
   AppState.clients.forEach((c, ci)=>{
     if(!canViewClient(c)) return;
     c.dossiers.forEach((d, di)=>{
@@ -17923,6 +18018,9 @@ function getAudienceRowsRawCached(){
           __sortMeta: sortMeta,
           __audienceDateDisplay: audienceDateDisplay
         };
+        const resolvedStatus = resolveAudienceRowStatusSnapshot(row, closedStatusLookup);
+        row.__resolvedStatus = resolvedStatus.statut;
+        row.__resolvedStatusDetail = resolvedStatus.detail;
         row.__effectiveColor = getAudienceRowEffectiveColor(row);
         rows.push(row);
       });
