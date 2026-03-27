@@ -235,10 +235,11 @@ function shouldQueueSidebarSalleSessionsRender(){
 function renderSuiviRowHtml(row){
   const displayDateAffectation = normalizeDateDDMMYYYY(row.d.dateAffectation || '') || '-';
   const isChecked = isSuiviSelectedForPrint(row);
+  const isDuplicate = isSuiviRowDuplicate(row);
   const dossierType = String(row?.d?.type || '').trim() || '-';
   const referenceClient = String(row?.d?.referenceClient || '').trim() || '-';
   return `
-    <tr>
+    <tr class="${isDuplicate ? 'color-red' : ''}">
       <td data-label="Sélection">
         <input
           type="checkbox"
@@ -311,16 +312,22 @@ function orderSuiviRowsByCheckedSelection(rows){
   ){
     return suiviCheckedOrderedRowsCacheOutput;
   }
+  const duplicateCheckedRows = [];
+  const duplicateOtherRows = [];
   const checkedRows = [];
   const otherRows = [];
   rows.forEach(row=>{
-    if(isSuiviSelectedForPrint(row)){
+    if(isSuiviRowDuplicate(row) && isSuiviSelectedForPrint(row)){
+      duplicateCheckedRows.push(row);
+    }else if(isSuiviRowDuplicate(row)){
+      duplicateOtherRows.push(row);
+    }else if(isSuiviSelectedForPrint(row)){
       checkedRows.push(row);
     }else{
       otherRows.push(row);
     }
   });
-  const out = checkedRows.concat(otherRows);
+  const out = duplicateCheckedRows.concat(duplicateOtherRows, checkedRows, otherRows);
   suiviCheckedOrderedRowsCacheInput = rows;
   suiviCheckedOrderedRowsCacheVersion = suiviPrintSelectionVersion;
   suiviCheckedOrderedRowsCacheOutput = out;
@@ -471,6 +478,7 @@ function renderSuivi(options = {}){
           if(!key) return;
           duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
         });
+        applySuiviDuplicateCounts(nextRows, duplicatePairCounts);
         const nextSortedRows = nextRows
           .slice()
           .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
@@ -511,6 +519,7 @@ function renderSuivi(options = {}){
       if(!key) return;
       duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
     });
+    applySuiviDuplicateCounts(filteredRows, duplicatePairCounts);
     sortedRows = filteredRows
       .slice()
       .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));

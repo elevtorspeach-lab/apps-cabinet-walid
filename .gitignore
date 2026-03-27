@@ -20,3 +20,4 @@ generated/
 release/
 snapshot-*/
 tmp/
+.tmp-tests/

@@ -4426,6 +4426,11 @@ td[data-label="Actions"] .btn-danger{
   min-width:0;
 }
 
+#suiviSection tbody tr.color-red td,
+#suiviSection tbody tr.color-red:hover td{
+  background:#e4a6a6;
+}
+
 #suiviSection td.suivi-type-cell{
   white-space:normal;
   min-width:110px;
