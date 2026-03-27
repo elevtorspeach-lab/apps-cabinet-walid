@@ -28,7 +28,13 @@ function renderSuiviRowsHtml(rows){
 }
 
 function getSuiviFilterCacheKey(query){
-  return [query, filterSuiviProcedure, filterSuiviTribunal].join('||');
+  return [
+    query,
+    filterSuiviProcedure,
+    filterSuiviTribunal,
+    filterSuiviStatus,
+    filterSuiviAttDepotOnly ? 'att-depot' : 'all'
+  ].join('||');
 }
 
 function getSuiviRenderStateKey(filterCacheKey){
@@ -36,11 +42,11 @@ function getSuiviRenderStateKey(filterCacheKey){
 }
 
 function getCurrentSuiviRenderStateKey(){
-  return getSuiviRenderStateKey(getSuiviFilterCacheKey($('filterGlobal')?.value?.toLowerCase() || ''));
+  return getSuiviRenderStateKey(getSuiviFilterCacheKey(normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || '')));
 }
 
 function getCurrentSuiviFilterCacheKey(){
-  return getSuiviFilterCacheKey($('filterGlobal')?.value?.toLowerCase() || '');
+  return getSuiviFilterCacheKey(normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || ''));
 }
 
 function buildSuiviRowsRenderKey(pageData, stateKey){
@@ -157,17 +163,20 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="Référence Client" class="${isRefClientMismatch ? 'audience-refclient-mismatch' : ''}">
-        ${escapeHtml(refClientDisplay)}
-        ${isRefClientMismatch ? '<div class="audience-inline-error">Réf client audience différente du global</div>' : ''}
+        ${canEdit && isRefClientMismatch
+          ? `<input class="${isRefClientMismatch ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
+          : escapeHtml(refClientDisplay)
+        }
+        ${isRefClientMismatch ? '<div class="audience-inline-error">Réf client audience introuvable dans le dossier global. Modifiez-la ici pour corriger rapidement.</div>' : ''}
       </td>
       <td data-label="Débiteur">${escapeHtml(d.debiteur || '-')}</td>
       <td data-label="Référence dossier">
-        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)">
+        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
         ${isMissingGlobal ? '<div class="audience-inline-error">Introuvable dans dossier global</div>' : ''}
       </td>
-      <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)"></td>
-      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)"></td>
-      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)"></td>
+      <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateAudience',this,event)"></td>
+      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
+      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
@@ -320,7 +329,7 @@ function orderSuiviRowsByCheckedSelection(rows){
 
 function renderSuivi(options = {}){
   if(!shouldRenderDeferredSection('suivi', options)) return;
-  const q = $('filterGlobal')?.value?.toLowerCase() || '';
+  const q = normalizeCaseInsensitiveSearchText($('filterGlobal')?.value || '');
   const suiviFilterCacheKey = getSuiviFilterCacheKey(q);
   const suiviRenderStateKey = getSuiviRenderStateKey(suiviFilterCacheKey);
   syncPaginationFilterState('suivi', suiviRenderStateKey);
@@ -349,6 +358,8 @@ function renderSuivi(options = {}){
   suiviTribunalAliasMap = base.tribunalState.aliasMap;
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noStatusFilter = filterSuiviStatus === 'all';
+  const noAttDepotFilter = filterSuiviAttDepotOnly !== true;
   const noSearchFilter = !q;
   const finalizeSuiviRender = (sortedRows)=>{
     const orderedRows = orderSuiviRowsByCheckedSelection(sortedRows);
@@ -405,7 +416,7 @@ function renderSuivi(options = {}){
   let sortedRows = [];
   if(base === suiviFilteredRowsCacheSource && suiviFilterCacheKey === suiviFilteredRowsCacheKey){
     sortedRows = suiviFilteredRowsCacheOutput;
-  }else if(noProcedureFilter && noTribunalFilter && noSearchFilter){
+  }else if(noProcedureFilter && noTribunalFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
     sortedRows = base.sortedDefaultRows;
     suiviFilteredRowsCacheSource = base;
     suiviFilteredRowsCacheKey = suiviFilterCacheKey;
@@ -415,6 +426,8 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+      if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return false;
+      if(!noAttDepotFilter && row?.hasPendingDepot !== true) return false;
       return true;
     });
     const requestId = ++suiviFilterRequestSeq;
@@ -477,6 +490,8 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return;
+      if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return;
+      if(!noAttDepotFilter && row?.hasPendingDepot !== true) return;
       if(!noSearchFilter){
         const haystack = row.__suiviHaystack
           || (row.__suiviHaystack = buildSuiviSearchHaystack(
@@ -608,7 +623,7 @@ function renderAudience(options = {}){
   const baseRows = getAudienceRowsDedupedCached();
   const colorFilteredRows = filterAudienceColor === 'all'
     ? baseRows
-    : baseRows.filter(row=>String(row?.p?.color || '').trim() === filterAudienceColor);
+    : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
   const exactMatchedRows = audienceQuery
     ? getAudienceRowsByExactQuery(colorFilteredRows, audienceQuery)
     : null;

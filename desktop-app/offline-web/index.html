@@ -92,27 +92,32 @@
     <div id="dashboardSection" class="section">
       <h1><i class="fa-solid fa-chart-pie"></i> Tableau de bord</h1>
       <div class="stats-container">
-        <div id="totalClientsCard" class="stat-card blue">
+        <div id="totalClientsCard" class="stat-card blue is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-users fa-2x"></i>
           <h3>Total Clients</h3>
           <p id="totalClients">0</p>
         </div>
-        <div class="stat-card green">
+        <div id="dashboardEnCoursCard" class="stat-card green is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-spinner fa-2x"></i>
           <h3>Dossiers en cours</h3>
           <p id="dossiersEnCours">0</p>
         </div>
-        <div class="stat-card purple">
+        <div id="dashboardClotureCard" class="stat-card purple is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-check fa-2x"></i>
           <h3>Dossiers Clôture</h3>
           <p id="dossiersTermines">0</p>
         </div>
-        <div class="stat-card orange">
+        <div id="dashboardAttSortCard" class="stat-card orange is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-hourglass-half fa-2x"></i>
           <h3>Dossiers Att sort</h3>
           <p id="dossiersAttSort">0</p>
         </div>
-        <div class="stat-card red">
+        <div id="dashboardAttDepotCard" class="stat-card amber is-clickable" role="button" tabindex="0">
+          <i class="fa-solid fa-folder-open fa-2x"></i>
+          <h3>ATT Depot</h3>
+          <p id="dossiersAttDepot">0</p>
+        </div>
+        <div id="dashboardAudienceErrorsCard" class="stat-card red is-clickable" role="button" tabindex="0">
           <i class="fa-solid fa-triangle-exclamation fa-2x"></i>
           <h3>Erreurs Audience</h3>
           <p id="audienceErrorsCount">0</p>
@@ -150,6 +155,7 @@
           <button class="color-btn blue" data-color="blue">Att sort</button>
           <button class="color-btn green" data-color="green">ATT ORD</button>
           <button class="color-btn yellow" data-color="yellow">ORD OK</button>
+          <button class="color-btn document-ok" data-color="document-ok">Document OK</button>
           <button class="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
         </div>
       </div>
@@ -169,14 +175,14 @@
         <button id="clearAllPrintAudienceBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-eraser"></i> Décocher page
         </button>
-        <button id="exportAudienceBtn" class="btn-primary">
+        <button id="exportAudienceBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-file-export"></i> Exporter
         </button>
-        <button id="exportAudienceDetailBtn" class="btn-primary">
+        <button id="exportAudienceDetailBtn" class="btn-primary" type="button">
           <i class="fa-solid fa-file-lines"></i> Export d'audience
         </button>
         <button id="previewAudienceBtn" class="btn-primary" type="button">
-          <i class="fa-regular fa-eye"></i> Voir le fichier
+          <i class="fa-regular fa-eye"></i> Aperçu Excel
         </button>
       </div>
     </div>
@@ -187,7 +193,6 @@
           <i class="fa-solid fa-filter"></i>
           <input type="text" id="filterAudience" placeholder="Filter global (date / client / réf client / réf dossier)..." autocomplete="off" />
         </div>
-        <div id="filterAudienceSuggestions" class="audience-search-suggestions" role="listbox" hidden></div>
       </div>
 
       <div class="audience-color-filter">
@@ -197,6 +202,7 @@
           <option value="blue">Att sort</option>
           <option value="green">ATT ORD</option>
           <option value="yellow">ORD OK</option>
+          <option value="document-ok">Document OK</option>
           <option value="closed">Soldé / Arrêt définitif</option>
         </select>
       </div>
@@ -298,12 +304,17 @@
                 <option value="all">Toutes</option>
               </select>
             </div>
-	            <div class="audience-color-filter">
-	              <label for="diligenceTribunalFilter">Tribunal</label>
-	              <select id="diligenceTribunalFilter">
-	                <option value="all">Tous</option>
-	              </select>
-	            </div>
+            <div class="audience-color-filter">
+              <label for="diligenceTribunalFilter">Tribunal</label>
+              <input
+                type="text"
+                id="diligenceTribunalFilter"
+                list="diligenceTribunalOptions"
+                placeholder=""
+                autocomplete="off"
+              />
+              <datalist id="diligenceTribunalOptions"></datalist>
+            </div>
 	            <label id="diligenceCheckedCount" class="audience-checked-count" for="diligencePageSelectionToggle">
               <input id="diligencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page diligence">
               <span class="label">Cochés</span>
@@ -472,12 +483,21 @@
     <div id="clientSection" class="section" style="display:none;">
       <h1><i class="fa-solid fa-users"></i> Gestion des Clients</h1>
       <div class="clients-toolbar">
-        <div class="search-box">
+        <div class="search-box search-box--clients-pro">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="searchClientInput" placeholder="Rechercher un client..." />
+          <div class="search-box-content">
+            <span class="search-box-label">Recherche client</span>
+            <input type="text" id="searchClientInput" placeholder="Rechercher un client..." />
+          </div>
         </div>
-        <div class="add-client-form pro">
-          <input type="text" id="clientName" placeholder="Nom du client"/>
+        <div class="add-client-form add-client-form--pro">
+          <label class="add-client-label" for="clientName">
+            <span class="add-client-label-main"><i class="fa-solid fa-user-plus"></i> Nouveau client</span>
+            <span class="add-client-label-sub">Ajout rapide pour lancer un dossier</span>
+          </label>
+          <div class="add-client-input-wrap">
+            <input type="text" id="clientName" placeholder="Nom du client"/>
+          </div>
           <button id="addClientBtn" class="btn-success">
             <i class="fa-solid fa-plus"></i> Ajouter
           </button>
@@ -534,8 +554,14 @@
             <div class="creation-form-row creation-form-row-two creation-form-row-top">
               <div class="form-group creation-layout-card creation-client-card creation-priority-field">
                 <label>Client <span class="creation-priority-badge">Prioritaire</span></label>
-                <select id="selectClient"></select>
+                <div class="creation-client-picker">
+                  <select id="selectClient"></select>
+                  <button id="unlockCreationClientBtn" class="btn-primary creation-client-change-btn" type="button" style="display:none;">
+                    <i class="fa-solid fa-rotate"></i> Changer
+                  </button>
+                </div>
                 <div class="creation-client-card-subtitle">Sélectionnez le client principal du dossier.</div>
+                <div id="creationClientHint" class="creation-client-hint" style="display:none;"></div>
               </div>
 
               <div class="form-group creation-layout-card creation-priority-field">
@@ -604,7 +630,7 @@
               </div>
             </div>
 
-            <div class="creation-form-row creation-form-row-two">
+            <div class="creation-form-row creation-form-row-two" data-procedure-visibility="Restitution">
               <div class="form-group creation-layout-card">
                 <label>WW</label>
                 <input type="text" id="wwInput" placeholder="WW"/>
@@ -613,6 +639,23 @@
               <div class="form-group creation-layout-card">
                 <label>Marque</label>
                 <input type="text" id="marqueInput" placeholder="Marque"/>
+              </div>
+            </div>
+
+            <div class="creation-form-row creation-form-row-three" data-procedure-visibility="Commandement">
+              <div class="form-group creation-layout-card">
+                <label>TF N°</label>
+                <input type="text" id="efNumberInput" placeholder="TF N°"/>
+              </div>
+
+              <div class="form-group creation-layout-card">
+                <label>Conservation</label>
+                <input type="text" id="conservationInput" placeholder="Conservation"/>
+              </div>
+
+              <div class="form-group creation-layout-card">
+                <label>Métrage</label>
+                <input type="text" id="metrageInput" placeholder="Métrage"/>
               </div>
             </div>
           </div>
@@ -632,6 +675,7 @@
               <label data-proc="SFDC"><input type="checkbox" value="SFDC" class="proc-check"> SFDC</label>
               <label data-proc="Injonction"><input type="checkbox" value="Injonction" class="proc-check"> Injonction</label>
               <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
+              <label data-proc="Commandement"><input type="checkbox" value="Commandement" class="proc-check"> Commandement</label>
               <label data-proc="Vérification de créance"><input type="checkbox" value="Vérification de créance" class="proc-check"> Vérification de créance</label>
               <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
               <label data-proc="Liquidation judiciaire"><input type="checkbox" value="Liquidation judiciaire" class="proc-check"> Liquidation judiciaire</label>
@@ -645,6 +689,9 @@
 
           <div id="procedureDetails" class="procedure-details full"></div>
           <datalist id="procedureTribunalOptions"></datalist>
+          <datalist id="commandementSortOptions">
+            <option value="att expertise"></option>
+          </datalist>
 
           <!-- DOCUMENTS + NOTE/STATUT -->
           <div class="form-group full two-col">

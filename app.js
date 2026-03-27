@@ -3092,108 +3092,102 @@ function getSelectedSuiviRowsForExport(){
 
 function buildSuiviSelectedExportDatasetBase(){
   const rows = getSelectedSuiviRowsForExport();
-  const baseHeaders = [
+  const headers = [
     'Client',
-    'Date d’affectation',
+    'date affectation',
     'Type',
-    'Référence Client',
+    'ref client',
     'Procédure',
-    'Nom',
+    'debiteur ',
     'Adresse',
     'Ville',
     'WW',
     'Marque',
     'Caution',
-    'Adresse de caution'
-  ];
-  const getProcedureReference = (dossier, procedureName)=>{
-    const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
-      ? dossier.procedureDetails
-      : {};
-    const refs = Object.entries(details)
-      .filter(([procName])=>getProcedureBaseName(procName) === procedureName)
-      .map(([, procDetails])=>String(procDetails?.referenceClient || '').trim())
-      .filter(Boolean);
-    return refs.length ? [...new Set(refs)].join(', ') : '';
-  };
-  const procedureReferenceColumns = [
-    { label: 'Référence ASS', procedureName: 'ASS', width: 26 },
-    { label: 'Référence Restitution', procedureName: 'Restitution', width: 30 },
-    { label: 'Référence Nantissement', procedureName: 'Nantissement', width: 30 },
-    { label: 'Référence SFDC', procedureName: 'SFDC', width: 30 },
-    { label: 'Référence Injonction', procedureName: 'Injonction', width: 30 }
-  ].filter(column=>rows.some(row=>getProcedureReference(row.d, column.procedureName)));
-  const headers = [
-    ...baseHeaders,
-    ...procedureReferenceColumns.map(column=>column.label),
+    'Adresse  caution',
+    'Date depot',
+    'Réf Ass',
+    'Audience',
+    'Sort',
     'Tribunal'
   ];
   return {
     rows,
     headers,
-    procedureReferenceColumns,
     colWidths: [
       { wch: 20 },
-      { wch: 30 },
+      { wch: 18 },
       { wch: 16 },
       { wch: 28 },
-      { wch: 42 },
+      { wch: 20 },
       { wch: 28 },
-      { wch: 56 },
+      { wch: 34 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 28 },
       { wch: 18 },
       { wch: 22 },
       { wch: 18 },
-      { wch: 22 },
-      { wch: 46 },
-      ...procedureReferenceColumns.map(column=>({ wch: column.width })),
-      { wch: 24 }
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 34 }
     ]
   };
 }
 
-function buildSuiviSelectedExportDataset(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
+function getSuiviExportProcedureNames(row){
+  const procedures = Array.isArray(row?.procSource) && row.procSource.length
+    ? row.procSource
+    : normalizeProcedures(row?.d || {});
+  const out = [...new Set(
+    procedures
+      .map(value=>String(value || '').trim())
+      .filter(Boolean)
+  )];
+  return out.length ? out : [''];
+}
+
+function collectSuiviProcedureExportValues(dossier, procedureName){
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  const baseProcedureName = getProcedureBaseName(procedureName);
+  const matchingDetails = Object.entries(details)
+    .filter(([procName])=>getProcedureBaseName(procName) === baseProcedureName)
+    .map(([, procDetails])=>procDetails || {});
+  const collect = (getter)=>{
+    const values = matchingDetails
+      .map(getter)
+      .map(value=>String(value || '').trim())
+      .filter(Boolean);
+    return values.length ? [...new Set(values)].join(', ') : '';
+  };
   return {
-    ...dataset,
-    tableRows: dataset.rows.map(row=>[
-      row.c?.name || '-',
-      normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
-      row.d?.type || '-',
-      row.d?.referenceClient || '-',
-      Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
-      row.d?.debiteur || '-',
-      row.d?.adresse || '-',
-      row.d?.ville || '-',
-      row.d?.ww || '-',
-      row.d?.marque || '-',
-      row.d?.caution || '-',
-      row.d?.cautionAdresse || '-',
-      ...dataset.procedureReferenceColumns.map(column=>{
-        const details = row.d?.procedureDetails && typeof row.d.procedureDetails === 'object'
-          ? row.d.procedureDetails
-          : {};
-        const refs = Object.entries(details)
-          .filter(([procName])=>getProcedureBaseName(procName) === column.procedureName)
-          .map(([, procDetails])=>String(procDetails?.referenceClient || '').trim())
-          .filter(Boolean);
-        return refs.length ? [...new Set(refs)].join(', ') : '';
-      }),
-      (row.tribunalList && row.tribunalList.length) ? row.tribunalList.join(', ') : '-'
-    ])
+    dateDepot: collect(proc=>proc.depotLe || proc.dateDepot || ''),
+    reference: collect(proc=>proc.referenceClient || ''),
+    audience: collect(proc=>proc.audience || ''),
+    sort: collect(proc=>proc.sort || ''),
+    tribunal: collect(proc=>proc.tribunal || '')
   };
 }
 
-async function buildSuiviSelectedExportDatasetAsync(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
-  return {
-    ...dataset,
-    tableRows: await mapChunked(dataset.rows, async (row)=>{
+function buildSuiviExportTableRows(rows){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return sourceRows.flatMap((row)=>{
+    const procedures = getSuiviExportProcedureNames(row);
+    return procedures.map((procedureName)=>{
+      const procedureValues = collectSuiviProcedureExportValues(row?.d, procedureName);
+      const fallbackTribunal = (row?.tribunalList && row.tribunalList.length)
+        ? row.tribunalList.join(', ')
+        : '';
       return [
         row.c?.name || '-',
         normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
         row.d?.type || '-',
         row.d?.referenceClient || '-',
-        Array.isArray(row.procSource) ? row.procSource.join(', ') : (row.d?.procedure || '-'),
+        procedureName || '-',
         row.d?.debiteur || '-',
         row.d?.adresse || '-',
         row.d?.ville || '-',
@@ -3201,25 +3195,38 @@ async function buildSuiviSelectedExportDatasetAsync(){
         row.d?.marque || '-',
         row.d?.caution || '-',
         row.d?.cautionAdresse || '-',
-        ...dataset.procedureReferenceColumns.map((column)=>{
-          const details = row.d?.procedureDetails && typeof row.d.procedureDetails === 'object'
-            ? row.d.procedureDetails
-            : {};
-          const refs = Object.entries(details)
-            .filter(([procName])=>getProcedureBaseName(procName) === column.procedureName)
-            .map(([, procDetails])=>String(procDetails?.referenceClient || '').trim())
-            .filter(Boolean);
-          return refs.length ? [...new Set(refs)].join(', ') : '';
-        }),
-        (row.tribunalList && row.tribunalList.length) ? row.tribunalList.join(', ') : '-'
+        procedureValues.dateDepot || '',
+        procedureValues.reference || '',
+        procedureValues.audience || '',
+        procedureValues.sort || '',
+        procedureValues.tribunal || fallbackTribunal || ''
       ];
-    }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') })
+    });
+  });
+}
+
+function buildSuiviSelectedExportDataset(){
+  const dataset = buildSuiviSelectedExportDatasetBase();
+  return {
+    ...dataset,
+    tableRows: buildSuiviExportTableRows(dataset.rows)
+  };
+}
+
+async function buildSuiviSelectedExportDatasetAsync(){
+  const dataset = buildSuiviSelectedExportDatasetBase();
+  const rowGroups = await mapChunked(dataset.rows, async (row)=>{
+    return buildSuiviExportTableRows([row]);
+  }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') });
+  return {
+    ...dataset,
+    tableRows: rowGroups.flat()
   };
 }
 
 function previewSuiviSelectedRows(){
   const dataset = buildSuiviSelectedExportDataset();
-  if(!dataset.rows.length){
+  if(!dataset.tableRows.length){
     alert('Cochez au moins une ligne pour afficher le fichier.');
     return;
   }
@@ -3239,7 +3246,7 @@ function previewSuiviSelectedRows(){
 
 function openSuiviExcelFilePreviewWindow(){
   const dataset = buildSuiviSelectedExportDataset();
-  if(!dataset.rows.length){
+  if(!dataset.tableRows.length){
     alert('Cochez au moins une ligne pour afficher le fichier.');
     return;
   }
@@ -3258,11 +3265,11 @@ async function exportSuiviSelectedXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     const dataset = await buildSuiviSelectedExportDatasetAsync();
-    if(!dataset.rows.length){
+    if(!dataset.tableRows.length){
       alert('Cochez au moins une ligne pour exporter.');
       return;
     }
-    if(shouldPreferSelectedExportCsvPath(dataset.rows.length)){
+    if(shouldPreferSelectedExportCsvPath(dataset.tableRows.length)){
       const csvBlob = await createMappedCsvBlobChunked({
         headers: dataset.headers,
         items: dataset.tableRows,
@@ -3284,7 +3291,7 @@ async function exportSuiviSelectedXLS(options = {}){
       subtitle: '',
       sheetName: 'Suivi',
       colWidths: dataset.colWidths,
-      filename: 'suivi_export.xlsx',
+      filename: 'suivis dossier.xlsx',
       openAfterExport: options?.openAfterExport === true,
       browserDownloadTarget: options?.browserDownloadTarget || null,
       browserOpenInline: options?.browserOpenInline === true,
@@ -5404,6 +5411,18 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     columnWrap: [true, true, false, false, false, false, false],
     columnShrinkToFit: [false, false, false, false, true, false, false]
   };
+  const audienceReferenceBodyBorder = {
+    top: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+    left: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+    bottom: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+    right: { style: 'thin', color: { argb: 'FF1A1A1A' } }
+  };
+  const audienceReferenceHeaderBorder = {
+    top: { style: 'thin', color: { argb: 'FF111111' } },
+    left: { style: 'thin', color: { argb: 'FF111111' } },
+    bottom: { style: 'thin', color: { argb: 'FF111111' } },
+    right: { style: 'thin', color: { argb: 'FF111111' } }
+  };
 
   if(useAudienceReferenceLayout && colCount === 7){
     try{
@@ -5431,7 +5450,15 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
           sheetRow.values = Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill('');
           sheetRow.height = sampleRowHeight;
           for(let c = 1; c <= colCount; c++){
-            sheetRow.getCell(c).alignment = getAudienceReferenceCellAlignment(audienceReferenceLayout, c);
+            const cell = sheetRow.getCell(c);
+            cell.font = { name: 'Calibri', size: 12, color: { argb: 'FF111111' } };
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFFFFFFF' }
+            };
+            cell.alignment = getAudienceReferenceCellAlignment(audienceReferenceLayout, c);
+            cell.border = audienceReferenceBodyBorder;
           }
         }, { chunkSize: 120 });
         await yieldToMainThread();
@@ -5485,13 +5512,6 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         sheetRow.height = audienceReferenceLayout.dataRowHeight;
       }, { chunkSize: 80 });
 
-      const thinBorder = {
-        top: { style: 'thin', color: { argb: 'FFBFC5CE' } },
-        left: { style: 'thin', color: { argb: 'FFBFC5CE' } },
-        bottom: { style: 'thin', color: { argb: 'FFBFC5CE' } },
-        right: { style: 'thin', color: { argb: 'FFBFC5CE' } }
-      };
-
       for(let c = 1; c <= colCount; c++){
         const topCell = sheet.getRow(5).getCell(c);
         topCell.fill = {
@@ -5511,7 +5531,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
           fgColor: { argb: 'FF1A4590' }
         };
         headerCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        headerCell.border = thinBorder;
+        headerCell.border = audienceReferenceHeaderBorder;
       }
 
       const subtitleCell = sheet.getCell('A6');
@@ -5526,8 +5546,13 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
           const cell = sheetRow.getCell(c);
           cell.value = Array.isArray(row) ? (row[c - 1] ?? '') : '';
           cell.font = { name: 'Calibri', size: 12, color: { argb: 'FF111111' } };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFFFFF' }
+          };
           cell.alignment = getAudienceReferenceCellAlignment(audienceReferenceLayout, c);
-          cell.border = thinBorder;
+          cell.border = audienceReferenceBodyBorder;
         }
       }, { chunkSize: 40 });
 
@@ -8291,9 +8316,7 @@ function getAudiencePurpleStatusSnapshot(dossier){
   if(!normalizedStatus) return null;
   const detail = String(dossier?.statutDetails || '').trim();
   if(
-    normalizedStatus === 'arrêt'
-    || normalizedStatus === 'arret'
-    || normalizedStatus.startsWith('arrêt definitif')
+    normalizedStatus.startsWith('arrêt definitif')
     || normalizedStatus.startsWith('arret definitif')
     || normalizedStatus.startsWith('arrêt definitive')
     || normalizedStatus.startsWith('arret definitive')
@@ -11848,6 +11871,7 @@ async function applyExcelImport(payload, options = {}){
     }
     const importedAudienceColor = String(row.importedColor || '').trim();
     if(row.hasSortOrdColumn === true){
+      p._audienceSortOrd = String(row.sortOrd || '').trim();
       if(isAudienceOrdonnanceColorSuppressed(p)){
         p._disableAudienceRowColor = '1';
         p.color = '';
@@ -12733,6 +12757,7 @@ function setupEvents(){
   });
   $('filterAudienceProcedure')?.addEventListener('change', (e)=>{
     filterAudienceProcedure = e.target.value;
+    clearAudiencePrintSelection();
     renderAudience();
   });
   $('filterAudienceTribunal')?.addEventListener('change', (e)=>{
@@ -17140,6 +17165,15 @@ function updateAudienceCheckedCount(){
   syncAudiencePageSelectionToggle();
 }
 
+function clearAudiencePrintSelection(){
+  if(!audiencePrintSelection.size) return false;
+  audiencePrintSelection = new Set();
+  audiencePrintSelectionVersion += 1;
+  lastAudienceRenderedSelectedCount = 0;
+  queueAudienceCheckedCountRender();
+  return true;
+}
+
 function toggleAudiencePrintSelection(ci, di, procKey, checked){
   const key = makeAudiencePrintKey(ci, di, procKey);
   if(checked){
@@ -17335,8 +17369,10 @@ function getFilteredAudienceRows(allRows = null){
     return { row, bucket, colorMatch, sortMeta };
   });
   decorated.sort((a, b)=>{
+    if(priorityColor && priorityColor !== 'all' && a.colorMatch !== b.colorMatch){
+      return b.colorMatch - a.colorMatch;
+    }
     if(a.bucket !== b.bucket) return a.bucket - b.bucket;
-    if(a.colorMatch !== b.colorMatch) return b.colorMatch - a.colorMatch;
     return compareAudienceSortMeta(a.sortMeta, b.sortMeta);
   });
   const out = decorated.map(item=>item.row);
@@ -17503,11 +17539,19 @@ function getSelectedAudienceRowsForExport(){
   return out;
 }
 
-function buildAudienceSelectedExportDatasetBase(rowsOverride = null){
+function buildAudienceSelectedExportDatasetBase(rowsOverride = null, options = {}){
+  const omitSort = options?.omitSort === true;
   const audienceRows = Array.isArray(rowsOverride)
     ? rowsOverride.slice()
     : getSelectedAudienceRowsForExport();
-  const headers = [
+  const headers = omitSort ? [
+    'Client',
+    'Adversaire',
+    'N° Dossier',
+    'Juge',
+    'Instruction',
+    'Tribunal'
+  ] : [
     'Client',
     'Adversaire',
     'N° Dossier',
@@ -17523,11 +17567,14 @@ function buildAudienceSelectedExportDatasetBase(rowsOverride = null){
     rows: audienceRows,
     headers,
     subtitle: `Date d'audience : ${dateAudienceTop}`,
-    colWidths: [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 46 }]
+    colWidths: omitSort
+      ? [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 34 }, { wch: 46 }]
+      : [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 46 }]
   };
 }
 
-function buildAudienceSelectedExportTableRow(row){
+function buildAudienceSelectedExportTableRow(row, options = {}){
+  const omitSort = options?.omitSort === true;
   const p = row?.p || {};
   const d = row?.d || {};
   const draft = row?.draft || {};
@@ -17536,15 +17583,18 @@ function buildAudienceSelectedExportTableRow(row){
     draft.instruction || p.instruction || draft.sort || p.sort || ''
   );
   const jugeValue = draft.juge || p.juge || '';
-  return [
+  const out = [
     row?.c?.name || '',
     d.debiteur || '',
     dossierRef || '-',
     jugeValue,
     instructionValue,
-    '',
     p.tribunal || ''
   ];
+  if(!omitSort){
+    out.splice(5, 0, '');
+  }
+  return out;
 }
 
 function getAudienceRowsForDetailedExportFallback(){
@@ -17553,11 +17603,11 @@ function getAudienceRowsForDetailedExportFallback(){
   return getAudienceRowsForRegularExport();
 }
 
-function buildAudienceSelectedExportDataset(rowsOverride = null){
-  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
+function buildAudienceSelectedExportDataset(rowsOverride = null, options = {}){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride, options);
   return {
     ...dataset,
-    tableRows: dataset.rows.map((row)=>buildAudienceSelectedExportTableRow(row))
+    tableRows: dataset.rows.map((row)=>buildAudienceSelectedExportTableRow(row, options))
   };
 }
 
@@ -17580,13 +17630,13 @@ function openAudienceExcelFilePreviewWindow(){
   });
 }
 
-async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null){
-  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride);
+async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null, options = {}){
+  const dataset = buildAudienceSelectedExportDatasetBase(rowsOverride, options);
   return {
     ...dataset,
     tableRows: await mapChunked(
       dataset.rows,
-      async (row)=>buildAudienceSelectedExportTableRow(row),
+      async (row)=>buildAudienceSelectedExportTableRow(row, options),
       { chunkSize: 80, onProgress: makeProgressReporter('Export audience') }
     )
   };
@@ -18342,7 +18392,7 @@ async function exportAudienceRegularXLS(){
       alert('Aucune ligne à exporter.');
       return;
     }
-    const dataset = await buildAudienceSelectedExportDatasetAsync(audienceRows);
+    const dataset = await buildAudienceSelectedExportDatasetAsync(audienceRows, { omitSort: true });
     await exportAudienceWorkbookXlsxStyled({
       headers: dataset.headers,
       rows: dataset.tableRows,

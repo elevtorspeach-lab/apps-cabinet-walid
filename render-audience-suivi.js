@@ -163,7 +163,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="Référence Client" class="${isRefClientMismatch ? 'audience-refclient-mismatch' : ''}">
-        ${canEdit
+        ${canEdit && isRefClientMismatch
           ? `<input class="${isRefClientMismatch ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
           : escapeHtml(refClientDisplay)
         }
