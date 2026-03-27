@@ -7115,6 +7115,15 @@ function findDossierByImportUid(importUid){
   return null;
 }
 
+function isProtectedManualDossier(dossier){
+  if(!dossier || typeof dossier !== 'object') return false;
+  if(dossier.isManualEntry === true) return true;
+  if(dossier.isAudienceOrphanImport === true) return false;
+  const globalBatchId = String(dossier.importGlobalBatchId || '').trim();
+  const audienceBatchId = String(dossier.importAudienceBatchId || '').trim();
+  return !globalBatchId && !audienceBatchId;
+}
+
 function syncUsersWithVisibleClients(){
   const allowedClientIds = new Set((Array.isArray(AppState.clients) ? AppState.clients : []).map(client=>Number(client?.id)).filter(Number.isFinite));
   USERS = ensureManagerUser(USERS.map(user=>{
@@ -7136,7 +7145,10 @@ function deleteGlobalImportBatch(batchId){
   let removedDossiers = 0;
   AppState.clients = (Array.isArray(AppState.clients) ? AppState.clients : []).filter(client=>{
     const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
-    const keptDossiers = dossiers.filter(dossier=>String(dossier?.importGlobalBatchId || '').trim() !== batch.id);
+    const keptDossiers = dossiers.filter(dossier=>{
+      if(isProtectedManualDossier(dossier)) return true;
+      return String(dossier?.importGlobalBatchId || '').trim() !== batch.id;
+    });
     removedDossiers += Math.max(0, dossiers.length - keptDossiers.length);
     client.dossiers = keptDossiers;
     if(keptDossiers.length) return true;
@@ -11075,7 +11087,7 @@ function showExcelImportResult(summary, issuesText){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'closed'];
+  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
 }
 
@@ -13668,6 +13680,7 @@ async function addDossier(){
       importUid: String(previousImportMeta?.importUid || '').trim() || createImportTrackingId('dossier'),
       importGlobalBatchId: String(previousImportMeta?.importGlobalBatchId || '').trim(),
       importAudienceBatchId: String(previousImportMeta?.importAudienceBatchId || '').trim(),
+      isManualEntry: editingDossier ? previousImportMeta?.isManualEntry === true : true,
       isAudienceOrphanImport: previousImportMeta?.isAudienceOrphanImport === true,
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
@@ -17665,18 +17678,22 @@ function getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet){
 function getFilteredAudienceRows(allRows = null){
   const rows = Array.isArray(allRows) ? allRows : getAudienceRows();
   const priorityColor = getActiveAudiencePriorityColor();
+  const strictPriorityColorFilter = (!filterAudienceErrorsOnly && filterAudienceColor === 'all' && priorityColor === 'closed')
+    ? priorityColor
+    : '';
   const isDefaultView =
     filterAudienceProcedure === 'all'
     && filterAudienceTribunal === 'all'
     && !filterAudienceDate
     && !filterAudienceErrorsOnly
+    && !strictPriorityColorFilter
     && (!priorityColor || priorityColor === 'all');
   const filterKey = [
     filterAudienceProcedure,
     filterAudienceTribunal,
     filterAudienceDate,
     filterAudienceErrorsOnly ? '1' : '0',
-    priorityColor || 'all'
+    strictPriorityColorFilter || priorityColor || 'all'
   ].join('||');
   if(rows === audienceFilteredRowsCacheInput && filterKey === audienceFilteredRowsCacheKey){
     return orderAudienceRowsByCheckedSelection(audienceFilteredRowsCacheOutput);
@@ -17706,6 +17723,7 @@ function getFilteredAudienceRows(allRows = null){
     && filterAudienceProcedure === 'all'
     && filterAudienceTribunal === 'all'
     && !filterAudienceDate
+    && !strictPriorityColorFilter
     && priorityColor
     && priorityColor !== 'all'
     && rows.length > AUDIENCE_DEFAULT_SORT_MAX_ROWS;
@@ -17736,6 +17754,7 @@ function getFilteredAudienceRows(allRows = null){
       if(targetDate && rowDate !== targetDate) return false;
     }
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
+    if(strictPriorityColorFilter && !audienceRowMatchesColorFilter(row, strictPriorityColorFilter)) return false;
     return true;
   });
   const decorated = filtered.map(row=>{
@@ -18411,9 +18430,11 @@ function syncAudienceFilterOptions(rows){
   audienceFilterOptionsRowsRef = rows;
 }
 
-function hasAudienceProcedureData(procData, draftData){
+function hasAudienceProcedureData(procData, draftData, dossier){
   const p = procData || {};
   const d = draftData || {};
+  if(isProtectedManualDossier(dossier)) return true;
+  if(getAudiencePurpleStatusSnapshot(dossier)) return true;
   const fields = [
     d.dateAudience,
     p.audience,
@@ -18452,7 +18473,7 @@ function getAudienceRowsRawCached(){
         const p = getAudienceProcedure(ci, di, procKey);
         const key = makeAudienceDraftKey(ci, di, procKey);
         const draft = audienceDraft[key] || {};
-        if(!hasAudienceProcedureData(p, draft)) return;
+        if(!hasAudienceProcedureData(p, draft, d)) return;
         const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || d?.referenceClient || '').trim();
         const refDossier = normalizeReferenceForAudienceLookup(draftReferenceValue);
         const procedureNorm = String(procKey || '').trim().toLowerCase();
