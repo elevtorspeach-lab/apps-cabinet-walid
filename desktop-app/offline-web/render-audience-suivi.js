@@ -142,9 +142,16 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const hasError = isAudienceRowInvalid(row, duplicateKeySet);
   const isMissingGlobal = !!row?.p?._missingGlobal;
   const isRefClientMismatch = !!row?.p?._refClientMismatch;
+  const canFixRefClient = canEdit && (isRefClientMismatch || isMissingGlobal);
+  const refClientCellClass = (isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch' : '';
   const refClientDisplay = isRefClientMismatch
     ? String(row?.p?._refClientProvided || d.referenceClient || '-')
     : String(d.referenceClient || '-');
+  const refClientErrorMessage = isMissingGlobal
+    ? 'Audience introuvable dans le dossier global. Modifiez la reference client ou la reference dossier, puis appuyez sur Entree pour relancer le rapprochement.'
+    : (isRefClientMismatch
+      ? 'Ref client audience introuvable dans le dossier global. Modifiez-la ici pour corriger rapidement.'
+      : '');
   const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
   const procKeyEncoded = encodeURIComponent(String(procKey));
   const keyEncoded = encodeURIComponent(String(key));
@@ -152,7 +159,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
   return `
-    <tr class="color-${rowColor}">
+    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
       <td data-label="Sélection">
         <input type="checkbox" class="audience-print-check"
           data-ci="${row.ci}"
@@ -162,12 +169,12 @@ function renderAudienceRowHtml(row, duplicateKeySet){
           onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
-      <td data-label="Référence Client" class="${isRefClientMismatch ? 'audience-refclient-mismatch' : ''}">
-        ${canEdit && isRefClientMismatch
-          ? `<input class="${isRefClientMismatch ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
+      <td data-label="Référence Client" class="${refClientCellClass}">
+        ${canFixRefClient
+          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
           : escapeHtml(refClientDisplay)
         }
-        ${isRefClientMismatch ? '<div class="audience-inline-error">Réf client audience introuvable dans le dossier global. Modifiez-la ici pour corriger rapidement.</div>' : ''}
+        ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
       <td data-label="Débiteur">${escapeHtml(d.debiteur || '-')}</td>
       <td data-label="Référence dossier">

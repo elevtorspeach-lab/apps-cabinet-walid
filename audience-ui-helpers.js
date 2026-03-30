@@ -59,10 +59,17 @@ function getAudienceRowOrdonnanceColor(row){
   return '';
 }
 
-function getAudienceRowRefClientMismatchFallbackColor(row){
+function isAudienceRowOrdonnanceColorSuppressed(row){
+  return String(row?.p?._disableAudienceRowColor || '').trim() === '1'
+    || String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1';
+}
+
+function getAudienceRowRefClientMismatchFallbackColor(row, options = {}){
   if(!row?.p?._refClientMismatch) return '';
   const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
-  const fallbackOrdonnanceColor = getAudienceRowOrdonnanceColor(row);
+  const fallbackOrdonnanceColor = options.includeOrdonnanceColor === false
+    ? ''
+    : getAudienceRowOrdonnanceColor(row);
   if(fallbackOrdonnanceColor) return fallbackOrdonnanceColor;
   if(statusDerivedColor) return statusDerivedColor;
   return '';
@@ -71,17 +78,14 @@ function getAudienceRowRefClientMismatchFallbackColor(row){
 function getAudienceRowEffectiveColor(row){
   const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   const ordonnanceColor = getAudienceRowOrdonnanceColor(row);
-  if(String(row?.p?._disableAudienceRowColor || '').trim() === '1'){
-    return ordonnanceColor || getAudienceRowRefClientMismatchFallbackColor(row);
-  }
-  if(String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1'){
-    return ordonnanceColor || getAudienceRowRefClientMismatchFallbackColor(row);
-  }
-  if(ordonnanceColor) return ordonnanceColor;
-  if(statusDerivedColor) return statusDerivedColor;
   const explicitColor = String(row?.p?.color || '').trim();
+  const ordonnanceColorSuppressed = isAudienceRowOrdonnanceColorSuppressed(row);
+  if(!ordonnanceColorSuppressed && ordonnanceColor) return ordonnanceColor;
+  if(statusDerivedColor) return statusDerivedColor;
   if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
-  return getAudienceRowRefClientMismatchFallbackColor(row);
+  return getAudienceRowRefClientMismatchFallbackColor(row, {
+    includeOrdonnanceColor: !ordonnanceColorSuppressed
+  });
 }
 
 function audienceRowMatchesColorFilter(row, color){
@@ -92,6 +96,9 @@ function audienceRowMatchesColorFilter(row, color){
     return !!getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   }
   if(targetColor === 'green' || targetColor === 'yellow'){
+    if(isAudienceRowOrdonnanceColorSuppressed(row)){
+      return getAudienceRowEffectiveColor(row) === targetColor;
+    }
     return getAudienceRowOrdonnanceColor(row) === targetColor;
   }
   if(targetColor === 'purple-dark' || targetColor === 'purple-light'){

@@ -2675,6 +2675,15 @@ tr:hover{background:#f1f5f9}
 .color-btn.active{opacity:1}
 
 .color-btn.all{background:#334155}
+.color-btn.white,
+#audienceSection .color-btn.white{
+  background:linear-gradient(135deg,#ffffff 0%, #eef2f7 100%);
+  color:#0f172a;
+  border:1.5px solid #b8c6d8;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 12px 22px rgba(148,163,184,.26);
+}
 .color-btn.blue{background:#1e3a8a}
 .color-btn.green{background:#166534}
 .color-btn.red{background:#991b1b}
@@ -2703,9 +2712,16 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
 }
 
 .audience-print-check{
-  width:16px;
-  height:16px;
+  width:18px;
+  height:18px;
+  accent-color:#2563eb;
   cursor:pointer;
+}
+#audienceSection tbody tr.audience-row-selected td{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18), inset 0 -1px 0 rgba(37,99,235,.22);
+}
+#audienceSection tbody tr.audience-row-selected td:first-child{
+  box-shadow:inset 3px 0 0 rgba(37,99,235,.5), inset 0 1px 0 rgba(255,255,255,.18), inset 0 -1px 0 rgba(37,99,235,.22);
 }
 .audience-ref-missing{
   border-color:#ef4444 !important;
@@ -4658,6 +4674,27 @@ td[data-label="Actions"] .btn-danger{
   filter:none;
   box-shadow:0 8px 16px rgba(15,23,42,.1);
 }
+.color-btn.is-disabled,
+.color-btn:disabled{
+  opacity:.45;
+  filter:grayscale(.18);
+  cursor:not-allowed;
+  transform:none;
+  box-shadow:0 8px 14px rgba(15,23,42,.08);
+}
+.color-btn.white.is-disabled,
+.color-btn.white:disabled,
+#audienceSection .color-btn.white.is-disabled,
+#audienceSection .color-btn.white:disabled{
+  opacity:1;
+  filter:none;
+  color:#0f172a;
+  border-color:#c5d2e2;
+  background:linear-gradient(135deg,#ffffff 0%, #eef2f7 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 10px 18px rgba(148,163,184,.2);
+}
 
 /* ================== AUDIENCE ACTION PALETTE ================== */
 #audienceSection .audience-actions-row{
@@ -4669,14 +4706,31 @@ td[data-label="Actions"] .btn-danger{
   justify-content:flex-start;
 }
 
+#audienceSection .audience-color-group{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:8px;
+}
+
+#audienceSection .audience-color-group-label{
+  font-size:14px;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:#1e40af;
+  padding-left:4px;
+}
+
 #audienceSection .color-filters{
-  gap:10px;
-  padding:4px 2px 6px;
+  gap:8px;
+  padding:3px 2px 5px;
 }
 
 #audienceSection .color-btn{
-  min-height:40px;
-  padding:8px 16px;
+  min-height:44px;
+  padding:9px 14px;
+  font-size:13px;
   border:1px solid rgba(255,255,255,.3);
   box-shadow:0 10px 18px rgba(15,23,42,.12);
 }

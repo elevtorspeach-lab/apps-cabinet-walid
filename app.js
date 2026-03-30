@@ -6178,6 +6178,44 @@ function splitReferenceValues(value){
   return out;
 }
 
+function normalizeLooseClientReferenceValue(value){
+  const normalized = normalizeReferenceValue(value);
+  if(!normalized) return '';
+  return normalized.replace(/[^A-Z0-9]/g, '');
+}
+
+function getClientReferenceMatchKeys(value){
+  const raw = String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u061C]/g, '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  if(!raw) return [];
+
+  const out = new Set();
+  const pushCandidate = (candidate)=>{
+    const strict = normalizeReferenceValue(candidate);
+    if(strict) out.add(strict);
+    const loose = normalizeLooseClientReferenceValue(candidate);
+    if(loose) out.add(loose);
+  };
+
+  pushCandidate(raw);
+  splitReferenceValues(raw).forEach(pushCandidate);
+
+  const extraChunks = raw
+    .replace(/\d+\s*[\\\/⁄∕／]\s*\d+\s*[\\\/⁄∕／]\s*\d{2,4}/g, ' ')
+    .split(/(?:[\\\/⁄∕／,;|+_&\n-]+|\s+[xX×]\s+)/)
+    .map(v=>normalizeLooseClientReferenceValue(v))
+    .filter(v=>v.length >= 4 || (/[A-Z]/.test(v) && /\d/.test(v)));
+
+  if(extraChunks.length > 1){
+    extraChunks.forEach(chunk=>out.add(chunk));
+  }
+
+  return [...out];
+}
+
 function isAudienceOrdonnanceColorSuppressed(procData){
   return String(procData?._suppressAudienceOrdonnanceColor || '').trim() === '1';
 }
@@ -8400,18 +8438,54 @@ function getDossierAudienceReferenceKeys(dossier){
   return refs;
 }
 
+function getDossierClientReferenceMatchKeys(dossier){
+  const refs = new Set();
+  const pushRef = (value)=>{
+    const raw = String(value || '').trim();
+    if(!raw || normalizeDossierReferenceValue(raw)) return;
+    getClientReferenceMatchKeys(raw).forEach(key=>{
+      if(key) refs.add(key);
+    });
+  };
+  pushRef(dossier?.referenceClient || '');
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.values(details).forEach(proc=>{
+    pushRef(proc?.referenceClient || '');
+  });
+  return refs;
+}
+
+function getDossierClientReferenceDisplayValues(dossier){
+  const refs = [];
+  const seen = new Set();
+  const pushRef = (value)=>{
+    const raw = String(value || '').trim();
+    if(!raw || normalizeDossierReferenceValue(raw) || seen.has(raw)) return;
+    seen.add(raw);
+    refs.push(raw);
+  };
+  pushRef(dossier?.referenceClient || '');
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.values(details).forEach(proc=>{
+    pushRef(proc?.referenceClient || '');
+  });
+  return refs;
+}
+
 function refreshAudienceRefClientMismatchFlags(dossier){
   if(!dossier || typeof dossier !== 'object') return false;
-  const refs = getDossierAudienceReferenceKeys(dossier);
+  const refs = getDossierClientReferenceMatchKeys(dossier);
   const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
     ? dossier.procedureDetails
     : {};
   let changed = false;
   Object.values(details).forEach((proc)=>{
     if(!proc || typeof proc !== 'object' || !proc._refClientMismatch) return;
-    const providedKeys = splitReferenceValues(proc._refClientProvided || '')
-      .map(value=>normalizeReferenceForAudienceLookup(value))
-      .filter(Boolean);
+    const providedKeys = getClientReferenceMatchKeys(proc._refClientProvided || '');
     if(providedKeys.some(key=>refs.has(key))){
       delete proc._refClientMismatch;
       delete proc._refClientProvided;
@@ -8419,7 +8493,7 @@ function refreshAudienceRefClientMismatchFlags(dossier){
       changed = true;
       return;
     }
-    const expectedRefs = [...refs];
+    const expectedRefs = getDossierClientReferenceDisplayValues(dossier);
     proc._refClientExpected = expectedRefs.length ? expectedRefs.join('/') : '-';
   });
   return changed;
@@ -8608,6 +8682,7 @@ function reconcileAudienceOrphanDossiers(){
       globalCandidates.push({
         dossier,
         refs: getDossierAudienceReferenceKeys(dossier),
+        clientRefs: getDossierClientReferenceMatchKeys(dossier),
         procRefs: getDossierProcedureReferenceKeys(dossier),
         debiteurKey: getDossierDebiteurKey(dossier)
       });
@@ -8632,7 +8707,7 @@ function reconcileAudienceOrphanDossiers(){
     }
     const orphanDebiteur = getDossierDebiteurKey(orphanDossier);
     const orphanProcs = new Set(normalizeProcedures(orphanDossier));
-    const orphanClientRef = normalizeReferenceValue(String(orphanDossier?.referenceClient || '').trim());
+    const orphanClientRefKeys = getClientReferenceMatchKeys(String(orphanDossier?.referenceClient || '').trim());
 
     let bestCandidate = null;
     let bestScore = -1;
@@ -8640,15 +8715,15 @@ function reconcileAudienceOrphanDossiers(){
       const hasProcRefMatch = orphanProcRefs.size
         ? [...orphanProcRefs].some(ref=>candidate.procRefs.has(ref))
         : false;
-      const hasDirectClientRefMatch = orphanClientRef
-        && (candidate.refs.has(orphanClientRef) || candidate.procRefs.has(orphanClientRef));
+      const hasDirectClientRefMatch = orphanClientRefKeys.length
+        && orphanClientRefKeys.some(ref=>candidate.clientRefs.has(ref) || candidate.refs.has(ref) || candidate.procRefs.has(ref));
       const hasRefMatch = hasProcRefMatch || hasDirectClientRefMatch || [...orphanRefs].some(ref=>candidate.refs.has(ref));
       if(!hasRefMatch) return;
       let score = 200;
       if(hasProcRefMatch) score += 120;
       if(hasDirectClientRefMatch) score += 90;
-      const candidateClientRef = normalizeReferenceValue(String(candidate?.dossier?.referenceClient || '').trim());
-      if(orphanClientRef && candidateClientRef && orphanClientRef === candidateClientRef){
+      const candidateClientRefKeys = getClientReferenceMatchKeys(String(candidate?.dossier?.referenceClient || '').trim());
+      if(orphanClientRefKeys.length && candidateClientRefKeys.some(key=>orphanClientRefKeys.includes(key))){
         score += 60;
       }
       if(orphanDebiteur && candidate.debiteurKey && orphanDebiteur === candidate.debiteurKey){
@@ -11151,6 +11226,65 @@ function syncAudienceColorFilterSelectAppearance(){
   if(!select) return;
   const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
+  const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
+  if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
+  select.value = normalizedValue;
+}
+
+function normalizeAudienceFilterColorValue(value){
+  const normalized = String(value || 'all').trim() || 'all';
+  if(normalized === 'purple-dark' || normalized === 'purple-light'){
+    return 'closed';
+  }
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  return allowed.has(normalized) ? normalized : 'all';
+}
+
+function getAudienceSelectionToneClass(color = selectedAudienceColor){
+  const normalized = String(color || '').trim();
+  const resolved = normalized === 'closed' ? 'purple-dark' : normalized;
+  const allowed = new Set(['blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
+  if(!allowed.has(resolved)) return 'audience-tone-all';
+  return `audience-tone-${resolved}`;
+}
+
+function syncAudienceSelectionTone(){
+  const toneClasses = [
+    'audience-tone-all',
+    'audience-tone-blue',
+    'audience-tone-green',
+    'audience-tone-yellow',
+    'audience-tone-document-ok',
+    'audience-tone-purple-dark',
+    'audience-tone-purple-light'
+  ];
+  const targets = [$('audienceCheckedCount'), $('printAudienceBtn')].filter(Boolean);
+  const nextToneClass = getAudienceSelectionToneClass();
+  targets.forEach((node)=>{
+    toneClasses.forEach(cls=>node.classList.remove(cls));
+    node.classList.add(nextToneClass);
+  });
+}
+
+function syncAudienceColorActionAvailability(){
+  const buttons = audienceColorButtons.length ? audienceColorButtons : Array.from(document.querySelectorAll('.color-btn[data-color]'));
+  const hasSelection = audiencePrintSelection.size > 0;
+  if(!hasSelection && selectedAudienceColor !== 'all'){
+    setSelectedAudienceColor('all', false);
+  }
+  buttons.forEach((btn)=>{
+    const color = String(btn?.dataset?.color || '').trim();
+    const shouldDisable = !hasSelection && color !== 'all';
+    btn.disabled = shouldDisable;
+    btn.classList.toggle('is-disabled', shouldDisable);
+    if(shouldDisable){
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = 'Cochez d’abord un ou plusieurs dossiers avant de choisir une couleur.';
+    }else{
+      btn.removeAttribute('aria-disabled');
+      btn.removeAttribute('title');
+    }
+  });
 }
 
 function resetAudienceFiltersUi(){
@@ -11331,6 +11465,7 @@ async function applyExcelImport(payload, options = {}){
   const audienceOrphanDossierMap = new Map();
   const candidateSeenByMap = new WeakMap();
   const dossierAudienceRefsCache = new WeakMap();
+  const dossierClientRefMatchCache = new WeakMap();
 
   const getDossierAudienceRefsCached = (dossier)=>{
     if(!dossier || typeof dossier !== 'object') return new Set();
@@ -11338,6 +11473,15 @@ async function applyExcelImport(payload, options = {}){
     if(cached) return cached;
     const refs = getDossierAudienceReferenceKeys(dossier);
     dossierAudienceRefsCache.set(dossier, refs);
+    return refs;
+  };
+
+  const getDossierClientRefMatchKeysCached = (dossier)=>{
+    if(!dossier || typeof dossier !== 'object') return new Set();
+    const cached = dossierClientRefMatchCache.get(dossier);
+    if(cached) return cached;
+    const refs = getDossierClientReferenceMatchKeys(dossier);
+    dossierClientRefMatchCache.set(dossier, refs);
     return refs;
   };
 
@@ -11396,7 +11540,8 @@ async function applyExcelImport(payload, options = {}){
 
   const buildAudienceOrphanDossierKey = (refKey, row)=>{
     const safeRef = String(refKey || '').trim();
-    const safeRefClient = normalizeReferenceValue(String(row?.refClient || '').trim());
+    const safeRefClient = getClientReferenceMatchKeys(String(row?.refClient || '').trim())[0]
+      || normalizeReferenceValue(String(row?.refClient || '').trim());
     const safeDebiteur = String(row?.debiteur || '')
       .trim()
       .toLowerCase()
@@ -11517,9 +11662,7 @@ async function applyExcelImport(payload, options = {}){
         : String(dossier?.procedure || '').split(',').map(v=>String(v || '').trim()).filter(Boolean));
     const defaultProc = procList[0] || 'ASS';
     const procCandidates = procList.length ? procList : [defaultProc];
-    const mainRefParts = splitReferenceValues(dossier?.referenceClient || '')
-      .map(v=>normalizeReferenceValue(v))
-      .filter(Boolean);
+    const mainRefParts = getClientReferenceMatchKeys(dossier?.referenceClient || '');
     const rowRefClient = mainRefParts[0] || normalizeReferenceValue(String(dossier?.referenceClient || '').trim());
 
     // Dossier-level reference is ambiguous when multiple procedures exist:
@@ -11531,7 +11674,7 @@ async function applyExcelImport(payload, options = {}){
     allRefs.forEach(({ ref, proc })=>{
       const refKey = normalizeReferenceForAudienceLookup(ref);
       if(!refKey) return;
-      dossierRefClientSet.add(refKey);
+      getClientReferenceMatchKeys(ref).forEach(key=>dossierRefClientSet.add(key));
       pushCandidate(rowRefClientToProcMap, refKey, {
         dossier,
         client,
@@ -11719,7 +11862,8 @@ async function applyExcelImport(payload, options = {}){
           procedureSet.add(proc);
         }
       }
-      const baseRowRefClient = normalizeReferenceValue(row.refClient || '');
+      const baseRowRefClientKeys = getClientReferenceMatchKeys(row.refClient || '');
+      const baseRowRefClient = baseRowRefClientKeys[0] || normalizeReferenceValue(row.refClient || '');
       const candidate = {
         dossier,
         client,
@@ -11728,14 +11872,11 @@ async function applyExcelImport(payload, options = {}){
         rowDebiteur: String(row.debiteur || '').trim().toLowerCase()
       };
       pushCandidate(refToProcMap, refKey, candidate);
-      const rowRefParts = splitReferenceValues(row.refClient || '');
-      if(!rowRefParts.length && baseRowRefClient){
+      if(!baseRowRefClientKeys.length && baseRowRefClient){
         pushCandidate(rowRefClientToProcMap, baseRowRefClient, candidate);
         dossierRefClientSet.add(baseRowRefClient);
       }else{
-        rowRefParts.forEach(part=>{
-          const key = normalizeReferenceValue(part);
-          if(!key) return;
+        baseRowRefClientKeys.forEach(key=>{
           pushCandidate(rowRefClientToProcMap, key, { ...candidate, rowRefClient: key });
           dossierRefClientSet.add(key);
         });
@@ -11906,8 +12047,7 @@ async function applyExcelImport(payload, options = {}){
       importIgnoredRows.push(`${rowNumberLabel}: procédure audience inconnue "${explicitProcRaw}"${audienceBaseContext}`);
       return;
     }
-    const rowRefClientParts = splitReferenceValues(row.refClient || '');
-    const rowRefClientKeys = rowRefClientParts.map(v=>normalizeReferenceValue(v)).filter(Boolean);
+    const rowRefClientKeys = getClientReferenceMatchKeys(row.refClient || '');
     const rowRefClientKeySet = new Set(rowRefClientKeys);
     const candidatesByRefDossier = refToProcMap.get(refKey) || [];
     const procByRefDossier = formatProcedureContextFromCandidates(candidatesByRefDossier);
@@ -11950,7 +12090,8 @@ async function applyExcelImport(payload, options = {}){
           dossier: orphanDossier,
           client: getOrCreateAudienceOrphanClient(),
           proc: procFallback,
-          rowRefClient: normalizeReferenceValue(String(row?.refClient || '').trim()),
+          rowRefClient: getClientReferenceMatchKeys(String(row?.refClient || '').trim())[0]
+            || normalizeReferenceValue(String(row?.refClient || '').trim()),
           rowDebiteur: String(row?.debiteur || '').trim().toLowerCase()
         }];
         importIgnoredRows.push(`${rowNumberLabel}: ${ref || '-'} introuvable dans dossier global (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`);
@@ -11974,9 +12115,10 @@ async function applyExcelImport(payload, options = {}){
         let score = 0;
         if(rowRefClientKeySet.size && rowRefClientKeySet.has(candidate.rowRefClient)) score += 220;
         if(rowDebiteur && candidate.rowDebiteur === rowDebiteur) score += 140;
-        const candidateRefs = getDossierAudienceRefsCached(candidate?.dossier || null);
-        if(candidateRefs.has(refKey)) score += 90;
-        if(rowRefClientKeySet.size && [...rowRefClientKeySet].some(key=>candidateRefs.has(key))) score += 80;
+        const candidateAudienceRefs = getDossierAudienceRefsCached(candidate?.dossier || null);
+        const candidateClientRefs = getDossierClientRefMatchKeysCached(candidate?.dossier || null);
+        if(candidateAudienceRefs.has(refKey)) score += 90;
+        if(rowRefClientKeySet.size && [...rowRefClientKeySet].some(key=>candidateClientRefs.has(key))) score += 80;
         if(score > bestScore){
           bestScore = score;
           bestCandidate = candidate;
@@ -11988,14 +12130,14 @@ async function applyExcelImport(payload, options = {}){
     const { dossier, proc } = match;
     let refClientMismatch = null;
     if(rowRefClientKeySet.size){
-      const matchedDossierRefKeys = getDossierAudienceRefsCached(dossier);
+      const matchedDossierRefKeys = getDossierClientRefMatchKeysCached(dossier);
       const hasSameRefClient = [...rowRefClientKeySet].some(key=>matchedDossierRefKeys.has(key));
       const hasKnownRefClientElsewhere = [...rowRefClientKeySet].some(key=>dossierRefClientSet.has(key));
       // Only flag ref client mismatch when the provided ref client is unknown globally.
       // If it exists elsewhere in global dossiers, keep the row linked by ref dossier priority.
       if(!hasSameRefClient && !hasKnownRefClientElsewhere){
         const givenRefClient = [...rowRefClientKeySet].join('/') || '-';
-        const expectedRefClient = [...matchedDossierRefKeys].join('/') || '-';
+        const expectedRefClient = getDossierClientReferenceDisplayValues(dossier).join('/') || '-';
         refClientMismatch = {
           provided: givenRefClient,
           expected: expectedRefClient
@@ -12936,7 +13078,7 @@ function setupEvents(){
     restoreRecycleItem(idx);
   });
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
-    filterAudienceColor = e.target.value;
+    filterAudienceColor = normalizeAudienceFilterColorValue(e.target.value);
     clearAudiencePrintSelection({ immediate: true });
     syncAudienceColorFilterSelectAppearance();
     renderAudience();
@@ -12996,12 +13138,20 @@ function setupEvents(){
   audienceColorButtons.forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const color = btn.dataset.color;
+      if(color !== 'all' && !audiencePrintSelection.size){
+        syncAudienceColorActionAvailability();
+        alert('Cochez d’abord un ou plusieurs dossiers avant de choisir une couleur.');
+        return;
+      }
       // Color buttons are paint mode selectors (not table filters).
       filterAudienceErrorsOnly = false;
       const errBtn = $('audienceErrorsBtn');
       if(errBtn) errBtn.classList.remove('active');
       setSelectedAudienceColor(color, false);
       const appliedToCheckedRows = applyColorToSelectedAudienceRows(color);
+      if(appliedToCheckedRows){
+        setSelectedAudienceColor('all', false);
+      }
       filterAudienceColor = 'all';
       const colorSel = $('filterAudienceColor');
       if(colorSel) colorSel.value = 'all';
@@ -13013,6 +13163,8 @@ function setupEvents(){
     });
   });
   syncAudienceColorFilterSelectAppearance();
+  syncAudienceSelectionTone();
+  syncAudienceColorActionAvailability();
   window.addEventListener('beforeunload', ()=>{
     if(hasLoadedState) persistAppStateNow();
   });
@@ -13024,6 +13176,7 @@ function setSelectedAudienceColor(color, syncFilter){
   buttons.forEach(b=>b.classList.remove('active'));
   const btn = buttons.find(b=>b.dataset.color === color) || null;
   if(btn) btn.classList.add('active');
+  syncAudienceSelectionTone();
   if(syncFilter){
     filterAudienceColor = color;
     const sel = $('filterAudienceColor');
@@ -17510,6 +17663,7 @@ function updateAudienceCheckedCount(){
   const count = audiencePrintSelection.size;
   const node = $('audienceCheckedCountValue');
   if(node) node.textContent = String(count);
+  syncAudienceColorActionAvailability();
   syncAudiencePageSelectionToggle();
 }
 
@@ -17572,10 +17726,6 @@ function toggleAudiencePrintSelectionEncoded(ci, di, procKeyEncoded, checked){
 
 function toggleAudienceSelectionAndColorEncoded(ci, di, procKeyEncoded, checked){
   const procKey = decodeURIComponent(String(procKeyEncoded));
-  if(checked && applySelectedAudienceColorToRow(ci, di, procKey)){
-    renderAudience();
-    return;
-  }
   toggleAudiencePrintSelection(ci, di, procKey, checked);
   if(filterAudienceCheckedFirst){
     paginationState.audience = 1;
@@ -17895,9 +18045,8 @@ function applyAudienceTransientPinnedRowOrder(rows){
 
 function applyColorToSelectedAudienceRows(color){
   const targetColor = String(color || '').trim();
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
   if(!allowed.has(targetColor) || !audiencePrintSelection.size) return false;
-  const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
   const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   let changed = false;
   let lastClientId = null;
@@ -17911,15 +18060,50 @@ function applyColorToSelectedAudienceRows(color){
     if(!dossier || !client) return;
     const p = getAudienceProcedure(row.ci, row.di, row.procKey);
     detachAudienceImportBatchOwnership(p);
-    delete p._disableAudienceRowColor;
-    delete p._suppressAudienceOrdonnanceColor;
-    if(String(p?.color || '').trim() === appliedColor) return;
-    rememberAudienceTransientPriorityColor(row.ci, row.di, row.procKey, '');
+    const currentEffectiveColor = String(getAudienceRowEffectiveColor(row) || '').trim();
+    let rowChanged = false;
+    if(targetColor === 'white'){
+      if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
+        if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
+          p._disableAudienceRowColor = '1';
+          rowChanged = true;
+        }
+        if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
+          p._suppressAudienceOrdonnanceColor = '1';
+          rowChanged = true;
+        }
+      }else{
+        if(String(p?._disableAudienceRowColor || '').trim()){
+          delete p._disableAudienceRowColor;
+          rowChanged = true;
+        }
+        if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
+          delete p._suppressAudienceOrdonnanceColor;
+          rowChanged = true;
+        }
+      }
+      if(String(p?.color || '').trim()){
+        p.color = '';
+        rowChanged = true;
+      }
+      if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
+        dossier.statut = 'En cours';
+        rowChanged = true;
+      }
+      if(!rowChanged && !currentEffectiveColor) return;
+    }else{
+      const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
+      delete p._disableAudienceRowColor;
+      delete p._suppressAudienceOrdonnanceColor;
+      if(String(p?.color || '').trim() === appliedColor) return;
+      p.color = appliedColor;
+      if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
+      if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
+      rowChanged = true;
+    }
+    rememberAudienceTransientPriorityColor(row.ci, row.di, row.procKey, currentEffectiveColor);
     pinAudienceRowTemporarily(row.ci, row.di, row.procKey);
-    p.color = appliedColor;
-    if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
-    if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
-    changed = true;
+    changed = changed || rowChanged;
     lastClientId = client.id;
     lastDossier = dossier;
     changedKeys.push(key);
@@ -19021,7 +19205,7 @@ async function exportAudienceRegularXLS(){
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
       colWidths: dataset.colWidths,
-      filename: 'adoukll.xlsx'
+      filename: "Export d'audience Excel.xlsx"
       ,
       layoutPreset: 'audience-reference'
     });
@@ -19045,7 +19229,7 @@ async function exportAudienceXLS(options = {}){
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
       colWidths: dataset.colWidths,
-      filename: 'adoukll.xlsx',
+      filename: "Export d'audience Excel.xlsx",
       layoutPreset: 'audience-reference',
       openAfterExport: options?.openAfterExport === true,
       browserDownloadTarget: options?.browserDownloadTarget || null,
@@ -19361,6 +19545,19 @@ function saveAudienceDraftEntry(key, options = {}){
     }
   }
 
+  const shouldReconcileAudienceRefs = !!(
+    dossier?.isAudienceOrphanImport
+    && data
+    && typeof data === 'object'
+    && (data.refClient !== undefined || data.refDossier !== undefined)
+  );
+  const reconciliation = shouldReconcileAudienceRefs
+    ? reconcileAudienceOrphanDossiers()
+    : { matchedDossiers: 0, mergedProcedures: 0 };
+  if(reconciliation.matchedDossiers > 0){
+    handleDossierDataChange({ audience: true });
+  }
+
   if(clearDraft && Object.prototype.hasOwnProperty.call(audienceDraft, safeKey)){
     delete audienceDraft[safeKey];
   }
@@ -19368,7 +19565,11 @@ function saveAudienceDraftEntry(key, options = {}){
     clearTimeout(audienceAutoSaveTimer);
     audienceAutoSaveTimer = null;
   }
-  persistDossierReferenceNow(client.id, dossier, { source: 'audience-inline-save' }).catch(()=>{});
+  if(reconciliation.matchedDossiers > 0){
+    queuePersistAppState();
+  }else{
+    persistDossierReferenceNow(client.id, dossier, { source: 'audience-inline-save' }).catch(()=>{});
+  }
   persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   if(rerender){
     if(isDeferredRenderSectionVisible('audience')){
@@ -19403,6 +19604,7 @@ function saveAllAudience(options = {}){
   const clearDraft = options.clearDraft !== false;
   const rerender = options.rerender !== false;
   const changedDossiers = new Map();
+  let shouldReconcileAudienceRefs = false;
   Object.entries(audienceDraft).forEach(([key, data])=>{
     const { ci, di, procKey } = parseAudienceDraftKey(key);
     const client = AppState.clients?.[ci];
@@ -19414,6 +19616,14 @@ function saveAllAudience(options = {}){
         clientId: client.id,
         dossier
       });
+      if(
+        dossier?.isAudienceOrphanImport
+        && data
+        && typeof data === 'object'
+        && (data.refClient !== undefined || data.refDossier !== undefined)
+      ){
+        shouldReconcileAudienceRefs = true;
+      }
     }
     if(data.refDossier!==undefined){
       const before = getAudienceProcedureFieldValue(p, 'refDossier');
@@ -19465,6 +19675,13 @@ function saveAllAudience(options = {}){
     }
   });
 
+  const reconciliation = shouldReconcileAudienceRefs
+    ? reconcileAudienceOrphanDossiers()
+    : { matchedDossiers: 0, mergedProcedures: 0 };
+  if(reconciliation.matchedDossiers > 0){
+    handleDossierDataChange({ audience: true });
+  }
+
   if(clearDraft){
     audienceDraft = {};
   }
@@ -19472,9 +19689,13 @@ function saveAllAudience(options = {}){
     clearTimeout(audienceAutoSaveTimer);
     audienceAutoSaveTimer = null;
   }
-  [...changedDossiers.values()].forEach((entry)=>{
-    persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'audience-save' }).catch(()=>{});
-  });
+  if(reconciliation.matchedDossiers > 0){
+    queuePersistAppState();
+  }else{
+    [...changedDossiers.values()].forEach((entry)=>{
+      persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'audience-save' }).catch(()=>{});
+    });
+  }
   persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   if(rerender){
     if(isDeferredRenderSectionVisible('audience')){

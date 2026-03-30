@@ -143,14 +143,18 @@
   <div class="clients-toolbar audience-toolbar">
     <div class="audience-actions-row">
       <div class="audience-actions-center">
-        <div class="color-filters">
-          <button class="color-btn all active" data-color="all">Tous</button>
-          <button id="audienceErrorsBtn" class="color-btn error" type="button">Erreurs</button>
-          <button class="color-btn blue" data-color="blue">Att sort</button>
-          <button class="color-btn green" data-color="green">ATT ORD</button>
-          <button class="color-btn yellow" data-color="yellow">ORD OK</button>
-          <button class="color-btn document-ok" data-color="document-ok">Document OK</button>
-          <button class="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
+        <div class="audience-color-group">
+          <div class="audience-color-group-label">Couleur</div>
+          <div class="color-filters">
+            <button class="color-btn all active" data-color="all">Tous</button>
+            <button class="color-btn white" data-color="white">Blanc</button>
+            <button id="audienceErrorsBtn" class="color-btn error" type="button">Erreurs</button>
+            <button class="color-btn blue" data-color="blue">Att sort</button>
+            <button class="color-btn green" data-color="green">ATT ORD</button>
+            <button class="color-btn yellow" data-color="yellow">ORD OK</button>
+            <button class="color-btn document-ok" data-color="document-ok">Document OK</button>
+            <button class="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
+          </div>
         </div>
       </div>
 
@@ -190,15 +194,13 @@
       </div>
 
       <div class="audience-color-filter">
-        <label for="filterAudienceColor">Couleur</label>
+        <label for="filterAudienceColor">Sort</label>
         <select id="filterAudienceColor">
           <option value="all">Toutes</option>
           <option value="blue">Att sort</option>
           <option value="green">ATT ORD</option>
           <option value="yellow">ORD OK</option>
           <option value="document-ok">Document OK</option>
-          <option value="purple-dark">Soldé</option>
-          <option value="purple-light">Arrêt définitif</option>
           <option value="closed">Soldé / Arrêt définitif</option>
         </select>
       </div>
