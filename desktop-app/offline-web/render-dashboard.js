@@ -9,14 +9,97 @@ function getDashboardTodayKey(){
   return toDashboardDateKey(today.getFullYear(), today.getMonth(), today.getDate());
 }
 
-function buildDashboardCalendarDayHtml(day, key, todayKey, eventCount, tooltip){
+function getDashboardTomorrowKey(){
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return toDashboardDateKey(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());
+}
+
+function getDashboardDateLabel(dateKey){
+  const raw = String(dateKey || '').trim();
+  if(!raw) return '-';
+  const parts = raw.split('-').map(Number);
+  if(parts.length !== 3 || parts.some(part=>!Number.isFinite(part))) return raw;
+  const date = new Date(parts[0], parts[1] - 1, parts[2]);
+  if(Number.isNaN(date.getTime())) return raw;
+  return formatDateDDMMYYYY(date) || raw;
+}
+
+function getDashboardDateAudienceRows(dateKey){
+  const targetKey = String(dateKey || '').trim();
+  if(!targetKey) return [];
+  return getAudienceRowsForSidebarProjectedCached()
+    .filter(row=>String(row?.calendarDateKey || '').trim() === targetKey)
+    .map((row)=>row?.calendarEvent || null)
+    .filter(Boolean)
+    .sort((a, b)=>{
+      const byClient = String(a?.client || '').localeCompare(String(b?.client || ''), 'fr', { sensitivity: 'base' });
+      if(byClient !== 0) return byClient;
+      const byProcedure = String(a?.procedure || '').localeCompare(String(b?.procedure || ''), 'fr', { sensitivity: 'base' });
+      if(byProcedure !== 0) return byProcedure;
+      return String(a?.debiteur || '').localeCompare(String(b?.debiteur || ''), 'fr', { sensitivity: 'base' });
+    });
+}
+
+function openDashboardCalendarDateDetails(dateKey){
+  const rows = getDashboardDateAudienceRows(dateKey);
+  if(!rows.length) return;
+  const todayKey = getDashboardTodayKey();
+  const tomorrowKey = getDashboardTomorrowKey();
+  let subtitleLabel = `Date d'audience : ${getDashboardDateLabel(dateKey)}`;
+  if(dateKey === todayKey){
+    subtitleLabel = `Aujourd'hui - ${getDashboardDateLabel(dateKey)}`;
+  }else if(dateKey === tomorrowKey){
+    subtitleLabel = `Demain - ${getDashboardDateLabel(dateKey)}`;
+  }
+  showExportPreviewModal({
+    title: `Audiences du ${getDashboardDateLabel(dateKey)}`,
+    subtitle: subtitleLabel,
+    headers: ['Client', 'Procedure', 'Debiteur', 'Ref dossier', 'Juge', 'Tribunal', 'Sort', 'Statut'],
+    rows: rows.map((row)=>[
+      row?.client || '-',
+      row?.procedure || '-',
+      row?.debiteur || '-',
+      row?.ref || '-',
+      row?.juge || '-',
+      row?.tribunal || '-',
+      row?.sort || '-',
+      row?.statut || 'En cours'
+    ])
+  });
+}
+
+function handleDashboardCalendarGridClick(event){
+  const button = event?.target?.closest?.('.dashboard-calendar-day[data-date-key]');
+  if(!button) return;
+  const dateKey = String(button.dataset.dateKey || '').trim();
+  if(!dateKey) return;
+  openDashboardCalendarDateDetails(dateKey);
+}
+
+function buildDashboardCalendarDayHtml(day, key, todayKey, tomorrowKey, eventCount, tooltip){
   const classes = ['dashboard-calendar-day'];
+  if(eventCount > 0) classes.push('has-event');
   if(key === todayKey) classes.push('is-today');
+  if(key === tomorrowKey) classes.push('is-tomorrow');
+  const ariaLabel = [
+    day,
+    key === todayKey ? "aujourd'hui" : '',
+    key === tomorrowKey ? 'demain' : '',
+    eventCount > 0 ? `${eventCount} audience(s)` : 'aucune audience'
+  ].filter(Boolean).join(' - ');
   return `
-    <div class="${classes.join(' ')}" title="${escapeAttr(tooltip)}">
+    <button
+      type="button"
+      class="${classes.join(' ')}"
+      data-date-key="${escapeAttr(key)}"
+      title="${escapeAttr(tooltip || ariaLabel)}"
+      aria-label="${escapeAttr(ariaLabel)}"
+      ${eventCount > 0 ? '' : 'disabled'}
+    >
       <span class="day-num">${day}</span>
-      ${key === todayKey && eventCount ? `<span class="day-count">${eventCount}</span>` : ''}
-    </div>
+      ${eventCount ? `<span class="day-count">${eventCount}</span>` : ''}
+    </button>
   `;
 }
 
@@ -62,12 +145,14 @@ function renderDashboardCalendar(){
   const firstWeekday = (firstDay.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayKey = getDashboardTodayKey();
+  const tomorrowKey = getDashboardTomorrowKey();
   const cacheKey = [
     dashboardCalendarEventsCacheVersion,
     dashboardCalendarEventsCacheUserKey,
     year,
     month,
-    todayKey
+    todayKey,
+    tomorrowKey
   ].join('||');
   if(cacheKey === dashboardCalendarMarkupCacheKey && dashboardCalendarMarkupCacheHtml){
     setElementHtmlWithRenderKey(grid, dashboardCalendarMarkupCacheHtml, cacheKey, { trustRenderKey: true });
@@ -85,7 +170,7 @@ function renderDashboardCalendar(){
     const tooltip = events
       .map(e=>`${e.client} / ${e.procedure} / ${e.debiteur}`)
       .join(' | ');
-    html += buildDashboardCalendarDayHtml(day, key, todayKey, eventCount, tooltip);
+    html += buildDashboardCalendarDayHtml(day, key, todayKey, tomorrowKey, eventCount, tooltip);
   }
   dashboardCalendarMarkupCacheKey = cacheKey;
   dashboardCalendarMarkupCacheHtml = html;

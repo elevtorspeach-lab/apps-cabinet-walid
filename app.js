@@ -12989,6 +12989,7 @@ function setupEvents(){
     dashboardCalendarCursor = new Date(dashboardCalendarCursor.getFullYear(), dashboardCalendarCursor.getMonth() + 1, 1);
     renderDashboardCalendar();
   });
+  $('dashboardCalendarGrid')?.addEventListener('click', handleDashboardCalendarGridClick);
 
   // ===== Audience color filters =====
   audienceColorButtons = Array.from(document.querySelectorAll('.color-btn[data-color]'));
@@ -18964,7 +18965,14 @@ function getAudienceRowsForSidebarProjectedCached(){
       calendarEvent: {
         client: row?.c?.name || '-',
         procedure: row?.procKey || '-',
-        debiteur: row?.d?.debiteur || '-'
+        debiteur: row?.d?.debiteur || '-',
+        ref: String(row?.draft?.refDossier || row?.p?.referenceClient || row?.d?.referenceClient || '').trim() || '-',
+        juge: judgeValue || '-',
+        tribunal: tribunalValue || '-',
+        sort: sortValue || '-',
+        statut: statutValue || 'En cours',
+        ordonnance: ordonnanceValue || '',
+        date: normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim() || '-'
       },
       judgeKeys,
       session: judgeKeys.length ? {

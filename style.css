@@ -4540,8 +4540,14 @@ td[data-label="Actions"] .btn-danger{
 }
 
 .dashboard-calendar-day{
+  appearance:none;
+  width:100%;
   position:relative;
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+  cursor:pointer;
+  text-align:left;
+  border:1px solid #d7e3f4;
+  background:#fff;
 }
 
 .dashboard-calendar-day:hover{
@@ -4550,12 +4556,37 @@ td[data-label="Actions"] .btn-danger{
   border-color:#bfd2ff;
 }
 
+.dashboard-calendar-day:disabled{
+  cursor:default;
+}
+
+.dashboard-calendar-day:disabled:hover{
+  transform:none;
+  box-shadow:none;
+  border-color:#d7e3f4;
+}
+
 .dashboard-calendar-day.has-event{
   background:linear-gradient(180deg,#eef5ff 0%, #dbeafe 100%);
 }
 
 .dashboard-calendar-day.has-event .day-num{
   color:#1d4ed8;
+}
+
+.dashboard-calendar-day.is-today{
+  border-color:#2563eb;
+  box-shadow:0 0 0 3px rgba(37,99,235,.14);
+}
+
+.dashboard-calendar-day.is-tomorrow{
+  border-color:#22c55e;
+  box-shadow:0 0 0 3px rgba(34,197,94,.12);
+  background:linear-gradient(180deg,#f3fff7 0%, #e3f9ea 100%);
+}
+
+.dashboard-calendar-day.is-tomorrow.has-event .day-num{
+  color:#15803d;
 }
 
 .modal-card{

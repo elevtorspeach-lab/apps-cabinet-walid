@@ -1599,6 +1599,7 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
   });
   if(!remoteSyncRenderSections.size) return;
   const delayMs = getAdaptiveUiBatchDelay(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, {
+    ultraLargeDatasetExtraMs: 900,
     largeDatasetExtraMs: 180,
     busyExtraMs: 320,
     importExtraMs: 420
@@ -1662,6 +1663,7 @@ function queueLinkedSectionRender(sectionKeys = [], options = {}){
     linkedSectionRenderKeepAudiencePosition = true;
   }
   const delayMs = getAdaptiveUiBatchDelay(Number(options.delayMs) || LINKED_SECTION_RENDER_DEBOUNCE_MS, {
+    ultraLargeDatasetExtraMs: 780,
     largeDatasetExtraMs: 160,
     busyExtraMs: 260,
     importExtraMs: 360
@@ -1991,13 +1993,13 @@ function applyRemoteDossierPatchLocally(patch){
   const referenceClient = resolveRemoteDossierPatchReference(patch, dossier);
   const findClientIndex = (id)=>AppState.clients.findIndex(client=>Number(client?.id) === Number(id));
 
-  if(action === 'create'){
-    const clientIdx = findClientIndex(clientId);
-    if(clientIdx === -1 || !dossier) return false;
-    if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
-    AppState.clients[clientIdx].dossiers.unshift(dossier);
-    const targetClient = AppState.clients[clientIdx];
-    return {
+    if(action === 'create'){
+      const clientIdx = findClientIndex(clientId);
+      if(clientIdx === -1 || !dossier) return false;
+      if(!Array.isArray(AppState.clients[clientIdx].dossiers)) AppState.clients[clientIdx].dossiers = [];
+      AppState.clients[clientIdx].dossiers.unshift(dossier);
+      const targetClient = AppState.clients[clientIdx];
+      return {
       action,
       sourceClientId: clientId,
       targetClientId: clientId,
@@ -4291,6 +4293,7 @@ function scheduleDeferredSectionRender(sectionKey, renderFn, options = {}){
   if(onPending) onPending();
   const queueRun = (extraDelayMs = 0)=>{
     const delayMs = getAdaptiveUiBatchDelay((Number(options.delayMs) || 0) + Math.max(0, Number(extraDelayMs) || 0), {
+      ultraLargeDatasetExtraMs: 420,
       largeDatasetExtraMs: 120,
       busyExtraMs: 220,
       importExtraMs: 320
@@ -10023,6 +10026,7 @@ async function refreshRemoteState(){
 function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
   if(remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
   const nextDelay = getAdaptiveUiBatchDelay(delayMs, {
+    ultraLargeDatasetExtraMs: 1200,
     largeDatasetExtraMs: 650,
     busyExtraMs: 900,
     importExtraMs: 1200
@@ -12985,6 +12989,7 @@ function setupEvents(){
     dashboardCalendarCursor = new Date(dashboardCalendarCursor.getFullYear(), dashboardCalendarCursor.getMonth() + 1, 1);
     renderDashboardCalendar();
   });
+  $('dashboardCalendarGrid')?.addEventListener('click', handleDashboardCalendarGridClick);
 
   // ===== Audience color filters =====
   audienceColorButtons = Array.from(document.querySelectorAll('.color-btn[data-color]'));
@@ -12996,10 +13001,14 @@ function setupEvents(){
       const errBtn = $('audienceErrorsBtn');
       if(errBtn) errBtn.classList.remove('active');
       setSelectedAudienceColor(color, false);
+      const appliedToCheckedRows = applyColorToSelectedAudienceRows(color);
       filterAudienceColor = 'all';
       const colorSel = $('filterAudienceColor');
       if(colorSel) colorSel.value = 'all';
       syncAudienceColorFilterSelectAppearance();
+      if(appliedToCheckedRows && filterAudienceCheckedFirst){
+        paginationState.audience = 1;
+      }
       renderAudience();
     });
   });
@@ -13793,14 +13802,14 @@ async function addDossier(){
         targetClientId: Number(client.id),
         dossier
       };
-  }else{
-    dossier.history = [];
-    client.dossiers.unshift(dossier);
-    dossierPatch = {
-      action: 'create',
-      clientId: Number(client.id),
-      dossier
-    };
+    }else{
+      dossier.history = [];
+      client.dossiers.unshift(dossier);
+      dossierPatch = {
+        action: 'create',
+        clientId: Number(client.id),
+        dossier
+      };
     }
     const previousAudienceImpact = editingDossier
       ? dossierHasAudienceImpact(
@@ -17001,6 +17010,19 @@ function renderSalle(options = {}){
 }
 
 function normalizeProcedures(d){
+  if(!d || typeof d !== 'object') return [];
+  const procedureDetails = d.procedureDetails && typeof d.procedureDetails === 'object'
+    ? d.procedureDetails
+    : null;
+  const procedureDetailsKeys = procedureDetails ? Object.keys(procedureDetails) : [];
+  const cacheKey = [
+    Array.isArray(d.procedureList) ? d.procedureList.join('\u001f') : String(d.procedureList || ''),
+    Array.isArray(d.procedure) ? d.procedure.join('\u001f') : String(d.procedure || ''),
+    procedureDetailsKeys.join('\u001f')
+  ].join('\u001e');
+  if(d.__normalizedProceduresCacheKey === cacheKey && Array.isArray(d.__normalizedProceduresCacheValue)){
+    return d.__normalizedProceduresCacheValue;
+  }
   let list = [];
   if(Array.isArray(d.procedureList)) list = d.procedureList;
   else if(typeof d.procedureList === 'string') list = d.procedureList.split(',');
@@ -17012,14 +17034,17 @@ function normalizeProcedures(d){
 
   if(!list.length && d.procedure) list = [String(d.procedure)];
 
-  const fromDetails = Object.keys(d.procedureDetails || {});
+  const fromDetails = procedureDetailsKeys;
   list = list.concat(fromDetails);
 
   const cleaned = list
     .map(v=>parseProcedureToken(v))
     .map(v=>String(v).trim())
     .filter(Boolean);
-  return [...new Set(cleaned)];
+  const out = [...new Set(cleaned)];
+  d.__normalizedProceduresCacheKey = cacheKey;
+  d.__normalizedProceduresCacheValue = out;
+  return out;
 }
 
 function getSelectedDossierProcedures(d){
@@ -17877,6 +17902,7 @@ function applyColorToSelectedAudienceRows(color){
   let changed = false;
   let lastClientId = null;
   let lastDossier = null;
+  const changedKeys = [];
   rows.forEach(row=>{
     const key = makeAudiencePrintKey(row.ci, row.di, row.procKey);
     if(!audiencePrintSelection.has(key)) return;
@@ -17884,15 +17910,29 @@ function applyColorToSelectedAudienceRows(color){
     const client = AppState.clients?.[row.ci];
     if(!dossier || !client) return;
     const p = getAudienceProcedure(row.ci, row.di, row.procKey);
+    detachAudienceImportBatchOwnership(p);
+    delete p._disableAudienceRowColor;
+    delete p._suppressAudienceOrdonnanceColor;
     if(String(p?.color || '').trim() === appliedColor) return;
+    rememberAudienceTransientPriorityColor(row.ci, row.di, row.procKey, '');
+    pinAudienceRowTemporarily(row.ci, row.di, row.procKey);
     p.color = appliedColor;
     if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
     if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
     changed = true;
     lastClientId = client.id;
     lastDossier = dossier;
+    changedKeys.push(key);
   });
   if(!changed) return false;
+  changedKeys.forEach((key)=>{
+    audiencePrintSelection.delete(key);
+  });
+  if(changedKeys.length){
+    audiencePrintSelectionVersion += 1;
+    lastAudienceRenderedSelectedCount = countSelectedAudienceRows(lastAudienceRenderedRows);
+    queueAudienceCheckedCountRender();
+  }
   markAudienceColorCachesDirty();
   queueAudienceColorBatchUpdate({
     persist: true,
@@ -18090,14 +18130,18 @@ function buildAudienceSelectedExportTableRow(row, options = {}){
   const d = row?.d || {};
   const draft = row?.draft || {};
   const dossierRef = getAudienceRowDraftReferenceValue(row);
+  const rawSortValue = draft.sort || p.sort || '';
   const instructionValue = formatMixedDirectionExportText(
-    draft.instruction || p.instruction || draft.sort || p.sort || ''
+    draft.instruction || p.instruction || rawSortValue
   );
   const jugeValue = draft.juge || p.juge || '';
-  const sortValue = blankSort ? '' : formatMixedDirectionExportText(draft.sort || p.sort || '');
+  const sortValue = blankSort ? '' : formatMixedDirectionExportText(rawSortValue);
+  const adversaireValue = blankSort && String(rawSortValue || '').trim()
+    ? formatMixedDirectionExportText(rawSortValue)
+    : (d.debiteur || '');
   const out = [
     row?.c?.name || '',
-    d.debiteur || '',
+    adversaireValue,
     dossierRef || '-',
     jugeValue,
     instructionValue,
@@ -18921,7 +18965,14 @@ function getAudienceRowsForSidebarProjectedCached(){
       calendarEvent: {
         client: row?.c?.name || '-',
         procedure: row?.procKey || '-',
-        debiteur: row?.d?.debiteur || '-'
+        debiteur: row?.d?.debiteur || '-',
+        ref: String(row?.draft?.refDossier || row?.p?.referenceClient || row?.d?.referenceClient || '').trim() || '-',
+        juge: judgeValue || '-',
+        tribunal: tribunalValue || '-',
+        sort: sortValue || '-',
+        statut: statutValue || 'En cours',
+        ordonnance: ordonnanceValue || '',
+        date: normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim() || '-'
       },
       judgeKeys,
       session: judgeKeys.length ? {

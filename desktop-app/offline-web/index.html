@@ -142,12 +142,6 @@
 
   <div class="clients-toolbar audience-toolbar">
     <div class="audience-actions-row">
-      <div class="audience-actions-left">
-        <button id="saveAudienceBtn" class="btn-success">
-          <i class="fa-solid fa-floppy-disk"></i> Enregistrer
-        </button>
-      </div>
-
       <div class="audience-actions-center">
         <div class="color-filters">
           <button class="color-btn all active" data-color="all">Tous</button>
@@ -231,6 +225,9 @@
     </div>
 
     <div class="audience-filter-import-row">
+      <button id="saveAudienceBtn" class="btn-success" type="button">
+        <i class="fa-solid fa-floppy-disk"></i> Enregistrer
+      </button>
       <div class="import-excel">
         <input type="file" id="importAudienceExcelInput" accept=".xlsx,.xls" style="display:none;">
         <button id="importAudienceExcelBtn" class="btn-primary" type="button">
