@@ -135,6 +135,7 @@ let deferredStateCacheWritePayload = null;
 let deferredStateCacheWriteIndexedDb = false;
 let deferredStateCacheWriteLocalStorage = false;
 let audienceAutoSaveTimer = null;
+let audienceSaveFeedbackTimer = null;
 let audienceColorBatchTimer = null;
 let audienceColorBatchNeedsPersist = false;
 let audienceColorBatchNeedsDashboard = false;
@@ -13249,10 +13250,16 @@ function setupEvents(){
     renderAudience();
   });
 
-  $('saveAudienceBtn')?.addEventListener('click', saveAllAudience);
+  $('saveAudienceBtn')?.addEventListener('click', ()=>saveAllAudience({ feedback: true }));
   $('printAudienceBtn')?.addEventListener('click', ()=>{
-    // Manual mode only: do not auto-check all rows.
-    renderAudience();
+    const rows = getVisibleAudiencePageRowsForPrintSelection();
+    if(!rows.length){
+      syncAudienceSelectionActionButton();
+      alert('Aucune ligne visible.');
+      return;
+    }
+    const selected = countSelectedAudienceRows(rows);
+    setAllVisibleAudienceRowsForPrint(selected !== rows.length);
   });
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
@@ -17807,6 +17814,57 @@ function updateAudienceCheckedCount(){
   if(node) node.textContent = String(count);
   syncAudienceColorActionAvailability();
   syncAudiencePageSelectionToggle();
+  syncAudienceSelectionActionButton();
+}
+
+function syncAudienceSelectionActionButton(){
+  const btn = $('printAudienceBtn');
+  if(!btn) return;
+  const rows = getVisibleAudiencePageRowsForPrintSelection();
+  const total = rows.length;
+  const selected = total ? countSelectedAudienceRows(rows) : 0;
+  const shouldClear = total > 0 && selected === total;
+  btn.innerHTML = shouldClear
+    ? '<i class="fa-regular fa-square-minus"></i> Décocher'
+    : '<i class="fa-solid fa-square-check"></i> Cocher';
+  btn.disabled = total === 0;
+  btn.classList.toggle('is-disabled', total === 0);
+  if(total === 0){
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = 'Aucune ligne visible sur cette page.';
+    return;
+  }
+  btn.removeAttribute('aria-disabled');
+  btn.title = shouldClear
+    ? 'Décocher toutes les lignes visibles de cette page.'
+    : 'Cocher toutes les lignes visibles de cette page.';
+}
+
+function showAudienceSaveFeedback(message, tone = 'muted'){
+  const node = $('audienceSaveFeedback');
+  if(!node) return;
+  const text = String(message || '').trim();
+  if(audienceSaveFeedbackTimer){
+    clearTimeout(audienceSaveFeedbackTimer);
+    audienceSaveFeedbackTimer = null;
+  }
+  if(!text){
+    node.textContent = '';
+    node.style.display = 'none';
+    node.className = 'audience-save-feedback';
+    return;
+  }
+  node.textContent = text;
+  node.style.display = 'inline-flex';
+  node.className = `audience-save-feedback is-${tone}`;
+  audienceSaveFeedbackTimer = setTimeout(()=>{
+    const currentNode = $('audienceSaveFeedback');
+    if(!currentNode) return;
+    currentNode.textContent = '';
+    currentNode.style.display = 'none';
+    currentNode.className = 'audience-save-feedback';
+    audienceSaveFeedbackTimer = null;
+  }, 2600);
 }
 
 function clearAudiencePrintSelection(options = {}){
@@ -19743,12 +19801,21 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
 }
 
 function saveAllAudience(options = {}){
-  if(!canEditData()) return alert('Accès refusé');
+  if(!canEditData()){
+    alert('Accès refusé');
+    return false;
+  }
   const clearDraft = options.clearDraft !== false;
   const rerender = options.rerender !== false;
+  const feedback = options.feedback === true;
+  const draftEntries = Object.entries(audienceDraft);
+  if(!draftEntries.length){
+    if(feedback) showAudienceSaveFeedback('Aucune modification a enregistrer.', 'muted');
+    return false;
+  }
   const changedDossiers = new Map();
   let shouldReconcileAudienceRefs = false;
-  Object.entries(audienceDraft).forEach(([key, data])=>{
+  draftEntries.forEach(([key, data])=>{
     const { ci, di, procKey } = parseAudienceDraftKey(key);
     const client = AppState.clients?.[ci];
     const dossier = AppState.clients?.[ci]?.dossiers?.[di];
@@ -19848,6 +19915,8 @@ function saveAllAudience(options = {}){
     }
     queueAudienceLinkedRenders();
   }
+  if(feedback) showAudienceSaveFeedback('Audience enregistree.', 'success');
+  return true;
 }
 
 function queueAudienceAutoSave(){
