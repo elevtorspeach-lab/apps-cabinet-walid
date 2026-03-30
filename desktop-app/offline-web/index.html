@@ -201,8 +201,6 @@
           <option value="green">ATT ORD</option>
           <option value="yellow">ORD OK</option>
           <option value="document-ok">Document OK</option>
-          <option value="purple-dark">Soldé</option>
-          <option value="purple-light">Arrêt définitif</option>
           <option value="closed">Soldé / Arrêt définitif</option>
         </select>
       </div>
@@ -232,6 +230,7 @@
       <button id="saveAudienceBtn" class="btn-success" type="button">
         <i class="fa-solid fa-floppy-disk"></i> Enregistrer
       </button>
+      <span id="audienceSaveFeedback" class="audience-save-feedback" aria-live="polite" style="display:none;"></span>
       <div class="import-excel">
         <input type="file" id="importAudienceExcelInput" accept=".xlsx,.xls" style="display:none;">
         <button id="importAudienceExcelBtn" class="btn-primary" type="button">

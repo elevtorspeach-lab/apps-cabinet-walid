@@ -2,6 +2,7 @@
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [] };
 const DEFAULT_MANAGER_USERNAME = 'walid';
 const DEFAULT_MANAGER_PASSWORD = '1234';
+const REMOTE_MANAGER_USERNAME = 'manager';
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -21,6 +22,25 @@ const STANDARD_TEAM_TOTAL_ADMINS = 8;
 const STANDARD_TEAM_TOTAL_CLIENTS = 5;
 const STANDARD_TEAM_DEFAULT_PASSWORD = '1234';
 const STANDARD_TEAM_MANAGER_USERNAMES = ['walid', 'amine'];
+
+function normalizeLoginUsername(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function isManagerLoginAlias(value){
+  const username = normalizeLoginUsername(value);
+  return username === DEFAULT_MANAGER_USERNAME || username === REMOTE_MANAGER_USERNAME;
+}
+
+function resolveLocalLoginUsername(value){
+  const username = normalizeLoginUsername(value);
+  return isManagerLoginAlias(username) ? DEFAULT_MANAGER_USERNAME : username;
+}
+
+function resolveRemoteLoginUsername(value){
+  const username = normalizeLoginUsername(value);
+  return isManagerLoginAlias(username) ? REMOTE_MANAGER_USERNAME : username;
+}
 
 function buildSeedUsers(){
   return [
@@ -135,6 +155,7 @@ let deferredStateCacheWritePayload = null;
 let deferredStateCacheWriteIndexedDb = false;
 let deferredStateCacheWriteLocalStorage = false;
 let audienceAutoSaveTimer = null;
+let audienceSaveFeedbackTimer = null;
 let audienceColorBatchTimer = null;
 let audienceColorBatchNeedsPersist = false;
 let audienceColorBatchNeedsDashboard = false;
@@ -6220,6 +6241,49 @@ function isAudienceOrdonnanceColorSuppressed(procData){
   return String(procData?._suppressAudienceOrdonnanceColor || '').trim() === '1';
 }
 
+function hasAudienceOrdonnanceColorSource(procData){
+  const ordonnanceValue = String(procData?.attOrdOrOrdOk || procData?._audienceSortOrd || '').trim();
+  return !!normalizeDiligenceOrdonnance(ordonnanceValue);
+}
+
+function applyAudienceWhiteColorState(procData, dossier, currentEffectiveColor = ''){
+  const p = procData && typeof procData === 'object' ? procData : null;
+  if(!p || !dossier || typeof dossier !== 'object') return false;
+  const effectiveColor = String(currentEffectiveColor || '').trim();
+  const hasOrdonnanceColor = hasAudienceOrdonnanceColorSource(p)
+    || ['green', 'yellow'].includes(String(p?.color || '').trim())
+    || ['green', 'yellow'].includes(effectiveColor);
+  let changed = false;
+  if(hasOrdonnanceColor){
+    if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
+      p._disableAudienceRowColor = '1';
+      changed = true;
+    }
+    if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
+      p._suppressAudienceOrdonnanceColor = '1';
+      changed = true;
+    }
+  }else{
+    if(String(p?._disableAudienceRowColor || '').trim()){
+      delete p._disableAudienceRowColor;
+      changed = true;
+    }
+    if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
+      delete p._suppressAudienceOrdonnanceColor;
+      changed = true;
+    }
+  }
+  if(String(p?.color || '').trim()){
+    p.color = '';
+    changed = true;
+  }
+  if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
+    dossier.statut = 'En cours';
+    changed = true;
+  }
+  return changed;
+}
+
 function parseExcelDateValue(value){
   if(value === null || value === undefined) return '';
 
@@ -6872,7 +6936,7 @@ async function submitLocalBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
-  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
   $('password')?.focus();
@@ -6887,7 +6951,7 @@ async function submitRemoteBootstrapPasswordSetup(password){
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: DEFAULT_MANAGER_USERNAME,
+      username: REMOTE_MANAGER_USERNAME,
       password
     })
   }, API_STATE_SAVE_TIMEOUT_MS);
@@ -6900,7 +6964,7 @@ async function submitRemoteBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
-  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire serveur initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
   $('password')?.focus();
@@ -11250,6 +11314,44 @@ function syncAudienceColorFilterSelectAppearance(){
   if(!select) return;
   const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
+  const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
+  if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
+  select.value = normalizedValue;
+}
+
+function normalizeAudienceFilterColorValue(value){
+  const normalized = String(value || 'all').trim() || 'all';
+  if(normalized === 'purple-dark' || normalized === 'purple-light'){
+    return 'closed';
+  }
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  return allowed.has(normalized) ? normalized : 'all';
+}
+
+function getAudienceSelectionToneClass(color = selectedAudienceColor){
+  const normalized = String(color || '').trim();
+  const resolved = normalized === 'closed' ? 'purple-dark' : normalized;
+  const allowed = new Set(['blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
+  if(!allowed.has(resolved)) return 'audience-tone-all';
+  return `audience-tone-${resolved}`;
+}
+
+function syncAudienceSelectionTone(){
+  const toneClasses = [
+    'audience-tone-all',
+    'audience-tone-blue',
+    'audience-tone-green',
+    'audience-tone-yellow',
+    'audience-tone-document-ok',
+    'audience-tone-purple-dark',
+    'audience-tone-purple-light'
+  ];
+  const targets = [$('audienceCheckedCount'), $('printAudienceBtn')].filter(Boolean);
+  const nextToneClass = getAudienceSelectionToneClass();
+  targets.forEach((node)=>{
+    toneClasses.forEach(cls=>node.classList.remove(cls));
+    node.classList.add(nextToneClass);
+  });
 }
 
 function syncAudienceColorActionAvailability(){
@@ -13182,7 +13284,7 @@ function setupEvents(){
     restoreRecycleItem(idx);
   });
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
-    filterAudienceColor = e.target.value;
+    filterAudienceColor = normalizeAudienceFilterColorValue(e.target.value);
     clearAudiencePrintSelection({ immediate: true });
     syncAudienceColorFilterSelectAppearance();
     renderAudience();
@@ -13211,10 +13313,17 @@ function setupEvents(){
     renderAudience();
   });
 
-  $('saveAudienceBtn')?.addEventListener('click', saveAllAudience);
+  document.addEventListener('keydown', handleAudienceSaveShortcut);
+  $('saveAudienceBtn')?.addEventListener('click', ()=>saveAllAudience({ feedback: true }));
   $('printAudienceBtn')?.addEventListener('click', ()=>{
-    // Manual mode only: do not auto-check all rows.
-    renderAudience();
+    const rows = getVisibleAudiencePageRowsForPrintSelection();
+    if(!rows.length){
+      syncAudienceSelectionActionButton();
+      alert('Aucune ligne visible.');
+      return;
+    }
+    const selected = countSelectedAudienceRows(rows);
+    setAllVisibleAudienceRowsForPrint(selected !== rows.length);
   });
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
@@ -13267,6 +13376,7 @@ function setupEvents(){
     });
   });
   syncAudienceColorFilterSelectAppearance();
+  syncAudienceSelectionTone();
   syncAudienceColorActionAvailability();
   window.addEventListener('beforeunload', ()=>{
     if(hasLoadedState) persistAppStateNow();
@@ -13279,6 +13389,7 @@ function setSelectedAudienceColor(color, syncFilter){
   buttons.forEach(b=>b.classList.remove('active'));
   const btn = buttons.find(b=>b.dataset.color === color) || null;
   if(btn) btn.classList.add('active');
+  syncAudienceSelectionTone();
   if(syncFilter){
     filterAudienceColor = color;
     const sel = $('filterAudienceColor');
@@ -13362,11 +13473,13 @@ async function login(){
 
   loginInFlight = true;
   try{
-    const usernameInput = String($('username').value || '').trim().toLowerCase();
+    const rawUsernameInput = $('username').value || '';
+    const usernameInput = resolveLocalLoginUsername(rawUsernameInput);
+    const remoteUsernameInput = resolveRemoteLoginUsername(rawUsernameInput);
     const passwordInput = normalizeLoginPassword($('password').value);
     let remoteLoginState = 'offline';
     if(!LOCAL_ONLY_MODE){
-      const remoteAuth = await loginRemoteSession(usernameInput, passwordInput);
+      const remoteAuth = await loginRemoteSession(remoteUsernameInput, passwordInput);
       if(remoteAuth.ok){
         remoteLoginState = 'ok';
         updateBootstrapSetupUi({ visible: false });
@@ -17767,6 +17880,77 @@ function updateAudienceCheckedCount(){
   if(node) node.textContent = String(count);
   syncAudienceColorActionAvailability();
   syncAudiencePageSelectionToggle();
+  syncAudienceSelectionActionButton();
+}
+
+function syncAudienceSelectionActionButton(){
+  const btn = $('printAudienceBtn');
+  if(!btn) return;
+  const rows = getVisibleAudiencePageRowsForPrintSelection();
+  const total = rows.length;
+  const selected = total ? countSelectedAudienceRows(rows) : 0;
+  const shouldClear = total > 0 && selected === total;
+  btn.innerHTML = shouldClear
+    ? '<i class="fa-regular fa-square-minus"></i> Décocher'
+    : '<i class="fa-solid fa-square-check"></i> Cocher';
+  btn.disabled = total === 0;
+  btn.classList.toggle('is-disabled', total === 0);
+  if(total === 0){
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = 'Aucune ligne visible sur cette page.';
+    return;
+  }
+  btn.removeAttribute('aria-disabled');
+  btn.title = shouldClear
+    ? 'Décocher toutes les lignes visibles de cette page.'
+    : 'Cocher toutes les lignes visibles de cette page.';
+}
+
+function showAudienceSaveFeedback(message, tone = 'muted'){
+  const node = $('audienceSaveFeedback');
+  if(!node) return;
+  const text = String(message || '').trim();
+  if(audienceSaveFeedbackTimer){
+    clearTimeout(audienceSaveFeedbackTimer);
+    audienceSaveFeedbackTimer = null;
+  }
+  if(!text){
+    node.textContent = '';
+    node.style.display = 'none';
+    node.className = 'audience-save-feedback';
+    return;
+  }
+  node.textContent = text;
+  node.style.display = 'inline-flex';
+  node.className = `audience-save-feedback is-${tone}`;
+  audienceSaveFeedbackTimer = setTimeout(()=>{
+    const currentNode = $('audienceSaveFeedback');
+    if(!currentNode) return;
+    currentNode.textContent = '';
+    currentNode.style.display = 'none';
+    currentNode.className = 'audience-save-feedback';
+    audienceSaveFeedbackTimer = null;
+  }, 2600);
+}
+
+function shouldHandleAudienceSaveShortcut(event){
+  if(!event || event.defaultPrevented || event.key !== 'Enter') return false;
+  if(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return false;
+  if(!canEditData()) return false;
+  const target = event.target;
+  if(typeof Element === 'undefined' || !(target instanceof Element)) return false;
+  const audienceSection = $('audienceSection');
+  if(!audienceSection || audienceSection.style.display === 'none' || !audienceSection.contains(target)) return false;
+  if(target.closest('#importResultModal, #exportPreviewModal')) return false;
+  if(target.closest('.search-box, .audience-color-filter, .audience-actions-right, .import-excel')) return false;
+  if(target.closest('textarea') || target.isContentEditable) return false;
+  return !!target.closest('#audienceTableContainer');
+}
+
+function handleAudienceSaveShortcut(event){
+  if(!shouldHandleAudienceSaveShortcut(event)) return;
+  event.preventDefault();
+  saveAllAudience({ feedback: true });
 }
 
 function clearAudiencePrintSelection(options = {}){
@@ -18165,33 +18349,7 @@ function applyColorToSelectedAudienceRows(color){
     const currentEffectiveColor = String(getAudienceRowEffectiveColor(row) || '').trim();
     let rowChanged = false;
     if(targetColor === 'white'){
-      if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
-        if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
-          p._disableAudienceRowColor = '1';
-          rowChanged = true;
-        }
-        if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
-          p._suppressAudienceOrdonnanceColor = '1';
-          rowChanged = true;
-        }
-      }else{
-        if(String(p?._disableAudienceRowColor || '').trim()){
-          delete p._disableAudienceRowColor;
-          rowChanged = true;
-        }
-        if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
-          delete p._suppressAudienceOrdonnanceColor;
-          rowChanged = true;
-        }
-      }
-      if(String(p?.color || '').trim()){
-        p.color = '';
-        rowChanged = true;
-      }
-      if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
-        dossier.statut = 'En cours';
-        rowChanged = true;
-      }
+      rowChanged = applyAudienceWhiteColorState(p, dossier, currentEffectiveColor);
       if(!rowChanged && !currentEffectiveColor) return;
     }else{
       const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
@@ -19357,20 +19515,10 @@ function setAudienceColor(ci, di, procKey, checked){
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   if(!dossier) return;
   const p = getAudienceProcedure(ci, di, procKey);
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
   if(!checked){
     detachAudienceImportBatchOwnership(p);
-    if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
-      p._disableAudienceRowColor = '1';
-      p._suppressAudienceOrdonnanceColor = '1';
-    }else{
-      delete p._disableAudienceRowColor;
-      delete p._suppressAudienceOrdonnanceColor;
-    }
-    p.color = '';
-    if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
-      dossier.statut = 'En cours';
-    }
+    applyAudienceWhiteColorState(p, dossier, '');
     markAudienceColorCachesDirty();
     queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: false });
     return;
@@ -19381,6 +19529,20 @@ function setAudienceColor(ci, di, procKey, checked){
   }
   const appliedColor = selectedAudienceColor === 'closed' ? 'purple-dark' : selectedAudienceColor;
   detachAudienceImportBatchOwnership(p);
+  if(appliedColor === 'white'){
+    applyAudienceWhiteColorState(p, dossier, getAudienceRowEffectiveColor({
+      c: client,
+      d: dossier,
+      procKey,
+      p,
+      draft: {},
+      ci,
+      di
+    }));
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
+    return;
+  }
   delete p._disableAudienceRowColor;
   delete p._suppressAudienceOrdonnanceColor;
   p.color = appliedColor;
@@ -19703,12 +19865,21 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
 }
 
 function saveAllAudience(options = {}){
-  if(!canEditData()) return alert('Accès refusé');
+  if(!canEditData()){
+    alert('Accès refusé');
+    return false;
+  }
   const clearDraft = options.clearDraft !== false;
   const rerender = options.rerender !== false;
+  const feedback = options.feedback === true;
+  const draftEntries = Object.entries(audienceDraft);
+  if(!draftEntries.length){
+    if(feedback) showAudienceSaveFeedback('Aucune modification a enregistrer.', 'muted');
+    return false;
+  }
   const changedDossiers = new Map();
   let shouldReconcileAudienceRefs = false;
-  Object.entries(audienceDraft).forEach(([key, data])=>{
+  draftEntries.forEach(([key, data])=>{
     const { ci, di, procKey } = parseAudienceDraftKey(key);
     const client = AppState.clients?.[ci];
     const dossier = AppState.clients?.[ci]?.dossiers?.[di];
@@ -19808,6 +19979,8 @@ function saveAllAudience(options = {}){
     }
     queueAudienceLinkedRenders();
   }
+  if(feedback) showAudienceSaveFeedback('Audience enregistree.', 'success');
+  return true;
 }
 
 function queueAudienceAutoSave(){

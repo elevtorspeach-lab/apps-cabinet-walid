@@ -3,6 +3,8 @@
 ## Before Push
 
 - Confirm `app.js`, `index.html`, and `style.css` behave correctly in the browser.
+- Run `node desktop-app/scripts/sync-offline-web.mjs` from the project root.
+- Run `node desktop-app/scripts/validate-offline-sync.mjs` from the project root.
 - Review `git status` and avoid mixing unrelated changes in the same release.
 - Keep user-visible flows stable:
   - dossier update

@@ -2,6 +2,7 @@
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [] };
 const DEFAULT_MANAGER_USERNAME = 'walid';
 const DEFAULT_MANAGER_PASSWORD = '1234';
+const REMOTE_MANAGER_USERNAME = 'manager';
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -21,6 +22,25 @@ const STANDARD_TEAM_TOTAL_ADMINS = 8;
 const STANDARD_TEAM_TOTAL_CLIENTS = 5;
 const STANDARD_TEAM_DEFAULT_PASSWORD = '1234';
 const STANDARD_TEAM_MANAGER_USERNAMES = ['walid', 'amine'];
+
+function normalizeLoginUsername(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function isManagerLoginAlias(value){
+  const username = normalizeLoginUsername(value);
+  return username === DEFAULT_MANAGER_USERNAME || username === REMOTE_MANAGER_USERNAME;
+}
+
+function resolveLocalLoginUsername(value){
+  const username = normalizeLoginUsername(value);
+  return isManagerLoginAlias(username) ? DEFAULT_MANAGER_USERNAME : username;
+}
+
+function resolveRemoteLoginUsername(value){
+  const username = normalizeLoginUsername(value);
+  return isManagerLoginAlias(username) ? REMOTE_MANAGER_USERNAME : username;
+}
 
 function buildSeedUsers(){
   return [
@@ -6221,6 +6241,49 @@ function isAudienceOrdonnanceColorSuppressed(procData){
   return String(procData?._suppressAudienceOrdonnanceColor || '').trim() === '1';
 }
 
+function hasAudienceOrdonnanceColorSource(procData){
+  const ordonnanceValue = String(procData?.attOrdOrOrdOk || procData?._audienceSortOrd || '').trim();
+  return !!normalizeDiligenceOrdonnance(ordonnanceValue);
+}
+
+function applyAudienceWhiteColorState(procData, dossier, currentEffectiveColor = ''){
+  const p = procData && typeof procData === 'object' ? procData : null;
+  if(!p || !dossier || typeof dossier !== 'object') return false;
+  const effectiveColor = String(currentEffectiveColor || '').trim();
+  const hasOrdonnanceColor = hasAudienceOrdonnanceColorSource(p)
+    || ['green', 'yellow'].includes(String(p?.color || '').trim())
+    || ['green', 'yellow'].includes(effectiveColor);
+  let changed = false;
+  if(hasOrdonnanceColor){
+    if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
+      p._disableAudienceRowColor = '1';
+      changed = true;
+    }
+    if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
+      p._suppressAudienceOrdonnanceColor = '1';
+      changed = true;
+    }
+  }else{
+    if(String(p?._disableAudienceRowColor || '').trim()){
+      delete p._disableAudienceRowColor;
+      changed = true;
+    }
+    if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
+      delete p._suppressAudienceOrdonnanceColor;
+      changed = true;
+    }
+  }
+  if(String(p?.color || '').trim()){
+    p.color = '';
+    changed = true;
+  }
+  if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
+    dossier.statut = 'En cours';
+    changed = true;
+  }
+  return changed;
+}
+
 function parseExcelDateValue(value){
   if(value === null || value === undefined) return '';
 
@@ -6873,7 +6936,7 @@ async function submitLocalBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
-  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
   $('password')?.focus();
@@ -6888,7 +6951,7 @@ async function submitRemoteBootstrapPasswordSetup(password){
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: DEFAULT_MANAGER_USERNAME,
+      username: REMOTE_MANAGER_USERNAME,
       password
     })
   }, API_STATE_SAVE_TIMEOUT_MS);
@@ -6901,7 +6964,7 @@ async function submitRemoteBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
-  if($('username')) $('username').value = DEFAULT_MANAGER_USERNAME;
+  if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire serveur initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
   $('password')?.focus();
@@ -13250,6 +13313,7 @@ function setupEvents(){
     renderAudience();
   });
 
+  document.addEventListener('keydown', handleAudienceSaveShortcut);
   $('saveAudienceBtn')?.addEventListener('click', ()=>saveAllAudience({ feedback: true }));
   $('printAudienceBtn')?.addEventListener('click', ()=>{
     const rows = getVisibleAudiencePageRowsForPrintSelection();
@@ -13409,11 +13473,13 @@ async function login(){
 
   loginInFlight = true;
   try{
-    const usernameInput = String($('username').value || '').trim().toLowerCase();
+    const rawUsernameInput = $('username').value || '';
+    const usernameInput = resolveLocalLoginUsername(rawUsernameInput);
+    const remoteUsernameInput = resolveRemoteLoginUsername(rawUsernameInput);
     const passwordInput = normalizeLoginPassword($('password').value);
     let remoteLoginState = 'offline';
     if(!LOCAL_ONLY_MODE){
-      const remoteAuth = await loginRemoteSession(usernameInput, passwordInput);
+      const remoteAuth = await loginRemoteSession(remoteUsernameInput, passwordInput);
       if(remoteAuth.ok){
         remoteLoginState = 'ok';
         updateBootstrapSetupUi({ visible: false });
@@ -17867,6 +17933,26 @@ function showAudienceSaveFeedback(message, tone = 'muted'){
   }, 2600);
 }
 
+function shouldHandleAudienceSaveShortcut(event){
+  if(!event || event.defaultPrevented || event.key !== 'Enter') return false;
+  if(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return false;
+  if(!canEditData()) return false;
+  const target = event.target;
+  if(typeof Element === 'undefined' || !(target instanceof Element)) return false;
+  const audienceSection = $('audienceSection');
+  if(!audienceSection || audienceSection.style.display === 'none' || !audienceSection.contains(target)) return false;
+  if(target.closest('#importResultModal, #exportPreviewModal')) return false;
+  if(target.closest('.search-box, .audience-color-filter, .audience-actions-right, .import-excel')) return false;
+  if(target.closest('textarea') || target.isContentEditable) return false;
+  return !!target.closest('#audienceTableContainer');
+}
+
+function handleAudienceSaveShortcut(event){
+  if(!shouldHandleAudienceSaveShortcut(event)) return;
+  event.preventDefault();
+  saveAllAudience({ feedback: true });
+}
+
 function clearAudiencePrintSelection(options = {}){
   if(!audiencePrintSelection.size){
     if(options.immediate) updateAudienceCheckedCount();
@@ -18263,33 +18349,7 @@ function applyColorToSelectedAudienceRows(color){
     const currentEffectiveColor = String(getAudienceRowEffectiveColor(row) || '').trim();
     let rowChanged = false;
     if(targetColor === 'white'){
-      if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
-        if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
-          p._disableAudienceRowColor = '1';
-          rowChanged = true;
-        }
-        if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
-          p._suppressAudienceOrdonnanceColor = '1';
-          rowChanged = true;
-        }
-      }else{
-        if(String(p?._disableAudienceRowColor || '').trim()){
-          delete p._disableAudienceRowColor;
-          rowChanged = true;
-        }
-        if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
-          delete p._suppressAudienceOrdonnanceColor;
-          rowChanged = true;
-        }
-      }
-      if(String(p?.color || '').trim()){
-        p.color = '';
-        rowChanged = true;
-      }
-      if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
-        dossier.statut = 'En cours';
-        rowChanged = true;
-      }
+      rowChanged = applyAudienceWhiteColorState(p, dossier, currentEffectiveColor);
       if(!rowChanged && !currentEffectiveColor) return;
     }else{
       const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
@@ -19455,20 +19515,10 @@ function setAudienceColor(ci, di, procKey, checked){
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   if(!dossier) return;
   const p = getAudienceProcedure(ci, di, procKey);
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
   if(!checked){
     detachAudienceImportBatchOwnership(p);
-    if(normalizeDiligenceOrdonnance(p?.attOrdOrOrdOk || '') || ['green', 'yellow'].includes(String(p?.color || '').trim())){
-      p._disableAudienceRowColor = '1';
-      p._suppressAudienceOrdonnanceColor = '1';
-    }else{
-      delete p._disableAudienceRowColor;
-      delete p._suppressAudienceOrdonnanceColor;
-    }
-    p.color = '';
-    if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
-      dossier.statut = 'En cours';
-    }
+    applyAudienceWhiteColorState(p, dossier, '');
     markAudienceColorCachesDirty();
     queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: false });
     return;
@@ -19479,6 +19529,20 @@ function setAudienceColor(ci, di, procKey, checked){
   }
   const appliedColor = selectedAudienceColor === 'closed' ? 'purple-dark' : selectedAudienceColor;
   detachAudienceImportBatchOwnership(p);
+  if(appliedColor === 'white'){
+    applyAudienceWhiteColorState(p, dossier, getAudienceRowEffectiveColor({
+      c: client,
+      d: dossier,
+      procKey,
+      p,
+      draft: {},
+      ci,
+      di
+    }));
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
+    return;
+  }
   delete p._disableAudienceRowColor;
   delete p._suppressAudienceOrdonnanceColor;
   p.color = appliedColor;
