@@ -41,6 +41,51 @@ function getDashboardDateAudienceRows(dateKey){
     });
 }
 
+function getDashboardDateAudienceSourceRows(dateKey){
+  const targetKey = String(dateKey || '').trim();
+  if(!targetKey) return [];
+  return getAudienceRowsForSidebar()
+    .filter((row)=>{
+      const audienceDateRaw = row?.draft?.dateAudience || row?.p?.audience || '';
+      const parsedAudienceDate = parseDateForAge(audienceDateRaw);
+      if(!(parsedAudienceDate instanceof Date) || Number.isNaN(parsedAudienceDate.getTime())) return false;
+      return formatDateYYYYMMDD(parsedAudienceDate) === targetKey;
+    })
+    .sort(compareAudienceRowsByReferenceProximity);
+}
+
+function buildDashboardCalendarDateExcelFilename(dateKey){
+  const safeDateKey = String(dateKey || '').trim().replace(/[^0-9-]/g, '') || 'audience';
+  return `audiences_${safeDateKey}.xlsx`;
+}
+
+function openDashboardCalendarDateExcelPreviewWindow(dateKey){
+  const exportRows = getDashboardDateAudienceSourceRows(dateKey);
+  if(!exportRows.length){
+    alert("Aucune ligne d'audience à afficher dans le fichier.");
+    return;
+  }
+  const browserDownloadTarget = primeBrowserDownloadTarget('Ouverture du fichier Excel...');
+  runWithHeavyUiOperation(async ()=>{
+    const dataset = await buildAudienceSelectedExportDatasetAsync(exportRows, { blankSort: true });
+    await exportAudienceWorkbookXlsxStyled({
+      headers: dataset.headers,
+      rows: dataset.tableRows,
+      subtitle: dataset.subtitle,
+      sheetName: 'Audience',
+      colWidths: dataset.colWidths,
+      filename: buildDashboardCalendarDateExcelFilename(dateKey),
+      layoutPreset: 'audience-reference',
+      openAfterExport: true,
+      browserDownloadTarget,
+      browserOpenInline: true
+    });
+  }).catch((err)=>{
+    console.error(err);
+    alert("Ouverture du fichier Excel impossible.");
+  });
+}
+
 function openDashboardCalendarDateDetails(dateKey){
   const rows = getDashboardDateAudienceRows(dateKey);
   if(!rows.length) return;
@@ -56,6 +101,8 @@ function openDashboardCalendarDateDetails(dateKey){
     title: `Audiences du ${getDashboardDateLabel(dateKey)}`,
     subtitle: subtitleLabel,
     headers: ['Client', 'Procedure', 'Debiteur', 'Ref dossier', 'Juge', 'Tribunal', 'Sort', 'Statut'],
+    exportLabel: 'Aperçu Excel',
+    onExport: ()=>openDashboardCalendarDateExcelPreviewWindow(dateKey),
     rows: rows.map((row)=>[
       row?.client || '-',
       row?.procedure || '-',
