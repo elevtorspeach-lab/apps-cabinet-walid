@@ -2199,7 +2199,7 @@ tr:hover{background:#f1f5f9}
   width:100%;
 }
 
-#audienceSection .audience-checked-count{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count{
   --audience-tone-solid:#334155;
   --audience-tone-solid-2:#1f2937;
   --audience-tone-soft:#f8fafc;
@@ -2225,10 +2225,10 @@ tr:hover{background:#f1f5f9}
   user-select:none;
   transition:border-color .18s ease, box-shadow .18s ease, background .18s ease, opacity .18s ease;
 }
-#audienceSection .audience-checked-count:hover{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count:hover{
   box-shadow:0 14px 26px var(--audience-tone-shadow);
 }
-#audienceSection .audience-checked-count input{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count input{
   width:18px;
   height:18px;
   margin:0;
@@ -2236,10 +2236,10 @@ tr:hover{background:#f1f5f9}
   cursor:pointer;
   flex:0 0 auto;
 }
-#audienceSection .audience-checked-count .label{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count .label{
   opacity:.9;
 }
-#audienceSection .audience-checked-count .value{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count .value{
   min-width:28px;
   text-align:center;
   padding:3px 8px;
@@ -2249,18 +2249,18 @@ tr:hover{background:#f1f5f9}
   box-shadow:0 6px 14px var(--audience-tone-shadow);
 }
 
-#audienceSection .audience-checked-count.is-partial{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count.is-partial{
   background:
     linear-gradient(135deg,var(--audience-tone-soft) 0%, var(--audience-tone-soft-2) 100%);
 }
 
-#audienceSection .audience-checked-count.is-disabled{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count.is-disabled{
   opacity:.58;
   cursor:not-allowed;
   box-shadow:none;
 }
 
-#audienceSection .audience-checked-count.is-disabled input{
+:is(#audienceSection, #diligenceSection, #suiviSection) .audience-checked-count.is-disabled input{
   cursor:not-allowed;
 }
 

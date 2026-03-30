@@ -2998,12 +2998,12 @@ function getAllFilteredSuiviRowsForPrintSelection(){
 }
 
 function syncSuiviPageSelectionToggle(){
-  const rows = getAllFilteredSuiviRowsForPrintSelection();
+  const rows = getVisibleSuiviPageRowsForPrintSelection();
   const selected = (
-    rows === lastSuiviRenderedRows
+    rows === lastSuiviRenderedPageRows
     && getSuiviRenderStateKey() === lastSuiviRenderedStateKey
   )
-    ? lastSuiviRenderedSelectedCount
+    ? countSelectedSuiviRows(lastSuiviRenderedPageRows)
     : countSelectedSuiviRows(rows);
   syncPageSelectionToggleControl('suiviPageSelectionToggle', 'suiviCheckedCount', rows.length, selected);
 }
@@ -11444,6 +11444,7 @@ async function applyExcelImport(payload, options = {}){
   let skippedDossiersCount = 0;
   let linkedAudiencesCount = 0;
   let skippedAudiencesCount = 0;
+  const audienceImportSlotMap = new Map();
   const addSkippedImportIssue = (message)=>{
     const text = String(message || '').trim();
     if(text) importSkippedRows.push(text);
@@ -12169,6 +12170,19 @@ async function applyExcelImport(payload, options = {}){
       }
       targetProc = 'ASS';
     }
+    const targetDossierUid = ensureDossierImportUid(dossier);
+    const audienceSlotKey = `${targetDossierUid || ''}::${String(targetProc || '').trim()}`;
+    const existingAudienceSlot = audienceImportSlotMap.get(audienceSlotKey);
+    if(existingAudienceSlot){
+      skippedAudiencesCount += 1;
+      addSkippedImportIssue(
+        `${rowNumberLabel}: audience ignorée (même dossier/procédure déjà importé à ${existingAudienceSlot.rowLabel}) - Réf dossier "${ref || '-'}", Procédure "${targetProc}", Débiteur "${row.debiteur || '-'}"${audienceBaseContext}`
+      );
+      return;
+    }
+    audienceImportSlotMap.set(audienceSlotKey, {
+      rowLabel: rowNumberLabel
+    });
     if(!dossier.procedureDetails) dossier.procedureDetails = {};
     if(!dossier.procedureDetails[targetProc]) dossier.procedureDetails[targetProc] = {};
     recordAudienceImportOperation(dossier, targetProc);
@@ -12959,7 +12973,7 @@ function setupEvents(){
   bindDashboardShortcutCard('dashboardClotureCard', openDashboardSuiviClosedView);
   $('selectAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(true));
   $('clearAllSuiviBtn')?.addEventListener('click', ()=>setAllVisibleSuiviRowsForPrint(false));
-  $('suiviPageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredSuiviRowsForPrint(!!e.target?.checked));
+  $('suiviPageSelectionToggle')?.addEventListener('change', (e)=>setAllVisibleSuiviRowsForPrint(!!e.target?.checked));
   $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('previewSuiviBtn')?.addEventListener('click', previewSuiviSelectedRows);
   $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
