@@ -63,7 +63,10 @@ function shouldShowDiligenceCommandementColumns(rows){
 function getDiligenceColCount(){
   if(diligenceVirtualShowCommandementColumns) return 12;
   if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 12;
-  return diligenceVirtualShowAssColumns ? 18 : 15;
+  if(diligenceVirtualShowAssColumns){
+    return getDiligenceAssHeaderMode(diligenceVirtualRows) === 'default' ? 16 : 18;
+  }
+  return 15;
 }
 
 function getDiligenceCompactProcedureMode(rows = []){
@@ -120,8 +123,9 @@ function buildDiligenceHeadHtml(){
   const huissierHeader = assHeaderMode === 'nb'
     ? 'Sort notif'
     : (assHeaderMode === 'mixed' ? 'Huissier / Sort notif' : 'Huissier');
+  const showAssFollowupColumns = diligenceVirtualShowAssColumns && assHeaderMode !== 'default';
   const avisHeader = diligenceVirtualShowAssColumns
-    ? 'Avis curateur'
+    ? (showAssFollowupColumns ? 'Avis curateur' : '')
     : 'Sort exécution';
   const compactMode = diligenceVirtualCompactProcedureMode;
   const showCompactInjonctionColumns = !diligenceVirtualShowAssColumns && compactMode !== 'sfdc' && compactMode !== 'sbien';
@@ -142,8 +146,8 @@ function buildDiligenceHeadHtml(){
     <th>${villeHeader}</th>
     <th>${delegationHeader}</th>
     <th>${huissierHeader}</th>
-    <th>${avisHeader}</th>
-    ${diligenceVirtualShowAssColumns ? '<th>PV Police</th>' : ''}
+    ${avisHeader ? `<th>${avisHeader}</th>` : ''}
+    ${showAssFollowupColumns ? '<th>PV Police</th>' : ''}
     <th>Tribunal</th>
   `;
 }
@@ -192,6 +196,10 @@ function renderDiligenceRowHtml(row){
     && diligenceVirtualCompactProcedureMode !== 'sfdc'
     && diligenceVirtualCompactProcedureMode !== 'sbien';
   const showSharedNotificationColumns = isAssProcedure || showCompactInjonctionColumns;
+  const assHeaderMode = diligenceVirtualShowAssColumns
+    ? getDiligenceAssHeaderMode(diligenceVirtualRows)
+    : 'default';
+  const showAssFollowupColumns = isAssProcedure && assHeaderMode !== 'default';
   if(diligenceVirtualShowCommandementColumns && isCommandementProcedure){
     return `
       <tr>
@@ -248,7 +256,10 @@ function renderDiligenceRowHtml(row){
       <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue)}</td>
-      <td>${!isAssProcedure ? renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue) : ''}</td>
+      ${!isAssProcedure
+        ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue)}</td>`
+        : (showAssFollowupColumns ? `<td></td><td></td>` : '')
+      }
       <td>${isCommandementProcedure ? '' : renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
     `;
   return `

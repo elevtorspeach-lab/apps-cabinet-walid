@@ -157,6 +157,10 @@ let queuedPersistPayload = null;
 let dossierPatchPersistTimer = null;
 let queuedDossierPatchEntries = new Map();
 let desktopStatePersistTimer = null;
+let desktopStatePersistInFlight = false;
+let desktopStatePersistQueuedPayload = null;
+let desktopStatePersistQueuedSignature = '';
+let lastDesktopStatePersistSignature = '';
 let deferredStateCacheWriteTimer = null;
 let deferredStateCacheWriteIdleId = null;
 let deferredStateCacheWritePayload = null;
@@ -9485,7 +9489,7 @@ async function openDesktopStateFile(){
   ){
     try{
       // Force-write latest in-memory state before opening the file.
-      await persistDesktopStateFileNow();
+      await persistDesktopStateFileNow(buildAppStatePayload(), { force: true, signature: '' });
       const result = await window.cabinetDesktopState.openStateFile();
       if(result?.ok) return;
       const fallbackPath = String(result?.filePath || '').trim();
@@ -9504,24 +9508,57 @@ async function openDesktopStateFile(){
   alert('Option disponible uniquement dans la version Desktop (EXE/DMG).');
 }
 
-async function persistDesktopStateFileNow(payload = buildAppStatePayload()){
+async function persistDesktopStateFileNow(payload = buildAppStatePayload(), options = {}){
   if(!hasDesktopStateBridge()) return;
+  const nextPayload = payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
+  const nextSignature = typeof options.signature === 'string'
+    ? options.signature
+    : getStateSignatureFromPayload(nextPayload);
+  if(options.force !== true && nextSignature && nextSignature === lastDesktopStatePersistSignature){
+    return;
+  }
+  if(desktopStatePersistInFlight){
+    desktopStatePersistQueuedPayload = nextPayload;
+    desktopStatePersistQueuedSignature = nextSignature;
+    return;
+  }
+  desktopStatePersistInFlight = true;
   try{
-    await window.cabinetDesktopState.writeState(payload);
+    await window.cabinetDesktopState.writeState(nextPayload);
+    if(nextSignature){
+      lastDesktopStatePersistSignature = nextSignature;
+    }
   }catch(err){
     console.warn('Impossible de sauvegarder applicationversion1.json', err);
+  }finally{
+    desktopStatePersistInFlight = false;
+    if(desktopStatePersistQueuedPayload){
+      const queuedPayload = desktopStatePersistQueuedPayload;
+      const queuedSignature = desktopStatePersistQueuedSignature;
+      desktopStatePersistQueuedPayload = null;
+      desktopStatePersistQueuedSignature = '';
+      persistDesktopStateFileNow(queuedPayload, { signature: queuedSignature }).catch(()=>{});
+    }
   }
 }
 
-function queueDesktopStateFilePersist(payload = null){
+function queueDesktopStateFilePersist(payload = null, options = {}){
   if(!hasDesktopStateBridge()) return;
   if(desktopStatePersistTimer) clearTimeout(desktopStatePersistTimer);
   desktopStatePersistTimer = setTimeout(()=>{
     const pendingPayload = payload && typeof payload === 'object'
       ? payload
       : buildAppStatePayload();
+    const pendingSignature = typeof options.signature === 'string'
+      ? options.signature
+      : getStateSignatureFromPayload(pendingPayload);
     desktopStatePersistTimer = null;
-    persistDesktopStateFileNow(pendingPayload).catch(()=>{});
+    persistDesktopStateFileNow(pendingPayload, {
+      signature: pendingSignature,
+      force: options.force === true
+    }).catch(()=>{});
   }, DESKTOP_STATE_SAVE_DEBOUNCE_MS);
 }
 
@@ -9554,7 +9591,7 @@ async function persistLocalStateSnapshot(payload = buildAppStatePayload(), optio
     ? options.signature
     : getStateSignatureFromPayload(payload);
   if(!options.force && nextSignature && nextSignature === lastLocalSnapshotSignature){
-    queueDesktopStateFilePersist(payload);
+    queueDesktopStateFilePersist(payload, { signature: nextSignature });
     return payload;
   }
   if(nextSignature){
@@ -9577,7 +9614,7 @@ async function persistLocalStateSnapshot(payload = buildAppStatePayload(), optio
     writeStateToLocalStorage(payload);
   }
   await createAutoBackupSnapshot(payload, { source, signature: nextSignature });
-  queueDesktopStateFilePersist(payload);
+  queueDesktopStateFilePersist(payload, { signature: nextSignature });
   return payload;
 }
 
@@ -13363,8 +13400,7 @@ function setupEvents(){
   $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS());
   $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
     return exportAudienceXLS({
-      blankSort: true,
-      useFilteredRowsWhenNoSelection: true
+      blankSort: true
     });
   });
   $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
@@ -15670,9 +15706,15 @@ function getDiligenceProcedureFilterValue(procedure){
   return getProcedureBaseName(String(procedure || '').trim());
 }
 
+function getDiligenceProcedureVariantValue(procedure){
+  const raw = String(procedure || '').trim();
+  if(!raw) return '';
+  return parseProcedureToken(raw) || raw;
+}
+
 function getDiligenceRowProcedureFilterValue(row){
   if(!row || typeof row !== 'object') return '';
-  return getDiligenceProcedureFilterValue(row.procedureFilterValue || row.procedure || '');
+  return getDiligenceProcedureVariantValue(row.procedureFilterValue || row.procedure || '');
 }
 
 function isDiligenceAssProcedure(procedure){
@@ -15688,8 +15730,8 @@ function matchesDiligenceProcedureFilter(procedure, filterValue){
   if(activeFilter === 'all') return true;
   const procedureValue = typeof procedure === 'object' && procedure
     ? getDiligenceRowProcedureFilterValue(procedure)
-    : getDiligenceProcedureFilterValue(procedure);
-  return procedureValue === getDiligenceProcedureFilterValue(activeFilter);
+    : getDiligenceProcedureVariantValue(procedure);
+  return procedureValue === getDiligenceProcedureVariantValue(activeFilter);
 }
 
 function isDiligenceExecutionProcedure(procedure){
@@ -15757,7 +15799,7 @@ function getDiligenceRows(){
           clientName: c.name || '',
           dossier: d,
           procedure: proc,
-          procedureFilterValue: baseProc,
+          procedureFilterValue: proc,
           details,
           sort,
           delegation,
@@ -15809,7 +15851,7 @@ function syncDiligenceProcedureFilter(rows){
     const procedureValue = getDiligenceRowProcedureFilterValue(r);
     if(procedureValue) set.add(procedureValue);
   });
-  const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
+  const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' }));
   select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
   if(!set.has(filterDiligenceProcedure)){
     filterDiligenceProcedure = 'all';
@@ -18662,9 +18704,7 @@ function blankAudienceExportSortColumn(headers, rows, options = {}){
 }
 
 function getAudienceRowsForDetailedExportFallback(){
-  const selectedRows = getSelectedAudienceRowsForExport();
-  if(selectedRows.length) return selectedRows;
-  return getAudienceRowsForRegularExport();
+  return getSelectedAudienceRowsForExport();
 }
 
 function buildAudienceSelectedExportDataset(rowsOverride = null, options = {}){
@@ -18687,7 +18727,7 @@ function openAudienceExcelFilePreviewWindow(){
   const exportRows = getAudienceRowsForDetailedExportFallback();
   const dataset = buildAudienceSelectedExportDataset(exportRows, { blankSort: true });
   if(!dataset.rows.length){
-    alert("Aucune ligne d'audience à afficher dans le fichier.");
+    alert("Cochez les dossiers à afficher dans le fichier.");
     return;
   }
   const browserDownloadTarget = primeBrowserDownloadTarget('Ouverture du fichier Excel...');
@@ -18695,8 +18735,7 @@ function openAudienceExcelFilePreviewWindow(){
     blankSort: true,
     openAfterExport: true,
     browserDownloadTarget,
-    browserOpenInline: true,
-    useFilteredRowsWhenNoSelection: true
+    browserOpenInline: true
   }).catch(err=>{
     console.error(err);
     alert("Ouverture du fichier Excel impossible.");
@@ -18722,7 +18761,7 @@ async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null, opti
 function previewAudienceSelectedRows(){
   const dataset = buildAudienceSelectedExportDataset(getAudienceRowsForDetailedExportFallback(), { blankSort: true });
   if(!dataset.rows.length){
-    alert("Aucune ligne d'audience à afficher dans le fichier.");
+    alert("Cochez au moins une ligne pour afficher le fichier.");
     return;
   }
   showAudienceExportPreviewModal({
@@ -19504,12 +19543,11 @@ function getAudienceRowsForRegularExport(){
 async function exportAudienceRegularXLS(){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
-    const audienceRows = getAudienceRowsForRegularExport();
-    if(!audienceRows.length){
-      alert('Aucune ligne à exporter.');
+    const dataset = await buildAudienceSelectedExportDatasetAsync(null, { omitSort: true });
+    if(!dataset.rows.length){
+      alert('Cochez au moins une ligne pour exporter.');
       return;
     }
-    const dataset = await buildAudienceSelectedExportDatasetAsync(audienceRows, { omitSort: true });
     await exportAudienceWorkbookXlsxStyled({
       headers: dataset.headers,
       rows: dataset.tableRows,
@@ -19527,9 +19565,6 @@ async function exportAudienceXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     let dataset = await buildAudienceSelectedExportDatasetAsync(null, options);
-    if(!dataset.rows.length && options?.useFilteredRowsWhenNoSelection === true){
-      dataset = await buildAudienceSelectedExportDatasetAsync(getAudienceRowsForRegularExport(), options);
-    }
     if(!dataset.rows.length){
       alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
       return;

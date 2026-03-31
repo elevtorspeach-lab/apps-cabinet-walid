@@ -42,6 +42,8 @@ function getAudienceStatusDerivedColor(status){
 }
 
 function getAudienceRowOrdonnanceSourceValue(row){
+  const ordonnanceValue = String(row?.p?.attOrdOrOrdOk ?? '').trim();
+  if(normalizeDiligenceOrdonnance(ordonnanceValue)) return ordonnanceValue;
   const importedSortOrd = String(row?.p?._audienceSortOrd ?? '').trim();
   if(normalizeDiligenceOrdonnance(importedSortOrd)) return importedSortOrd;
   return '';
