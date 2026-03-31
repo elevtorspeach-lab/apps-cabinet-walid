@@ -55,7 +55,7 @@ npm run start
 
 ## Comptes par defaut
 
-- local: `walid / 1234`
+- local: `manager / 1234`
 - serveur: `manager / 1234`
 
 L'application accepte aussi l'alias gestionnaire entre les modes local et distant.

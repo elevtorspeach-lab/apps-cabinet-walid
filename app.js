@@ -1,8 +1,9 @@
 // ================== STATE ==================
 const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [] };
-const DEFAULT_MANAGER_USERNAME = 'walid';
+const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const REMOTE_MANAGER_USERNAME = 'manager';
+const LEGACY_MANAGER_USERNAMES = ['walid'];
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -21,7 +22,7 @@ const STANDARD_TEAM_TOTAL_MANAGERS = 2;
 const STANDARD_TEAM_TOTAL_ADMINS = 8;
 const STANDARD_TEAM_TOTAL_CLIENTS = 5;
 const STANDARD_TEAM_DEFAULT_PASSWORD = '1234';
-const STANDARD_TEAM_MANAGER_USERNAMES = ['walid', 'amine'];
+const STANDARD_TEAM_MANAGER_USERNAMES = ['manager', 'amine'];
 
 function normalizeLoginUsername(value){
   return String(value || '').trim().toLowerCase();
@@ -29,7 +30,14 @@ function normalizeLoginUsername(value){
 
 function isManagerLoginAlias(value){
   const username = normalizeLoginUsername(value);
-  return username === DEFAULT_MANAGER_USERNAME || username === REMOTE_MANAGER_USERNAME;
+  return username === DEFAULT_MANAGER_USERNAME
+    || username === REMOTE_MANAGER_USERNAME
+    || LEGACY_MANAGER_USERNAMES.includes(username);
+}
+
+function isDefaultManagerPasswordLogin(username, password){
+  return isManagerLoginAlias(username)
+    && normalizeLoginPassword(password) === normalizeLoginPassword(DEFAULT_MANAGER_PASSWORD);
 }
 
 function resolveLocalLoginUsername(value){
@@ -6878,6 +6886,7 @@ function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
   const modal = $('passwordSetupModal');
   if(!modal) return;
   modal.dataset.mode = mode;
+  const reason = String(modal.dataset.reason || '').trim().toLowerCase();
   const title = $('passwordSetupTitle');
   const lead = $('passwordSetupLead');
   const saveLabel = $('passwordSetupSaveLabel');
@@ -6893,6 +6902,12 @@ function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
     if(saveLabel) saveLabel.textContent = 'Initialiser le serveur';
     return;
   }
+  if(reason === 'default-manager-password'){
+    if(title) title.innerHTML = '<i class="fa-solid fa-key"></i> Sécuriser le compte gestionnaire';
+    if(lead) lead.textContent = 'Le compte gestionnaire utilise encore le mot de passe par défaut. Définissez maintenant un nouveau mot de passe pour continuer.';
+    if(saveLabel) saveLabel.textContent = 'Sécuriser le compte';
+    return;
+  }
   if(title) title.innerHTML = '<i class="fa-solid fa-key"></i> Sécuriser ce compte';
   if(lead) lead.textContent = 'Vous pouvez mettre à jour le mot de passe de ce compte si vous le souhaitez.';
   if(saveLabel) saveLabel.textContent = 'Mettre à jour';
@@ -6901,6 +6916,7 @@ function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
 function openPasswordSetupModal(options = {}){
   const modal = $('passwordSetupModal');
   if(!modal) return;
+  modal.dataset.reason = String(options.reason || '').trim().toLowerCase();
   configurePasswordSetupModal(options.mode || PASSWORD_SETUP_MODE_FORCED);
   if($('passwordSetupInput')) $('passwordSetupInput').value = '';
   if($('passwordSetupConfirmInput')) $('passwordSetupConfirmInput').value = '';
@@ -6916,12 +6932,13 @@ function closePasswordSetupModal(){
   if(!modal) return;
   modal.style.display = 'none';
   modal.dataset.mode = PASSWORD_SETUP_MODE_FORCED;
+  modal.dataset.reason = '';
   if($('passwordSetupInput')) $('passwordSetupInput').value = '';
   if($('passwordSetupConfirmInput')) $('passwordSetupConfirmInput').value = '';
   clearPasswordSetupError();
 }
 
-async function submitLocalBootstrapPasswordSetup(password){
+async function submitLocalBootstrapPasswordSetup(password, options = {}){
   USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
   const managerIndex = USERS.findIndex(
     user=>String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
@@ -6936,13 +6953,14 @@ async function submitLocalBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
+  if(options.silent === true) return;
   if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
   $('password')?.focus();
 }
 
-async function submitRemoteBootstrapPasswordSetup(password){
+async function submitRemoteBootstrapPasswordSetup(password, options = {}){
   if(LOCAL_ONLY_MODE){
     throw new Error('Mode local uniquement.');
   }
@@ -6964,6 +6982,7 @@ async function submitRemoteBootstrapPasswordSetup(password){
   updateBootstrapSetupUi({ visible: false });
   closePasswordSetupModal();
   clearLoginError();
+  if(options.silent === true) return;
   if($('username')) $('username').value = REMOTE_MANAGER_USERNAME;
   if($('password')) $('password').value = '';
   alert('Compte gestionnaire serveur initialisé. Connectez-vous maintenant avec votre nouveau mot de passe.');
@@ -8336,6 +8355,19 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 
 function ensureManagerUser(users){
   const validUsers = Array.isArray(users) ? users.filter(Boolean).map(u=>({ ...u })) : [];
+  const defaultManagerIdx = validUsers.findIndex(
+    u=>String(u?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  );
+  if(defaultManagerIdx === -1){
+    const legacyManagerIdx = validUsers.findIndex(
+      u=>LEGACY_MANAGER_USERNAMES.includes(String(u?.username || '').trim().toLowerCase())
+    );
+    if(legacyManagerIdx >= 0){
+      validUsers[legacyManagerIdx].username = DEFAULT_MANAGER_USERNAME;
+      validUsers[legacyManagerIdx].role = 'manager';
+      validUsers[legacyManagerIdx].clientIds = [];
+    }
+  }
   const existingUsernames = new Set(
     validUsers.map(u=>String(u?.username || '').trim().toLowerCase()).filter(Boolean)
   );
@@ -8345,13 +8377,13 @@ function ensureManagerUser(users){
     validUsers.push({ ...seedUser });
     existingUsernames.add(usernameKey);
   });
-  const defaultManagerIdx = validUsers.findIndex(
+  const resolvedManagerIdx = validUsers.findIndex(
     u=>String(u.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
   );
 
-  if(defaultManagerIdx >= 0){
+  if(resolvedManagerIdx >= 0){
     // Keep the default manager account always available.
-    const defaultManager = validUsers[defaultManagerIdx];
+    const defaultManager = validUsers[resolvedManagerIdx];
     defaultManager.username = DEFAULT_MANAGER_USERNAME;
     defaultManager.role = 'manager';
     defaultManager.clientIds = [];
@@ -13477,9 +13509,18 @@ async function login(){
     const usernameInput = resolveLocalLoginUsername(rawUsernameInput);
     const remoteUsernameInput = resolveRemoteLoginUsername(rawUsernameInput);
     const passwordInput = normalizeLoginPassword($('password').value);
+    const usedDefaultManagerPassword = isDefaultManagerPasswordLogin(rawUsernameInput, passwordInput);
     let remoteLoginState = 'offline';
     if(!LOCAL_ONLY_MODE){
-      const remoteAuth = await loginRemoteSession(remoteUsernameInput, passwordInput);
+      let remoteAuth = await loginRemoteSession(remoteUsernameInput, passwordInput);
+      if(remoteAuth.reason === 'bootstrap_required' && usedDefaultManagerPassword){
+        try{
+          await submitRemoteBootstrapPasswordSetup(passwordInput, { silent: true });
+          remoteAuth = await loginRemoteSession(remoteUsernameInput, passwordInput);
+        }catch(err){
+          console.warn('Initialisation automatique du compte gestionnaire serveur impossible', err);
+        }
+      }
       if(remoteAuth.ok){
         remoteLoginState = 'ok';
         updateBootstrapSetupUi({ visible: false });
@@ -13497,6 +13538,15 @@ async function login(){
     }
 
     USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+    if(remoteLoginState === 'unavailable' && shouldOfferLocalBootstrapSetup()){
+      if(usedDefaultManagerPassword){
+        try{
+          await submitLocalBootstrapPasswordSetup(passwordInput, { silent: true });
+        }catch(err){
+          console.warn('Initialisation automatique du compte gestionnaire local impossible', err);
+        }
+      }
+    }
     if(remoteLoginState === 'unavailable' && shouldOfferLocalBootstrapSetup()){
       updateBootstrapSetupUi({ visible: true, remote: false });
       showLoginError('Le serveur est indisponible. Initialisez un mot de passe local pour utiliser la version web.');
