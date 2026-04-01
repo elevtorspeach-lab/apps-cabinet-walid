@@ -12325,15 +12325,9 @@ async function applyExcelImport(payload, options = {}){
       }
     };
 
-    const hasAnyExplicitProcedureRef = !!(row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction);
-    const mainProcedureRefValue = String(row.refClient || dossier.referenceClient || '').trim();
     const resolveProcedureReference = (proc, explicitRefValue)=>{
       const explicitRef = String(explicitRefValue || '').trim();
-      if(explicitRef) return explicitRef;
-      if(!hasAnyExplicitProcedureRef && procedures.length === 1 && procedures[0] === proc){
-        return mainProcedureRefValue;
-      }
-      return '';
+      return explicitRef;
     };
 
     const assReference = resolveProcedureReference('ASS', row.refAssignation);
@@ -12395,40 +12389,8 @@ async function applyExcelImport(payload, options = {}){
     // Split montants only when there are truly two affectation dates.
     const hasDualMontants = hasDualDates && orderedImportedProcs.length > 1 && !!primaryMontant && !!secondaryMontantCandidate;
 
-    const sharedReferenceCandidate = String(
-      row.refAssignation
-      || row.refRestitution
-      || row.refSfdc
-      || row.refInjonction
-      || row.refClient
-      || ''
-    ).trim();
-    const uniqueImportedProcedureRefs = [...new Set(
-      [
-        assReference,
-        restitutionReference,
-        sfdcReference,
-        injonctionReference,
-        mainProcedureRefValue,
-        sharedReferenceCandidate
-      ]
-        .map((value)=>String(value || '').trim())
-        .filter(Boolean)
-    )];
-    const propagatedProcedureReference = uniqueImportedProcedureRefs.length === 1
-      ? uniqueImportedProcedureRefs[0]
-      : '';
-    const shouldPropagateSharedProcedureReference = !!propagatedProcedureReference;
-
     orderedImportedProcs.forEach((proc, idx)=>{
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
-      if(
-        shouldPropagateSharedProcedureReference
-        && propagatedProcedureReference
-        && !String(dossier.procedureDetails[proc].referenceClient || '').trim()
-      ){
-        dossier.procedureDetails[proc].referenceClient = propagatedProcedureReference;
-      }
       if(importedDateDepotValue && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
         dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       }
