@@ -18072,7 +18072,7 @@ function isSuiviProcedurePendingDepot(dossier, procName, details){
 function hasSuiviPendingDepotRow(row){
   const dossier = row?.d;
   if(!dossier || typeof dossier !== 'object') return false;
-  const procedures = getSelectedDossierProcedures(dossier);
+  const procedures = normalizeProcedures(dossier);
   if(!procedures.length) return false;
   const detailsMap = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
     ? dossier.procedureDetails
@@ -20709,6 +20709,8 @@ function removeProcedureCard(procName){
   if(!currentOrder.length) return;
   const idx = currentOrder.indexOf(procName);
   if(idx === -1) return;
+  const confirmed = window.confirm(`Supprimer la procédure "${procName}" ?`);
+  if(!confirmed) return;
   const currentDraft = collectProcedureDraft();
   currentOrder.splice(idx, 1);
   delete currentDraft[procName];
