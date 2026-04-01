@@ -13816,7 +13816,7 @@ function showView(v, options = {}){
   if(nextView === 'dashboard' && options.warmup !== false && !isSameView){
     scheduleBackgroundDataWarmup(1800);
   }
-  if(isMobileViewport() && !isSameView){
+  if(isMobileViewport()){
     setSidebarCollapsed(true);
   }
 }
