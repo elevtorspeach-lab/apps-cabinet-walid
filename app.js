@@ -5477,10 +5477,17 @@ async function saveBlobDirectOrDownload(blob, filename, options = {}){
 
 async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', sheetName = 'Audience', colWidths = [], filename = 'audience_export.xlsx', preferWorker = false, openAfterExport = false, layoutPreset = 'default', browserDownloadTarget = null, browserOpenInline = false, preferredFileHandle = null, wrapColumnIndexes = [] }){
   const directExportHandlePromise = primeDirectExportDirectoryAccess();
+  const colCount = Array.isArray(headers) ? headers.length : 0;
   const rowCount = Array.isArray(rows) ? rows.length : 0;
   const useAudienceReferenceLayout = layoutPreset === 'audience-reference';
+  const defaultWrapColumnIndexes = useAudienceReferenceLayout
+    ? [0, 1, Math.max(0, colCount - 1)]
+    : [];
   const normalizedWrapColumnIndexes = [...new Set(
-    (Array.isArray(wrapColumnIndexes) ? wrapColumnIndexes : [])
+    [
+      ...(Array.isArray(wrapColumnIndexes) ? wrapColumnIndexes : []),
+      ...defaultWrapColumnIndexes
+    ]
       .map((value)=>Number(value))
       .filter((value)=>Number.isInteger(value) && value >= 0)
   )];
@@ -5538,7 +5545,6 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     return;
   }
 
-  const colCount = headers.length;
   const lastColLetter = String.fromCharCode(64 + Math.max(1, colCount));
   const audienceReferenceLayout = {
     columnWidths: [14.77734375, 20.6640625, 16.33203125, 13.77734375, 16.77734375, 23.21875, 26.88671875],
@@ -5559,9 +5565,37 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     },
     pageMargins: { left: 0, right: 0, top: 0, bottom: 0, header: 0, footer: 0 },
     pageSetup: { orientation: 'landscape' },
-    columnAlignments: ['left', 'left', 'left', 'center', 'center', 'left', 'center'],
-    columnWrap: [true, true, false, false, false, false, false],
+    columnAlignments: ['center', 'left', 'center', 'center', 'center', 'left', 'center'],
+    columnWrap: [true, true, false, false, false, false, true],
     columnShrinkToFit: [false, false, false, false, true, false, false]
+  };
+  const estimateWrappedLineCountForWidth = (value, width)=>{
+    const text = String(value ?? '');
+    if(!text) return 1;
+    const safeWidth = Math.max(8, Number(width) || 20);
+    return text
+      .split(/\r?\n/)
+      .reduce((maxLines, segment)=>{
+        const segmentLength = String(segment || '').length;
+        const estimatedLines = Math.max(1, Math.ceil(segmentLength / Math.max(1, Math.floor(safeWidth * 0.95))));
+        return Math.max(maxLines, estimatedLines);
+      }, 1);
+  };
+  const getAudienceReferenceRowHeight = (rowValues)=>{
+    const values = Array.isArray(rowValues) ? rowValues : [];
+    let maxLines = 1;
+    audienceReferenceLayout.columnWrap.forEach((shouldWrap, index)=>{
+      if(!shouldWrap) return;
+      const width = audienceReferenceLayout.columnWidths[index] || 20;
+      maxLines = Math.max(
+        maxLines,
+        estimateWrappedLineCountForWidth(values[index], width)
+      );
+    });
+    return Math.max(
+      audienceReferenceLayout.dataRowHeight,
+      18 + (maxLines * 18)
+    );
   };
   const audienceReferenceBodyBorder = {
     top: { style: 'thin', color: { argb: 'FF1A1A1A' } },
@@ -5596,14 +5630,15 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         templateSheet.getCell('A6').value = subtitleText;
         templateSheet.views = [{ showGridLines: false }];
         templateSheet.columns = audienceReferenceLayout.columnWidths.map(width=>({ width }));
+        templateSheet.getRow(8).height = 38;
         await runChunked(rows, async (row, index)=>{
           const rowIndex = index + 9;
           const sheetRow = templateSheet.getRow(rowIndex);
           sheetRow.values = Array.isArray(row) ? row.slice(0, colCount) : new Array(colCount).fill('');
-          sheetRow.height = sampleRowHeight;
+          sheetRow.height = Math.max(sampleRowHeight, getAudienceReferenceRowHeight(row));
           for(let c = 1; c <= colCount; c++){
             const cell = sheetRow.getCell(c);
-            cell.font = { name: 'Calibri', size: 12, color: { argb: 'FF111111' } };
+            cell.font = { name: 'Calibri', size: 16, color: { argb: 'FF111111' } };
             cell.fill = {
               type: 'pattern',
               pattern: 'solid',
@@ -5657,11 +5692,12 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       headers.forEach((header, index)=>{
         sheet.getRow(8).getCell(index + 1).value = header;
       });
+      sheet.getRow(8).height = 38;
       await runChunked(rows, async (row, index)=>{
         const rowNumber = index + 9;
         const sheetRow = sheet.getRow(rowNumber);
         sheetRow.values = Array.isArray(row) ? row : [];
-        sheetRow.height = audienceReferenceLayout.dataRowHeight;
+        sheetRow.height = getAudienceReferenceRowHeight(row);
       }, { chunkSize: 80 });
 
       for(let c = 1; c <= colCount; c++){
@@ -5676,7 +5712,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
         };
 
         const headerCell = sheet.getRow(8).getCell(c);
-        headerCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+        headerCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
         headerCell.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -5687,17 +5723,17 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       }
 
       const subtitleCell = sheet.getCell('A6');
-      subtitleCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1A4590' } };
+      subtitleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FF1A4590' } };
       subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
       await runChunked(rows, async (row, index)=>{
         const rowIndex = index + 9;
         const sheetRow = sheet.getRow(rowIndex);
-        sheetRow.height = audienceReferenceLayout.dataRowHeight;
+        sheetRow.height = getAudienceReferenceRowHeight(row);
         for(let c = 1; c <= colCount; c++){
           const cell = sheetRow.getCell(c);
           cell.value = Array.isArray(row) ? (row[c - 1] ?? '') : '';
-          cell.font = { name: 'Calibri', size: 12, color: { argb: 'FF111111' } };
+          cell.font = { name: 'Calibri', size: 16, color: { argb: 'FF111111' } };
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
@@ -5795,14 +5831,14 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     right: { style: 'thin', color: { argb: 'FFBFC5CE' } }
   };
 
-  sheet.getCell('A1').font = { name: 'Arial', size: 24, bold: true, color: { argb: 'FF1F3B8F' } };
+  sheet.getCell('A1').font = { name: 'Arial', size: useAudienceReferenceLayout ? 20 : 24, bold: true, color: { argb: 'FF1F3B8F' } };
   sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.getCell('A2').font = { name: 'Arial', size: 17, bold: true, color: { argb: 'FF1A4590' } };
+  sheet.getCell('A2').font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 17, bold: true, color: { argb: 'FF1A4590' } };
   sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
 
   for(let c=1; c<=colCount; c++){
     const cell = sheet.getRow(4).getCell(c);
-    cell.font = { name: 'Arial', size: 20, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 20, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
@@ -5815,9 +5851,11 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
   await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 5), async (rowIndex)=>{
     for(let c=1; c<=colCount; c++){
       const cell = sheet.getRow(rowIndex).getCell(c);
-      cell.font = { name: 'Arial', size: 18, color: { argb: 'FF111111' } };
+      cell.font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 18, color: { argb: 'FF111111' } };
       const isArabicColumn = c === colCount;
-      const align = c === 4 || c === 5 || isArabicColumn ? 'center' : 'left';
+      const align = useAudienceReferenceLayout
+        ? ((c === 1 || c === 3 || c === 4 || c === 5 || isArabicColumn) ? 'center' : 'left')
+        : (c === 4 || c === 5 || isArabicColumn ? 'center' : 'left');
       cell.alignment = {
         horizontal: align,
         vertical: 'middle',
@@ -5951,6 +5989,13 @@ function normalizeImportedAddressVille(adresseValue, villeValue){
     return { adresse: '', ville: adresse };
   }
   return { adresse, ville };
+}
+
+function normalizeImportedDebiteurName(value){
+  const text = normalizeLooseText(value);
+  if(!text) return '';
+  const latinTokens = text.match(/[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[’'`´-][A-Za-zÀ-ÖØ-öø-ÿ]+)*/g) || [];
+  return latinTokens.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeReferenceValue(value){
@@ -10755,7 +10800,7 @@ function parseExcelData(rows, sheet = null){
       if(rowLooksLikeHeader) break;
 
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1 ? String(row[idx.debiteur] || '').trim() : '';
+      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
       const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
       const type = idx.type !== -1 ? String(row[idx.type] || '').trim() : '';
@@ -10899,7 +10944,7 @@ function parseExcelData(rows, sheet = null){
     for(let j=i+1; j<rows.length; j++){
       const row = rows[j] || [];
       const refDossier = idx.refDossier !== -1 ? String(row[idx.refDossier] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1 ? String(row[idx.debiteur] || '').trim() : '';
+      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
       if(!refDossier && !debiteur && !refClient) break;
       const sortOrdText = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
@@ -12316,9 +12361,12 @@ async function applyExcelImport(payload, options = {}){
           || ((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus)
           || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))
         )
-        || !String(refValue || '').trim()
       ) return;
+      if(!procedureSet.has(proc)) return;
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
+      if(String(refValue || '').trim() && !String(dossier.procedureDetails[proc].referenceClient || '').trim()){
+        dossier.procedureDetails[proc].referenceClient = String(refValue || '').trim();
+      }
       if(executionNoValue) dossier.procedureDetails[proc].executionNo = executionNoValue;
       if(importedDateDepotValue) dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
@@ -12354,16 +12402,31 @@ async function applyExcelImport(payload, options = {}){
       || row.refClient
       || ''
     ).trim();
-    const shouldPropagateSharedProcedureReference = orderedImportedProcs.length === 1;
+    const uniqueImportedProcedureRefs = [...new Set(
+      [
+        assReference,
+        restitutionReference,
+        sfdcReference,
+        injonctionReference,
+        mainProcedureRefValue,
+        sharedReferenceCandidate
+      ]
+        .map((value)=>String(value || '').trim())
+        .filter(Boolean)
+    )];
+    const propagatedProcedureReference = uniqueImportedProcedureRefs.length === 1
+      ? uniqueImportedProcedureRefs[0]
+      : '';
+    const shouldPropagateSharedProcedureReference = !!propagatedProcedureReference;
 
     orderedImportedProcs.forEach((proc, idx)=>{
       if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
       if(
         shouldPropagateSharedProcedureReference
-        && sharedReferenceCandidate
+        && propagatedProcedureReference
         && !String(dossier.procedureDetails[proc].referenceClient || '').trim()
       ){
-        dossier.procedureDetails[proc].referenceClient = sharedReferenceCandidate;
+        dossier.procedureDetails[proc].referenceClient = propagatedProcedureReference;
       }
       if(importedDateDepotValue && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
         dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
@@ -16077,10 +16140,15 @@ function getDiligenceRows(){
           : (normalizeDiligenceAttOk(details.attDelegationOuDelegat || '') || 'att');
         const ordonnance = isCommandement
           ? String(details.ord || '').trim()
-          : (getDiligenceOrdonnanceStatus(
-            details.attOrdOrOrdOk || '',
-            details.notificationNo || ''
-          ) || 'att');
+          : (shouldShowBlankDiligenceOrdonnance({
+            procedure: proc,
+            details
+          })
+            ? ''
+            : (getDiligenceOrdonnanceStatus(
+              details.attOrdOrOrdOk || '',
+              details.notificationNo || ''
+            ) || 'att'));
         rows.push({
           clientId: c.id,
           dossierIndex: di,
@@ -16319,9 +16387,19 @@ function getDiligenceReferenceDossierValue(row){
   return String(row?.details?.referenceClient || '').trim();
 }
 
+function shouldShowBlankDiligenceOrdonnance(row){
+  if(!isDiligenceExecutionProcedure(row?.procedure) || isDiligenceCommandementProcedure(row?.procedure)){
+    return false;
+  }
+  return !String(getDiligenceReferenceDossierValue(row) || '').trim();
+}
+
 function getDiligenceOrdonnanceCellValue(row){
   if(isDiligenceCommandementProcedure(row?.procedure)){
     return String(row?.details?.ord || '').trim();
+  }
+  if(shouldShowBlankDiligenceOrdonnance(row)){
+    return '';
   }
   return getDiligenceOrdonnanceLabelFromDetails(row?.details) || '';
 }
@@ -16530,7 +16608,11 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   const isDelegationField = field === 'attDelegationOuDelegat';
   if(isOrdonnanceField || isDelegationField){
     const status = isOrdonnanceField
-      ? (getDiligenceOrdonnanceStatus(normalized, row?.details?.notificationNo || '') || 'att')
+      ? (
+        shouldShowBlankDiligenceOrdonnance(row)
+          ? ''
+          : (getDiligenceOrdonnanceStatus(normalized, row?.details?.notificationNo || '') || 'att')
+      )
       : (normalizeDiligenceAttOk(normalized) || 'att');
     if(!row?.canEdit){
       if(isOrdonnanceField){
@@ -16543,6 +16625,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="" ${status === '' ? 'selected' : ''}>-</option>
         <option value="att" ${status === 'att' ? 'selected' : ''}>ATT ORD</option>
         <option value="ok" ${status === 'ok' ? 'selected' : ''}>ORD OK</option>
       </select>
@@ -17998,9 +18081,7 @@ function isPendingDepotReferenceValue(value){
 function isSuiviProcedurePendingDepot(dossier, procName, details){
   const procDetails = details && typeof details === 'object' ? details : {};
   const procedureReference = String(procDetails.referenceClient || '').trim();
-  if(isPendingDepotReferenceValue(procedureReference)) return true;
-  if(procedureReference) return false;
-  return hasSuiviProcedureHistoryActivity(dossier, procName);
+  return !procedureReference;
 }
 
 function hasSuiviPendingDepotRow(row){
@@ -18894,6 +18975,18 @@ function getAudienceExportOrdonnanceValue(row){
   return normalizedStatus ? (getDiligenceOrdonnanceLabel(normalizedStatus) || '') : '';
 }
 
+function formatAudienceExportWrappedName(value){
+  const text = normalizeLooseText(value);
+  if(!text || /\r?\n/.test(text)) return text;
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if(tokens.length <= 2) return text;
+  const lines = [];
+  for(let index = 0; index < tokens.length; index += 2){
+    lines.push(tokens.slice(index, index + 2).join(' '));
+  }
+  return lines.join('\n');
+}
+
 function buildAudienceSelectedExportTableRow(row, options = {}){
   const omitSort = options?.omitSort === true;
   const blankSort = options?.blankSort === true;
@@ -18907,11 +19000,12 @@ function buildAudienceSelectedExportTableRow(row, options = {}){
   );
   const jugeValue = draft.juge || p.juge || '';
   const sortValue = blankSort ? '' : formatMixedDirectionExportText(rawSortValue);
+  const clientValue = formatAudienceExportWrappedName(row?.c?.name || '');
   const adversaireValue = blankSort && String(rawSortValue || '').trim()
     ? formatMixedDirectionExportText(rawSortValue)
-    : (d.debiteur || '');
+    : formatAudienceExportWrappedName(d.debiteur || '');
   const out = [
-    row?.c?.name || '',
+    clientValue,
     adversaireValue,
     dossierRef || '-',
     jugeValue,
