@@ -3233,7 +3233,7 @@ function buildSuiviSelectedExportDatasetBase(){
   const colWidths = [
     { wch: 22 },
     { wch: 18 },
-    { wch: 18 },
+    { wch: 13 },
     { wch: 30 },
     { wch: 22 },
     { wch: 34 },
@@ -3450,6 +3450,7 @@ async function exportSuiviSelectedXLS(options = {}){
       sheetName: 'Suivi',
       colWidths: dataset.colWidths,
       filename: 'suivis dossier.xlsx',
+      layoutPreset: 'suivi-reference',
       wrapColumnIndexes: dataset.wrapColumnIndexes,
       openAfterExport: options?.openAfterExport === true,
       browserDownloadTarget: options?.browserDownloadTarget || null,
@@ -5481,6 +5482,8 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
   const colCount = Array.isArray(headers) ? headers.length : 0;
   const rowCount = Array.isArray(rows) ? rows.length : 0;
   const useAudienceReferenceLayout = layoutPreset === 'audience-reference';
+  const useAudienceCompactReferenceLayout = useAudienceReferenceLayout && colCount === 6;
+  const useSuiviReferenceLayout = layoutPreset === 'suivi-reference';
   const defaultWrapColumnIndexes = useAudienceReferenceLayout
     ? [0, 1, Math.max(0, colCount - 1)]
     : [];
@@ -5494,6 +5497,7 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
   )];
   const wrapColumnIndexSet = new Set(normalizedWrapColumnIndexes);
   const useFastWorkbookPath = !useAudienceReferenceLayout
+    && !useSuiviReferenceLayout
     && !wrapColumnIndexSet.size
     && (preferWorker === true || shouldPreferFastWorkbookPath(rowCount));
   const subtitleText = String(subtitle || '').trim();
@@ -5548,7 +5552,11 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
 
   const lastColLetter = String.fromCharCode(64 + Math.max(1, colCount));
   const audienceReferenceLayout = {
-    columnWidths: [14.77734375, 20.6640625, 16.33203125, 13.77734375, 16.77734375, 23.21875, 26.88671875],
+    columnWidths: (
+      Array.isArray(colWidths) && colWidths.length === colCount
+        ? colWidths.map((value)=>Math.max(8, Number(value?.wch || value || 20)))
+        : [14.77734375, 20.6640625, 16.33203125, 13.77734375, 16.77734375, 23.21875, 26.88671875]
+    ),
     rowHeights: {
       1: 14.4,
       2: 14.4,
@@ -5795,6 +5803,42 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     : new Array(colCount).fill(22);
   sheet.columns = widthValues.map(w=>({ width: w }));
 
+  const genericLayoutConfig = useSuiviReferenceLayout
+    ? {
+      titleRowHeight: 35.25,
+      subtitleRowHeight: 24,
+      headerRowHeight: 36.75,
+      baseDataRowHeight: 35.25,
+      titleFontSize: 24,
+      subtitleFontSize: 17,
+      headerFontSize: 16,
+      bodyFontSize: 14,
+      wrapLineHeight: 17.25
+    }
+    : useAudienceCompactReferenceLayout
+      ? {
+        titleRowHeight: 35.25,
+        subtitleRowHeight: 24,
+        headerRowHeight: 36.75,
+        baseDataRowHeight: 35.25,
+        titleFontSize: 20,
+        subtitleFontSize: 16,
+        headerFontSize: 14,
+        bodyFontSize: 14,
+        wrapLineHeight: 17.25
+      }
+      : {
+        titleRowHeight: 44,
+        subtitleRowHeight: 30,
+        headerRowHeight: 46,
+        baseDataRowHeight: 44,
+        titleFontSize: useAudienceReferenceLayout ? 20 : 24,
+        subtitleFontSize: useAudienceReferenceLayout ? 16 : 17,
+        headerFontSize: useAudienceReferenceLayout ? 16 : 20,
+        bodyFontSize: useAudienceReferenceLayout ? 16 : 18,
+        wrapLineHeight: 20
+      };
+
   const estimateWrappedLineCount = (value, width)=>{
     const text = String(value ?? '');
     if(!text) return 1;
@@ -5808,17 +5852,20 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       }, 1);
   };
 
-  sheet.getRow(1).height = 44;
-  sheet.getRow(2).height = 30;
-  sheet.getRow(4).height = 46;
+  sheet.getRow(1).height = genericLayoutConfig.titleRowHeight;
+  sheet.getRow(2).height = genericLayoutConfig.subtitleRowHeight;
+  sheet.getRow(4).height = genericLayoutConfig.headerRowHeight;
   await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 5), async (rowIndex)=>{
-    let nextHeight = 44;
+    let nextHeight = genericLayoutConfig.baseDataRowHeight;
     if(wrapColumnIndexSet.size){
       const rowValues = Array.isArray(rows[rowIndex - 5]) ? rows[rowIndex - 5] : [];
       normalizedWrapColumnIndexes.forEach((colIndex)=>{
         const estimatedLines = estimateWrappedLineCount(rowValues[colIndex], widthValues[colIndex]);
         if(estimatedLines > 1){
-          nextHeight = Math.max(nextHeight, 28 + ((estimatedLines - 1) * 20));
+          nextHeight = Math.max(
+            nextHeight,
+            18 + ((estimatedLines - 1) * genericLayoutConfig.wrapLineHeight)
+          );
         }
       });
     }
@@ -5832,14 +5879,14 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
     right: { style: 'thin', color: { argb: 'FFBFC5CE' } }
   };
 
-  sheet.getCell('A1').font = { name: 'Arial', size: useAudienceReferenceLayout ? 20 : 24, bold: true, color: { argb: 'FF1F3B8F' } };
+  sheet.getCell('A1').font = { name: 'Arial', size: genericLayoutConfig.titleFontSize, bold: true, color: { argb: 'FF1F3B8F' } };
   sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.getCell('A2').font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 17, bold: true, color: { argb: 'FF1A4590' } };
+  sheet.getCell('A2').font = { name: 'Arial', size: genericLayoutConfig.subtitleFontSize, bold: true, color: { argb: 'FF1A4590' } };
   sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
 
   for(let c=1; c<=colCount; c++){
     const cell = sheet.getRow(4).getCell(c);
-    cell.font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 20, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.font = { name: 'Arial', size: genericLayoutConfig.headerFontSize, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
@@ -5852,11 +5899,20 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
   await runChunked(Array.from({ length: rows.length }, (_, index)=>index + 5), async (rowIndex)=>{
     for(let c=1; c<=colCount; c++){
       const cell = sheet.getRow(rowIndex).getCell(c);
-      cell.font = { name: 'Arial', size: useAudienceReferenceLayout ? 16 : 18, color: { argb: 'FF111111' } };
+      cell.font = { name: 'Arial', size: genericLayoutConfig.bodyFontSize, color: { argb: 'FF111111' } };
       const isArabicColumn = c === colCount;
+      const headerLabel = String(headers[c - 1] || '').trim().toLowerCase();
       const align = useAudienceReferenceLayout
         ? ((c === 1 || c === 3 || c === 4 || c === 5 || isArabicColumn) ? 'center' : 'left')
-        : (c === 4 || c === 5 || isArabicColumn ? 'center' : 'left');
+        : useSuiviReferenceLayout
+          ? (
+            headerLabel === 'ref client'
+            || headerLabel === 'procédure'
+            || headerLabel === 'tribunal'
+              ? 'center'
+              : 'left'
+          )
+          : (c === 4 || c === 5 || isArabicColumn ? 'center' : 'left');
       cell.alignment = {
         horizontal: align,
         vertical: 'middle',
@@ -18979,6 +19035,52 @@ function blankAudienceExportSortColumn(headers, rows, options = {}){
   });
 }
 
+function getAudienceExportCellDisplayWidth(value){
+  const text = String(value ?? '')
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+    .trim();
+  if(!text) return 0;
+  return text
+    .split(/\r?\n/)
+    .reduce((maxWidth, segment)=>Math.max(maxWidth, String(segment || '').trim().length), 0);
+}
+
+function buildAudienceExportColumnWidths(headers, rows, baseColWidths = []){
+  const safeHeaders = Array.isArray(headers) ? headers : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const normalizedHeaders = safeHeaders.map((header)=>normalizeLooseText(String(header || '')).toLowerCase());
+  const nextWidths = (Array.isArray(baseColWidths) && baseColWidths.length
+    ? baseColWidths
+    : safeHeaders.map(()=>({ wch: 22 }))
+  ).map((item)=>({ wch: Math.max(8, Number(item?.wch || item || 22)) }));
+
+  const applyDynamicWidth = (index, { min = 12, max = 60, factor = 1.15, padding = 2 } = {})=>{
+    if(index < 0 || index >= nextWidths.length) return;
+    const headerWidth = getAudienceExportCellDisplayWidth(safeHeaders[index]) + padding;
+    const contentWidth = safeRows.reduce((largestWidth, row)=>{
+      if(!Array.isArray(row) || index >= row.length) return largestWidth;
+      return Math.max(largestWidth, getAudienceExportCellDisplayWidth(row[index]));
+    }, 0);
+    const dynamicWidth = Math.ceil((contentWidth * factor) + padding);
+    nextWidths[index] = {
+      wch: Math.max(
+        min,
+        Number(nextWidths[index]?.wch || min),
+        headerWidth,
+        Math.min(max, dynamicWidth)
+      )
+    };
+  };
+
+  const dossierIndex = normalizedHeaders.findIndex((header)=>header.includes('dossier'));
+  const tribunalIndex = normalizedHeaders.findIndex((header)=>header === 'tribunal');
+
+  applyDynamicWidth(dossierIndex, { min: 18, max: 30, factor: 1.35, padding: 3 });
+  applyDynamicWidth(tribunalIndex, { min: 32, max: 58, factor: 1.15, padding: 4 });
+
+  return nextWidths;
+}
+
 function getAudienceRowsForDetailedExportFallback(){
   return getSelectedAudienceRowsForExport();
 }
@@ -18995,6 +19097,7 @@ function buildAudienceSelectedExportDataset(rowsOverride = null, options = {}){
   );
   return {
     ...dataset,
+    colWidths: buildAudienceExportColumnWidths(dataset.headers, tableRows, dataset.colWidths),
     tableRows
   };
 }
@@ -19030,6 +19133,11 @@ async function buildAudienceSelectedExportDatasetAsync(rowsOverride = null, opti
   );
   return {
     ...dataset,
+    colWidths: buildAudienceExportColumnWidths(
+      dataset.headers,
+      blankAudienceExportSortColumn(dataset.headers, rawTableRows, options),
+      dataset.colWidths
+    ),
     tableRows: blankAudienceExportSortColumn(dataset.headers, rawTableRows, options)
   };
 }
