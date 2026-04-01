@@ -1270,6 +1270,7 @@ function handleDossierDataChange(options = {}){
   if(hasAudienceImpact){
     markAudienceRowsCacheDirty();
   }else{
+    audienceRowsRawDataVersion += 1;
     invalidateDerivedCaches({
       audience: false,
       preserveClientAccessCaches: options.preserveClientAccessCaches === true,
@@ -14463,23 +14464,7 @@ async function addDossier(){
     const customList = customProcedures.slice();
     const cardProcs = getProcedureCardNames();
     selected.push(...activeLabels, ...customList, ...cardProcs);
-    if(editingDossier){
-      const prev = AppState.clients
-        .find(c=>c.id == editingDossier.clientId)
-        ?.dossiers?.[editingDossier.index];
-      const prevList = normalizeProcedures(prev || {});
-      selected.push(...prevList);
-    }
     selected = [...new Set(selected.map(v=>String(v).trim()).filter(Boolean))].filter(v=>v !== 'Autre');
-    if(selected.length === 0){
-      if(editingDossier){
-        const prev = AppState.clients
-          .find(c=>c.id == editingDossier.clientId)
-          ?.dossiers?.[editingDossier.index];
-        const fallback = normalizeProcedures(prev || {});
-        selected.push(...fallback);
-      }
-    }
     if(selected.length === 0) return alert('Choisir au moins une procédure');
 
     const details = collectProcedureDraftFromCards({ trimValues: true });
@@ -20694,6 +20679,45 @@ function removeProcedureVariant(procName){
   renderProcedureDetails(currentOrder, currentDraft);
 }
 
+function isProcedureCardFieldEmpty(fieldEl){
+  if(!fieldEl) return true;
+  if(fieldEl.disabled || fieldEl.type === 'hidden') return true;
+  if(fieldEl.readOnly || fieldEl.classList.contains('proc-fixed-input')) return true;
+  const hiddenParent = fieldEl.closest('.notif-date-wrap');
+  if(hiddenParent && hiddenParent.style.display === 'none'){
+    return true;
+  }
+  return !String(fieldEl.value || '').trim();
+}
+
+function isProcedureCardEmpty(card){
+  if(!card) return false;
+  const fields = [...card.querySelectorAll('input, select')];
+  if(!fields.length) return false;
+  return fields.every(isProcedureCardFieldEmpty);
+}
+
+function updateProcedureCardRemoveButtonVisibility(card){
+  const removeBtn = card?.querySelector('.proc-remove-empty-btn');
+  if(!removeBtn) return;
+  const procName = getProcedureCardName(card);
+  removeBtn.hidden = !editingDossier || isProcedureVariantName(procName) || !isProcedureCardEmpty(card);
+}
+
+function removeProcedureCard(procName){
+  const currentOrder = getProcedureCardNames();
+  if(!currentOrder.length) return;
+  const idx = currentOrder.indexOf(procName);
+  if(idx === -1) return;
+  const currentDraft = collectProcedureDraft();
+  currentOrder.splice(idx, 1);
+  delete currentDraft[procName];
+  customProcedures = customProcedures.filter(proc=>String(proc || '').trim() !== String(procName || '').trim());
+  renderCustomProcedures();
+  renderProcedureDetails(currentOrder, currentDraft);
+  resyncProcedureSelectionFromUI(currentOrder);
+}
+
 function getFormDateAffectationValue(){
   const raw = String($('dateAffectation')?.value || '').trim();
   if(!raw) return '';
@@ -20786,18 +20810,6 @@ function renderProcedureDetails(forceList, forceDraft){
   for(let i=selected.length-1;i>=0;i--){
     if(selected[i] === 'Autre') selected.splice(i,1);
   }
-  if(!forceList || !forceList.length){
-    const prev = editingDossier
-      ? AppState.clients.find(c=>c.id == editingDossier.clientId)?.dossiers?.[editingDossier.index]
-      : null;
-    const prevList = normalizeProcedures(prev || {});
-    prevList.forEach(p=>{
-      if(!selected.includes(p)) selected.push(p);
-    });
-    editingOriginalProcedures.forEach(p=>{
-      if(!selected.includes(p)) selected.push(p);
-    });
-  }
 
   const finalList = [...new Set(selected.map(v=>String(v).trim()).filter(Boolean))];
   syncConditionalCreationFieldsVisibility(finalList);
@@ -20843,6 +20855,15 @@ function renderProcedureDetails(forceList, forceDraft){
       removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
       removeBtn.addEventListener('click', ()=>removeProcedureVariant(proc));
       head.appendChild(removeBtn);
+    }else{
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'proc-remove-variant-btn proc-remove-empty-btn';
+      removeBtn.title = 'Supprimer cette procédure';
+      removeBtn.hidden = true;
+      removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+      removeBtn.addEventListener('click', ()=>removeProcedureCard(proc));
+      head.appendChild(removeBtn);
     }
     const grid = document.createElement('div');
     grid.className = 'proc-grid';
@@ -20867,7 +20888,13 @@ function renderProcedureDetails(forceList, forceDraft){
     if(addVariantBtn){
       addVariantBtn.addEventListener('click', ()=>addProcedureVariant(proc));
     }
+    div.querySelectorAll('input, select').forEach(fieldEl=>{
+      ['input', 'change'].forEach(eventName=>{
+        fieldEl.addEventListener(eventName, ()=>updateProcedureCardRemoveButtonVisibility(div));
+      });
+    });
     div.querySelectorAll('input[data-field="tribunal"]').forEach(bindProcedureTribunalAutocomplete);
+    updateProcedureCardRemoveButtonVisibility(div);
   });
 
   syncProcedureMontantGroups(finalList);
