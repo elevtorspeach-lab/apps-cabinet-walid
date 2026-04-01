@@ -5993,10 +5993,15 @@ function normalizeImportedAddressVille(adresseValue, villeValue){
 }
 
 function normalizeImportedDebiteurName(value){
-  const text = normalizeLooseText(value);
+  const text = normalizeLooseText(value)
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u061C]/g, '')
+    .trim();
   if(!text) return '';
   const latinTokens = text.match(/[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[’'`´-][A-Za-zÀ-ÖØ-öø-ÿ]+)*/g) || [];
-  return latinTokens.join(' ').replace(/\s+/g, ' ').trim();
+  const frenchValue = latinTokens.join(' ').replace(/\s+/g, ' ').trim();
+  if(frenchValue) return frenchValue;
+  if(/[\u0600-\u06FF]/.test(text)) return text;
+  return text;
 }
 
 function normalizeReferenceValue(value){
@@ -17930,14 +17935,9 @@ function toAgeDays(value){
 }
 
 function getDashboardAttSortCount(){
-  let count = 0;
-  const audienceRows = getAudienceRowsForSidebarProjectedCached();
-  audienceRows.forEach(row=>{
-    if(row?.color === 'blue'){
-      count += 1;
-    }
-  });
-  return count;
+  return getAudienceRowsDedupedCached().reduce((count, row)=>{
+    return count + (audienceRowMatchesColorFilter(row, 'blue') ? 1 : 0);
+  }, 0);
 }
 
 function getSuiviRequiredProcedureFields(procName, details){
