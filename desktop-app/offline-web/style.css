@@ -1041,6 +1041,19 @@ tr:hover{background:#f1f5f9}
   grid-template-columns:minmax(0, 1.45fr) minmax(260px, .85fr);
 }
 
+.creation-form-row-top-extended{
+  grid-template-columns:minmax(0, 1.35fr) minmax(180px, .52fr) minmax(320px, .92fr) minmax(240px, .72fr);
+  align-items:start;
+}
+
+.creation-form-top-left{
+  display:contents;
+}
+
+.creation-form-top-right{
+  display:contents;
+}
+
 .creation-form-row-three{
   grid-template-columns:repeat(3, minmax(0, 1fr));
 }
@@ -1157,6 +1170,28 @@ tr:hover{background:#f1f5f9}
   color:#5b6f95;
   font-size:13px;
   font-weight:600;
+}
+
+.creation-top-inline-card label{
+  justify-content:flex-start;
+}
+
+.creation-top-inline-card{
+  min-height:96px;
+  display:flex;
+  flex-direction:column;
+}
+
+.creation-form-top-left > .creation-top-inline-card{
+  min-height:96px;
+}
+
+.creation-form-top-right > .creation-top-inline-card{
+  min-height:96px;
+}
+
+.creation-top-inline-card input{
+  margin-top:10px;
 }
 
 .creation-layout-card input,
@@ -3258,6 +3293,11 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   #creationSection .creation-form-row-two,
   #creationSection .creation-form-row-three,
   #creationSection .creation-form-row-four{
+    grid-template-columns:1fr;
+  }
+  #creationSection .creation-form-row-top-extended,
+  #creationSection .creation-form-top-left,
+  #creationSection .creation-form-top-right{
     grid-template-columns:1fr;
   }
   #creationSection .creation-form-row-top{

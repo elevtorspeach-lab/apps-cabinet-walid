@@ -410,9 +410,11 @@ const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
 const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
+  nRef: 'N / ref',
   boiteNo: 'Boîte N°',
   referenceClient: 'Référence Client',
   dateAffectation: 'Date d’affectation',
+  gestionnaire: 'Gestionnaire',
   procedure: 'Procédure',
   montant: 'Montant',
   ville: 'Ville',
@@ -996,9 +998,11 @@ function collectDossierDiffEntries(prevDossier, nextDossier){
   const entries = [];
   const dossierFields = [
     'debiteur',
+    'nRef',
     'boiteNo',
     'referenceClient',
     'dateAffectation',
+    'gestionnaire',
     'procedure',
     'montant',
     'ville',
@@ -7225,7 +7229,9 @@ function normalizeClient(rawClient, options = {}){
           return {
             ...d,
             importUid: String(d.importUid || '').trim() || createImportTrackingId('dossier'),
+            nRef: String(d.nRef || '').trim(),
             dateAffectation: normalizedDate || '',
+            gestionnaire: String(d.gestionnaire || '').trim(),
             montant: getLowerMontantValue(d.montant || ''),
             history: normalizeDossierHistoryEntries(d.history),
             montantByProcedure: normalizeProcedureMontantGroups(
@@ -10524,7 +10530,9 @@ function startRemoteSyncStream(){
 function parseExcelData(rows, sheet = null){
   const dossierHeaderKeys = {
     client: ['client', 'clients', 'nom client', 'nom clients'],
+    nRef: ['n / ref', 'n/ref', 'n ref', 'num ref', 'numero ref', 'numéro ref', 'n° ref', 'ref interne'],
     affectation: ['affectation', 'date affectation', 'date d affectation'],
+    gestionnaire: ['gestionnaire', 'manager', 'responsable', 'charge dossier', 'chargé dossier', 'charge de dossier', 'chargé de dossier'],
     type: ['type'],
     procedure: ['procedure', 'procedure (choix multiple)', 'procédure'],
     refClient: ['ref client', 'refclient', 'ref. client', 'ref client ', 'reference client', 'réference client', 'référence client'],
@@ -10807,7 +10815,9 @@ function parseExcelData(rows, sheet = null){
 
     const idx = {
       client: getColIndex(dossierColMap, dossierHeaderKeys.client),
+      nRef: getColIndex(dossierColMap, dossierHeaderKeys.nRef),
       affectation: getColIndex(dossierColMap, dossierHeaderKeys.affectation),
+      gestionnaire: getColIndex(dossierColMap, dossierHeaderKeys.gestionnaire),
       type: getColIndex(dossierColMap, dossierHeaderKeys.type),
       procedure: getColIndex(dossierColMap, dossierHeaderKeys.procedure),
       refClient: getColIndex(dossierColMap, dossierHeaderKeys.refClient),
@@ -10859,7 +10869,9 @@ function parseExcelData(rows, sheet = null){
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
       const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
       const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
+      const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
+      const gestionnaire = idx.gestionnaire !== -1 ? String(row[idx.gestionnaire] || '').trim() : '';
       const type = idx.type !== -1 ? String(row[idx.type] || '').trim() : '';
       const refAssignation = idx.refAssignation !== -1 ? String(row[idx.refAssignation] || '').trim() : '';
       const refRestitution = idx.refRestitution !== -1 ? String(row[idx.refRestitution] || '').trim() : '';
@@ -10936,8 +10948,10 @@ function parseExcelData(rows, sheet = null){
       dossiers.push({
         rowNumber: j + 1,
         clientName,
+        nRef,
         dateAffectation,
         carriedAffectationDate,
+        gestionnaire,
         carriedMontant,
         dateAffectationExtra,
         type,
@@ -12016,11 +12030,13 @@ async function applyExcelImport(payload, options = {}){
       importUid: createImportTrackingId('dossier'),
       createdAt: new Date().toISOString(),
       debiteur: rowDebiteur || '-',
+      nRef: '',
       boiteNo: '',
       referenceClient: rowRefClient || String(row?.refDossier || '').trim(),
       importAudienceBatchId: audienceImportEntry ? audienceImportEntry.id : '',
       isAudienceOrphanImport: true,
       dateAffectation: '',
+      gestionnaire: '',
       procedure: normalizedPreferredProc,
       procedureList: [normalizedPreferredProc],
       procedureDetails: {
@@ -12318,9 +12334,11 @@ async function applyExcelImport(payload, options = {}){
       importGlobalBatchId: globalImportEntry ? globalImportEntry.id : '',
       createdAt: new Date().toISOString(),
       debiteur: row.debiteur,
+      nRef: String(row.nRef || '').trim(),
       boiteNo: row.boiteNo || '',
       referenceClient: row.refClient || row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction || '',
       dateAffectation: rowDateAffectation || '',
+      gestionnaire: String(row.gestionnaire || '').trim(),
       procedure: procedures.join(', '),
       procedureList: procedures.slice(),
       procedureDetails,
@@ -14514,9 +14532,11 @@ async function addDossier(){
       isAudienceOrphanImport: previousImportMeta?.isAudienceOrphanImport === true,
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
+      nRef: $('nRefInput')?.value.trim() || '',
       boiteNo: $('boiteNoInput')?.value.trim() || '',
       referenceClient: $('referenceClientInput').value.trim(),
       dateAffectation: normalizedDateAffectation,
+      gestionnaire: $('gestionnaireInput')?.value.trim() || '',
       procedure: selected.join(', '),
       procedureList: selected.slice(),
       procedureDetails: details,
@@ -14951,10 +14971,12 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
   const staticFields = [
     clientName || '',
     dossier?.debiteur || '',
+    dossier?.nRef || '',
     ...buildSuiviDebiteurSearchVariants(dossier?.debiteur || ''),
     dossier?.boiteNo || '',
     dossier?.referenceClient || '',
     dossier?.dateAffectation || '',
+    dossier?.gestionnaire || '',
     dossier?.procedure || '',
     ...(Array.isArray(dossier?.procedureList) ? dossier.procedureList : []),
     dossier?.ville || '',
@@ -15049,9 +15071,11 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
   const dossierValues = [
     clientName || '',
     dossier?.debiteur || '',
+    dossier?.nRef || '',
     dossier?.boiteNo || '',
     dossier?.referenceClient || '',
     dossier?.dateAffectation || '',
+    dossier?.gestionnaire || '',
     dossier?.ville || '',
     dossier?.adresse || '',
     dossier?.montant || '',
@@ -15210,9 +15234,11 @@ function editDossier(clientId, index){
 
   $('selectClient').value = clientId;
   $('debiteurInput').value = d.debiteur || '';
+  if($('nRefInput')) $('nRefInput').value = d.nRef || '';
   if($('boiteNoInput')) $('boiteNoInput').value = d.boiteNo || '';
   $('referenceClientInput').value = d.referenceClient || '';
   $('dateAffectation').value = normalizeDateDDMMYYYY(d.dateAffectation || '') || '';
+  if($('gestionnaireInput')) $('gestionnaireInput').value = d.gestionnaire || '';
   $('villeInput').value = d.ville || '';
   $('adresseInput').value = d.adresse || '';
   $('montantInput').value = d.montant || '';
@@ -15357,10 +15383,12 @@ function openDossierDetails(clientId, index){
   const files = Array.isArray(dossier.files) ? dossier.files : [];
   const detailsRows = [
     ['Client', client.name || '-'],
+    ['N / ref', dossier.nRef || '-'],
     ['Débiteur', dossier.debiteur || '-'],
     ['Boîte N°', dossier.boiteNo || '-'],
     ['Référence Client', dossier.referenceClient || '-'],
     ['Date d’affectation', dossier.dateAffectation || '-'],
+    ['Gestionnaire', dossier.gestionnaire || '-'],
     ['Procédure', dossier.procedure || '-'],
     ['Montant', dossier.montant || '-'],
     ['Ville', dossier.ville || '-'],
@@ -15555,10 +15583,12 @@ function buildDossierSummarySections(client, dossier){
       title: 'Informations generales',
       rows: [
         ['Client', formatDossierExcelCellValue(client?.name)],
+        ['N / ref', formatDossierExcelCellValue(dossier?.nRef)],
         ['Debiteur', formatDossierExcelCellValue(dossier?.debiteur)],
         ['Boite N°', formatDossierExcelCellValue(dossier?.boiteNo)],
         ['Reference Client', formatDossierExcelCellValue(dossier?.referenceClient)],
         ['Date d’affectation', formatDossierExcelCellValue(dossier?.dateAffectation)],
+        ['Gestionnaire', formatDossierExcelCellValue(dossier?.gestionnaire)],
         ['Procedure', formatDossierExcelCellValue(normalizeProcedures(dossier).join(', ') || dossier?.procedure)],
         ['Montant', formatDossierExcelCellValue(dossier?.montant)],
         ['Ville', formatDossierExcelCellValue(dossier?.ville)],
