@@ -420,7 +420,7 @@ function renderDiligence(options = {}){
         renderDiligenceRowsHtml(pageData.rows),
         [
           'diligence-rows',
-          audienceRowsRawDataVersion,
+          dossierDataVersion,
           diligencePrintSelectionVersion,
           pageData.page,
           pageData.rows.length,

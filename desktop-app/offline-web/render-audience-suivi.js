@@ -52,7 +52,7 @@ function getCurrentSuiviFilterCacheKey(){
 function buildSuiviRowsRenderKey(pageData, stateKey){
   return [
     'suivi-rows',
-    audienceRowsRawDataVersion,
+    dossierDataVersion,
     suiviPrintSelectionVersion,
     pageData.page,
     pageData.rows.length,
@@ -97,7 +97,7 @@ function buildAudienceRenderIdentityKey(stateKey){
 
 function buildSuiviRenderIdentityKey(stateKey){
   return [
-    audienceRowsRawDataVersion,
+    dossierDataVersion,
     suiviPrintSelectionVersion,
     String(stateKey || ''),
     getCurrentClientAccessCacheKey(),

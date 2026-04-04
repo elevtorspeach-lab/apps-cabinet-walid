@@ -208,6 +208,7 @@ let remoteRefreshTimer = null;
 let remoteSyncRenderTimer = null;
 let remoteSyncRenderSections = new Set();
 let remoteDashboardLightRefreshPending = false;
+let remoteSectionLastRenderAt = new Map();
 let lastPingMs = null;
 let lastLiveDelayMs = null;
 let syncMetricsRenderQueued = false;
@@ -230,10 +231,13 @@ let audienceVirtualRafId = null;
 let audienceRowsRawCache = null;
 let audienceRowsRawCacheVersion = 0;
 let audienceRowsRawCacheViewerKey = '';
+let dossierDataVersion = 0;
 let audienceRowsRawDataVersion = 0;
 let audienceRowsDedupeCache = null;
 let audienceRowsDedupeCacheVersion = 0;
 let audienceRowsDedupeCacheViewerKey = '';
+let audienceClosedStatusLookupCache = null;
+let audienceClosedStatusLookupCacheVersion = -1;
 let audienceRowsViewCacheSource = null;
 let audienceRowsViewCacheKey = '';
 let audienceRowsViewCacheOutput = [];
@@ -521,12 +525,26 @@ const SALLE_SIDEBAR_SESSION_RENDER_LIMIT_VERY_LARGE = 8;
 const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 60000;
 const STYLED_XLSX_MAX_ROWS = 12000;
 const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD = 40000;
+const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_LARGE = 24000;
+const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE = 12000;
 const SELECTED_EXPORT_CSV_THRESHOLD = 200;
 const SALLE_EXPORT_CSV_THRESHOLD = 250;
+const SALLE_EXPORT_CSV_THRESHOLD_LARGE = 160;
+const SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE = 80;
 const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 300;
 const LARGE_DATASET_DOSSIERS_THRESHOLD = 30000;
 const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 450;
 const ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD = 50000;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS = 900;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS = 1600;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION = Object.freeze({
+  dashboard: 2200,
+  clients: 1400,
+  suivi: 1000,
+  audience: 1100,
+  diligence: 1200,
+  salle: 2600
+});
 const SUIVI_VIRTUAL_MIN_ROWS = 40;
 const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
 const SUIVI_HEAVY_SORT_MAX_CLIENTS = 500;
@@ -1100,12 +1118,12 @@ function getAudienceViewerCacheKey(){
 
 function invalidateDerivedCaches(options = {}){
   const audience = options.audience !== false;
+  const preserveBaseRowCaches = options.preserveBaseRowCaches === true;
   const preserveClientAccessCaches = options.preserveClientAccessCaches === true;
   const preserveClientListSummary = options.preserveClientListSummary === true;
   const preserveDashboardSnapshot = options.preserveDashboardSnapshot === true;
-  if(audience){
-    audienceRowsRawDataVersion += 1;
-  }
+  dossierDataVersion += 1;
+  if(audience) audienceRowsRawDataVersion += 1;
   backgroundDataWarmupVersion = -1;
   if(!preserveClientAccessCaches){
     visibleClientsCache = null;
@@ -1128,7 +1146,9 @@ function invalidateDerivedCaches(options = {}){
   dashboardAudienceMetricsCache = null;
   dashboardAudienceMetricsCacheVersion = -1;
   dashboardAudienceMetricsCacheUserKey = '';
-  suiviBaseRowsCache = null;
+  if(!preserveBaseRowCaches){
+    suiviBaseRowsCache = null;
+  }
   suiviFilterOptionsRowsMetaRef = null;
   suiviFilteredRowsCacheSource = null;
   suiviFilteredRowsCacheKey = '';
@@ -1182,6 +1202,8 @@ function invalidateDerivedCaches(options = {}){
   audienceSidebarProjectionCacheUserKey = '';
   audienceErrorCountCacheVersion = -1;
   audienceErrorCountCacheValue = 0;
+  audienceClosedStatusLookupCache = null;
+  audienceClosedStatusLookupCacheVersion = -1;
   audienceExactSearchIndexCacheInput = null;
   audienceExactSearchIndexCacheOutput = null;
   knownJudgesCache = null;
@@ -1190,8 +1212,10 @@ function invalidateDerivedCaches(options = {}){
   salleAudienceMapCacheVersion = -1;
   salleAudienceMapCacheUserKey = '';
   lastSalleRenderKey = '';
-  audienceRowsRawCache = null;
-  audienceRowsDedupeCache = null;
+  if(!preserveBaseRowCaches){
+    audienceRowsRawCache = null;
+    audienceRowsDedupeCache = null;
+  }
   audienceRowsViewCacheSource = null;
   audienceRowsViewCacheKey = '';
   audienceRowsViewCacheOutput = [];
@@ -1274,9 +1298,9 @@ function handleDossierDataChange(options = {}){
   if(hasAudienceImpact){
     markAudienceRowsCacheDirty();
   }else{
-    audienceRowsRawDataVersion += 1;
     invalidateDerivedCaches({
       audience: false,
+      preserveBaseRowCaches: options.preserveBaseRowCaches === true,
       preserveClientAccessCaches: options.preserveClientAccessCaches === true,
       preserveClientListSummary: options.preserveClientListSummary === true,
       preserveDashboardSnapshot: options.preserveDashboardSnapshot === true
@@ -1518,7 +1542,7 @@ function getVisibleDeferredSectionKeys(){
 function getVisibleDossierCount(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
-    visibleDossierCountCacheVersion === audienceRowsRawDataVersion
+    visibleDossierCountCacheVersion === dossierDataVersion
     && visibleDossierCountCacheUserKey === userKey
   ){
     return visibleDossierCountCacheValue;
@@ -1529,7 +1553,7 @@ function getVisibleDossierCount(){
     dossierCount += Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
   }
   visibleDossierCountCacheValue = dossierCount;
-  visibleDossierCountCacheVersion = audienceRowsRawDataVersion;
+  visibleDossierCountCacheVersion = dossierDataVersion;
   visibleDossierCountCacheUserKey = userKey;
   return dossierCount;
 }
@@ -1537,7 +1561,7 @@ function getVisibleDossierCount(){
 function isUltraLargeDatasetMode(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
-    ultraLargeDatasetModeCacheVersion === audienceRowsRawDataVersion
+    ultraLargeDatasetModeCacheVersion === dossierDataVersion
     && ultraLargeDatasetModeCacheUserKey === userKey
   ){
     return ultraLargeDatasetModeCacheValue;
@@ -1547,7 +1571,7 @@ function isUltraLargeDatasetMode(){
   const ultraLarge = visibleClients.length >= ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD
     || dossierCount >= ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD;
   ultraLargeDatasetModeCacheValue = ultraLarge;
-  ultraLargeDatasetModeCacheVersion = audienceRowsRawDataVersion;
+  ultraLargeDatasetModeCacheVersion = dossierDataVersion;
   ultraLargeDatasetModeCacheUserKey = userKey;
   return ultraLarge;
 }
@@ -1569,6 +1593,72 @@ function shouldPreferFastWorkbookPath(rowCount = 0){
   return totalRows >= 200;
 }
 
+function shouldPreferAudienceRegularExportCsvPath(rowCount = 0){
+  const totalRows = Math.max(0, Number(rowCount) || 0);
+  if(totalRows <= 0) return false;
+  if(totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD) return true;
+  if(isVeryLargeLiveSyncMode()){
+    return totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE;
+  }
+  if(isLargeDatasetMode() || heavyUiOperationCount > 0){
+    return totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_LARGE;
+  }
+  return false;
+}
+
+function shouldPreferSalleExportCsvPath(rowCount = 0){
+  const totalRows = Math.max(0, Number(rowCount) || 0);
+  if(totalRows <= 0) return false;
+  if(totalRows >= SALLE_EXPORT_CSV_THRESHOLD) return true;
+  if(isVeryLargeLiveSyncMode()){
+    return totalRows >= SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE;
+  }
+  if(isLargeDatasetMode() || heavyUiOperationCount > 0){
+    return totalRows >= SALLE_EXPORT_CSV_THRESHOLD_LARGE;
+  }
+  return false;
+}
+
+function getRemoteSyncSectionMinInterval(sectionKey, options = {}){
+  if(options?.livePatch !== true) return 0;
+  const safeKey = String(sectionKey || '').trim();
+  if(!safeKey) return 0;
+  let baseDelay = 0;
+  if(isVeryLargeLiveSyncMode()){
+    baseDelay = REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS;
+  }else if(isLargeDatasetMode()){
+    baseDelay = REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS;
+  }
+  const sectionDelay = Number(REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION[safeKey]) || 0;
+  if(safeKey === 'dashboard' && remoteDashboardLightRefreshPending){
+    return Math.max(baseDelay, sectionDelay);
+  }
+  return Math.max(baseDelay, sectionDelay);
+}
+
+function getRemoteSyncRenderCooldownDelay(sectionKeys = [], options = {}){
+  const keys = sectionKeys instanceof Set ? [...sectionKeys] : (Array.isArray(sectionKeys) ? sectionKeys : []);
+  const now = Date.now();
+  return keys.reduce((maxDelay, key)=>{
+    const safeKey = String(key || '').trim();
+    if(!safeKey) return maxDelay;
+    const minIntervalMs = getRemoteSyncSectionMinInterval(safeKey, options);
+    if(minIntervalMs <= 0) return maxDelay;
+    const lastRenderedAt = Number(remoteSectionLastRenderAt.get(safeKey) || 0);
+    const remaining = minIntervalMs - (now - lastRenderedAt);
+    return Math.max(maxDelay, remaining > 0 ? remaining : 0);
+  }, 0);
+}
+
+function markRemoteSyncSectionsRendered(sectionKeys = []){
+  const now = Date.now();
+  (Array.isArray(sectionKeys) ? sectionKeys : []).forEach((key)=>{
+    const safeKey = String(key || '').trim();
+    if(!safeKey) return;
+    remoteSectionLastRenderAt.set(safeKey, now);
+  });
+}
+
 function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   const visibleKeys = new Set(getVisibleDeferredSectionKeys());
   const requestedKeys = Array.isArray(sectionKeys) && sectionKeys.length
@@ -1583,34 +1673,42 @@ function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   if(shouldRender('dashboard')){
     const lightRefresh = remoteDashboardLightRefreshPending;
     remoteDashboardLightRefreshPending = false;
-    if(!queueDeferredRemoteSectionRender('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), 50)){
+    if(lightRefresh && isVeryLargeLiveSyncMode() && typeof renderDashboardLiveLite === 'function'){
+      renderDashboardLiveLite();
+    }else if(!queueDeferredRemoteSectionRender('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), 50)){
       renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {});
     }
+    markRemoteSyncSectionsRendered(['dashboard']);
   }
   if(shouldRender('clients')){
     if(!queueDeferredRemoteSectionRender('clients', ()=>renderClients(), 50)){
       renderClients();
     }
+    markRemoteSyncSectionsRendered(['clients']);
   }
   if(shouldRender('suivi')){
     if(!queueDeferredRemoteSectionRender('suivi', ()=>renderSuivi(), 70)){
       renderSuivi();
     }
+    markRemoteSyncSectionsRendered(['suivi']);
   }
   if(shouldRender('audience')){
     if(!queueDeferredRemoteSectionRender('audience', ()=>renderAudience(), 70)){
       renderAudience();
     }
+    markRemoteSyncSectionsRendered(['audience']);
   }
   if(shouldRender('diligence')){
     if(!queueDeferredRemoteSectionRender('diligence', ()=>renderDiligence(), 70)){
       renderDiligence();
     }
+    markRemoteSyncSectionsRendered(['diligence']);
   }
   if(shouldRender('salle')){
     if(!queueDeferredRemoteSectionRender('salle', ()=>renderSalle(), 80)){
       renderSalle();
     }
+    markRemoteSyncSectionsRendered(['salle']);
   }
   if(shouldRender('equipe')) renderEquipe();
   if(shouldRender('recycle')) renderRecycleBin();
@@ -1637,7 +1735,9 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
     if(safeKey) remoteSyncRenderSections.add(safeKey);
   });
   if(!remoteSyncRenderSections.size) return;
-  const delayMs = getAdaptiveUiBatchDelay(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, {
+  const cooldownDelay = getRemoteSyncRenderCooldownDelay(remoteSyncRenderSections, options);
+  const baseDelay = Math.max(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, cooldownDelay);
+  const delayMs = getAdaptiveUiBatchDelay(baseDelay, {
     ultraLargeDatasetExtraMs: 900,
     largeDatasetExtraMs: 180,
     busyExtraMs: 320,
@@ -1817,12 +1917,12 @@ function getDossierCreatedAtSortValue(dossier){
 }
 
 function applyIncrementalRemoteDossierCaches(meta){
-  if(!meta || meta.audienceImpact) return;
+  if(!meta) return;
   const userKey = getCurrentClientAccessCacheKey();
 
   if(
     clientListSummaryCache
-    && clientListSummaryCacheVersion === audienceRowsRawDataVersion
+    && clientListSummaryCacheVersion === dossierDataVersion
     && clientListSummaryCacheUserKey === userKey
   ){
     const adjustSummary = (clientId, delta, clotureDelta = 0)=>{
@@ -1878,7 +1978,7 @@ function applyIncrementalRemoteDossierCaches(meta){
 
   if(
     dashboardSnapshotCache
-    && dashboardSnapshotCacheVersion === audienceRowsRawDataVersion
+    && dashboardSnapshotCacheVersion === dossierDataVersion
     && dashboardSnapshotCacheUserKey === userKey
   ){
     let enCoursDelta = 0;
@@ -1912,6 +2012,62 @@ function applyIncrementalRemoteDossierCaches(meta){
       enCours: Math.max(0, Number(dashboardSnapshotCache.enCours || 0) + enCoursDelta),
       clotureCount: Math.max(0, Number(dashboardSnapshotCache.clotureCount || 0) + clotureDelta)
     };
+  }
+
+  const affectedClientIds = [...new Set(
+    [meta.sourceClientId, meta.targetClientId]
+      .map(value=>Number(value))
+      .filter(value=>Number.isFinite(value))
+  )];
+  if(affectedClientIds.length){
+    if(
+      suiviBaseRowsCache
+      && suiviBaseRowsCacheVersion === dossierDataVersion - 1
+      && suiviBaseRowsCacheViewerKey === userKey
+    ){
+      const nextRawRows = replaceRowsForClientIds(
+        suiviBaseRowsCache.rawRows,
+        affectedClientIds,
+        (clientId)=>{
+          const resolved = getClientByIdWithIndex(clientId);
+          return resolved.client ? buildSuiviRowsForClient(resolved.client) : [];
+        },
+        row=>row?.c?.id
+      );
+      const hydratedBase = hydrateSuiviBaseRows(nextRawRows);
+      suiviBaseRowsCache = {
+        rawRows: hydratedBase.rawRows,
+        rowsMeta: hydratedBase.rowsMeta,
+        tribunalState: hydratedBase.tribunalState,
+        sortedDefaultRows: buildSortedSuiviRows(hydratedBase.rawRows)
+      };
+      suiviBaseRowsCacheVersion = dossierDataVersion;
+    }
+
+    if(
+      meta.audienceImpact === true
+      && audienceRowsRawCache
+      && audienceRowsRawCacheVersion === audienceRowsRawDataVersion - 1
+      && audienceRowsRawCacheViewerKey === getAudienceViewerCacheKey()
+    ){
+      const closedStatusLookup = getAudienceClosedStatusLookupCached();
+      const nextAudienceRows = replaceRowsForClientIds(
+        audienceRowsRawCache,
+        affectedClientIds,
+        (clientId)=>{
+          const resolved = getClientByIdWithIndex(clientId);
+          if(!resolved.client || resolved.index < 0) return [];
+          return buildAudienceRowsForClient(resolved.client, resolved.index, closedStatusLookup);
+        },
+        row=>row?.c?.id
+      );
+      audienceRowsRawCache = nextAudienceRows;
+      audienceRowsRawCacheVersion = audienceRowsRawDataVersion;
+      audienceRowsRawCacheViewerKey = getAudienceViewerCacheKey();
+      audienceRowsDedupeCache = nextAudienceRows;
+      audienceRowsDedupeCacheVersion = audienceRowsRawDataVersion;
+      audienceRowsDedupeCacheViewerKey = audienceRowsRawCacheViewerKey;
+    }
   }
 }
 
@@ -2213,7 +2369,7 @@ function finalizeRemoteStateUpdateLocally(options = {}){
     ? options.incrementalPatch
     : null;
   const hasAudienceImpact = options.audience === true;
-  const useIncrementalCaches = !!incrementalPatch && incrementalPatch.audienceImpact !== true;
+  const useIncrementalCaches = !!incrementalPatch;
   const refreshSections = normalizeRemoteSyncSectionList(options.sections, {
     includeAudience: hasAudienceImpact
   });
@@ -2221,17 +2377,27 @@ function finalizeRemoteStateUpdateLocally(options = {}){
     includeAudience: false
   }).filter(section=>!refreshSections.includes(section));
   if(options.livePatch === true && hasAudienceImpact && isVeryLargeLiveSyncMode()){
-    if(secondaryRefreshSections.includes('dashboard')){
+    if(refreshSections.includes('dashboard') || secondaryRefreshSections.includes('dashboard')){
       remoteDashboardLightRefreshPending = true;
+    }
+    const salleIndex = refreshSections.indexOf('salle');
+    if(salleIndex !== -1){
+      refreshSections.splice(salleIndex, 1);
+      if(!secondaryRefreshSections.includes('salle')){
+        secondaryRefreshSections.push('salle');
+      }
     }
     for(let index = secondaryRefreshSections.length - 1; index >= 0; index -= 1){
       if(secondaryRefreshSections[index] === 'salle'){
-        secondaryRefreshSections.splice(index, 1);
+        if(!isDeferredRenderSectionVisible('salle')){
+          secondaryRefreshSections.splice(index, 1);
+        }
       }
     }
   }
   handleDossierDataChange({
     audience: hasAudienceImpact,
+    preserveBaseRowCaches: useIncrementalCaches,
     preserveClientAccessCaches: useIncrementalCaches,
     preserveClientListSummary: useIncrementalCaches,
     preserveDashboardSnapshot: useIncrementalCaches
@@ -2251,9 +2417,10 @@ function finalizeRemoteStateUpdateLocally(options = {}){
   }else{
     markDeferredRenderDirty(...refreshSections, ...secondaryRefreshSections);
   }
-  queueRemoteSyncRender(refreshSections);
+  queueRemoteSyncRender(refreshSections, { livePatch: options.livePatch === true });
   if(secondaryRefreshSections.length){
     queueRemoteSyncRender(secondaryRefreshSections, {
+      livePatch: options.livePatch === true,
       delayMs: getAdaptiveUiBatchDelay(250, {
         largeDatasetExtraMs: 450,
         busyExtraMs: 650,
@@ -2754,7 +2921,12 @@ function promiseWithTimeout(promise, timeoutMs, label = 'Operation'){
 
 async function runChunked(items, task, options = {}){
   const list = Array.isArray(items) ? items : [];
-  const chunkSize = Math.max(1, Number(options.chunkSize) || IMPORT_CHUNK_SIZE);
+  const requestedChunkSize = Math.max(1, Number(options.chunkSize) || IMPORT_CHUNK_SIZE);
+  const chunkSize = (
+    list.length >= 200
+      ? (isVeryLargeLiveSyncMode() ? Math.min(requestedChunkSize, 20) : (isLargeDatasetMode() ? Math.min(requestedChunkSize, 40) : requestedChunkSize))
+      : requestedChunkSize
+  );
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
   for(let index = 0; index < list.length; index += 1){
     await task(list[index], index, list.length);
@@ -2778,6 +2950,9 @@ async function mapChunked(items, mapper, options = {}){
 function makeProgressReporter(prefix){
   let lastAt = 0;
   return (done, total)=>{
+    const progressModal = $('importProgressModal');
+    const progressVisible = !!progressModal && progressModal.style.display !== 'none';
+    if(!progressVisible) return;
     const now = Date.now();
     if(done < total && now - lastAt < IMPORT_STATUS_THROTTLE_MS) return;
     lastAt = now;
@@ -3084,7 +3259,7 @@ function toggleSuiviPrintSelection(clientId, dossierIndex, checked){
 }
 
 function syncSuiviPrintSelection(allRows){
-  const currentDataVersion = audienceRowsRawDataVersion;
+  const currentDataVersion = dossierDataVersion;
   if(currentDataVersion === suiviPrintSelectionPruneDataVersion){
     updateSuiviCheckedCount();
     return;
@@ -3644,7 +3819,7 @@ function scheduleChunkedSearchWarmup(kind, rows, stepFn){
 
 function scheduleBackgroundDataWarmup(delayMs = 1500){
   if(typeof window === 'undefined' || !currentUser || isLargeDatasetMode()) return;
-  const targetVersion = audienceRowsRawDataVersion;
+  const targetVersion = dossierDataVersion;
   if(backgroundDataWarmupVersion === targetVersion) return;
   if(backgroundDataWarmupTimer){
     clearTimeout(backgroundDataWarmupTimer);
@@ -3653,7 +3828,7 @@ function scheduleBackgroundDataWarmup(delayMs = 1500){
   const warmup = ()=>{
     backgroundDataWarmupTimer = null;
     if(!currentUser) return;
-    if(backgroundDataWarmupVersion === audienceRowsRawDataVersion) return;
+    if(backgroundDataWarmupVersion === dossierDataVersion) return;
     try{
       getClientListSummaries();
       getDashboardSnapshot();
@@ -3697,7 +3872,7 @@ function scheduleBackgroundDataWarmup(delayMs = 1500){
           row.__diligenceSearchValues = getDiligenceSearchValues(row);
         }
       });
-      backgroundDataWarmupVersion = audienceRowsRawDataVersion;
+      backgroundDataWarmupVersion = dossierDataVersion;
     }catch(err){
       console.warn('Préchargement des caches impossible', err);
     }
@@ -3726,14 +3901,14 @@ function queueLargeDatasetDashboardWarmup(delayMs = 120){
   );
   setTimeout(()=>{
     if(!currentUser) return;
-    if(dashboardSnapshotCacheVersion === audienceRowsRawDataVersion) return;
+    if(dashboardSnapshotCacheVersion === dossierDataVersion) return;
     if(importInProgress || heavyUiOperationCount > 0){
       queueLargeDatasetDashboardWarmup(1800);
       return;
     }
     const run = ()=>{
       try{
-        if(dashboardSnapshotCacheVersion === audienceRowsRawDataVersion) return;
+        if(dashboardSnapshotCacheVersion === dossierDataVersion) return;
         getDashboardSnapshot();
       }catch(err){
         console.warn('Préchargement dashboard impossible', err);
@@ -4217,14 +4392,14 @@ function getVisibleClients(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
     visibleClientsCache
-    && visibleClientsCacheVersion === audienceRowsRawDataVersion
+    && visibleClientsCacheVersion === dossierDataVersion
     && visibleClientsCacheUserKey === userKey
   ){
     return visibleClientsCache;
   }
   const next = AppState.clients.filter(c=>canViewClient(c));
   visibleClientsCache = next;
-  visibleClientsCacheVersion = audienceRowsRawDataVersion;
+  visibleClientsCacheVersion = dossierDataVersion;
   visibleClientsCacheUserKey = userKey;
   return next;
 }
@@ -4232,7 +4407,7 @@ function getVisibleClients(){
 function isLargeDatasetMode(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
-    largeDatasetModeCacheVersion === audienceRowsRawDataVersion
+    largeDatasetModeCacheVersion === dossierDataVersion
     && largeDatasetModeCacheUserKey === userKey
   ){
     return largeDatasetModeCacheValue;
@@ -4242,7 +4417,7 @@ function isLargeDatasetMode(){
   const large = visibleClients.length >= LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD
     || dossierCount >= LARGE_DATASET_DOSSIERS_THRESHOLD;
   largeDatasetModeCacheValue = large;
-  largeDatasetModeCacheVersion = audienceRowsRawDataVersion;
+  largeDatasetModeCacheVersion = dossierDataVersion;
   largeDatasetModeCacheUserKey = userKey;
   return large;
 }
@@ -4381,14 +4556,14 @@ function getEditableClients(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
     editableClientsCache
-    && editableClientsCacheVersion === audienceRowsRawDataVersion
+    && editableClientsCacheVersion === dossierDataVersion
     && editableClientsCacheUserKey === userKey
   ){
     return editableClientsCache;
   }
   const next = getVisibleClients().filter(c=>canEditClient(c));
   editableClientsCache = next;
-  editableClientsCacheVersion = audienceRowsRawDataVersion;
+  editableClientsCacheVersion = dossierDataVersion;
   editableClientsCacheUserKey = userKey;
   return next;
 }
@@ -4397,7 +4572,7 @@ function getClientListSummaries(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
     clientListSummaryCache
-    && clientListSummaryCacheVersion === audienceRowsRawDataVersion
+    && clientListSummaryCacheVersion === dossierDataVersion
     && clientListSummaryCacheUserKey === userKey
   ){
     return clientListSummaryCache;
@@ -4414,7 +4589,7 @@ function getClientListSummaries(){
     canEdit: canEditClient(client)
   }));
   clientListSummaryCache = next;
-  clientListSummaryCacheVersion = audienceRowsRawDataVersion;
+  clientListSummaryCacheVersion = dossierDataVersion;
   clientListSummaryCacheUserKey = userKey;
   return next;
 }
@@ -5513,10 +5688,14 @@ async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', 
       .filter((value)=>Number.isInteger(value) && value >= 0)
   )];
   const wrapColumnIndexSet = new Set(normalizedWrapColumnIndexes);
-  const useFastWorkbookPath = !useAudienceReferenceLayout
+  const useCompactAudienceFastWorkbookPath = useAudienceCompactReferenceLayout
+    && (preferWorker === true || shouldPreferFastWorkbookPath(rowCount));
+  const useFastWorkbookPath = useCompactAudienceFastWorkbookPath || (
+    !useAudienceReferenceLayout
     && !useSuiviReferenceLayout
     && !wrapColumnIndexSet.size
-    && (preferWorker === true || shouldPreferFastWorkbookPath(rowCount));
+    && (preferWorker === true || shouldPreferFastWorkbookPath(rowCount))
+  );
   const subtitleText = String(subtitle || '').trim();
   const editionDateText = formatDateDDMMYYYY(new Date());
   const editionLabelText = editionDateText ? `Edition le ${editionDateText}` : 'Edition le';
@@ -8513,61 +8692,92 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
     }
 
     const headers = ['Client', 'Adversaire', 'N° Dossier', 'Juge', 'Instruction', 'Statut', 'Ordonnance', 'Sort'];
-    const rows = [];
+    const sessionEntries = [];
     let dateAudience = '';
     const tribunalLabelsRaw = [];
-    [...judgeMap.entries()]
-      .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
-      .forEach(([judgeName, sessions])=>{
+    const judgeEntries = [...judgeMap.entries()]
+      .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }));
+    await runChunked(judgeEntries, async ([judgeName, sessions])=>{
         const visibleSessions = sessions
           .filter(s=>isSalleSessionMatchingTribunal(s))
           .filter(s=>isSalleSessionMatchingDate(s))
           .sort((a, b)=>(parseDateForAge(b.date)?.getTime() || 0) - (parseDateForAge(a.date)?.getTime() || 0));
-        visibleSessions
-          .forEach(s=>{
+        await runChunked(visibleSessions, async (s)=>{
             const maybeDate = String(s?.date || '').trim();
             if(!dateAudience && maybeDate && maybeDate !== '-') dateAudience = maybeDate;
             const tribunalText = String(s?.tribunal || '').trim();
             if(tribunalText && tribunalText !== '-') tribunalLabelsRaw.push(tribunalText);
-            rows.push([
-              s.client || '-',
-              s.debiteur || '-',
-              s.ref || '-',
-              judgeName || '-',
-              s.instruction || '-',
-              s.statut || 'En cours',
-              s.ordonnance || '',
-              ''
-            ]);
-          });
-      });
-    if(!rows.length){
-      rows.push(['-', '-', '-', '-', '-', '-', '-', '-']);
-    }
+            sessionEntries.push({
+              judgeName: judgeName || '-',
+              session: s
+            });
+        }, {
+          chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+        });
+    }, {
+      chunkSize: 1
+    });
     const tribunalClusterState = buildTribunalClusterStateFromLabels(tribunalLabelsRaw);
     const tribunalLabels = tribunalClusterState.options.map(v=>String(v?.label || '').trim()).filter(Boolean);
     const tribunalLabel = tribunalLabels.length ? tribunalLabels.join(' / ') : '-';
 
     const safeSalle = salleLabel.replace(/[^\w\-]+/g, '_');
     const safeDay = dayKey.replace(/[^\w\-]+/g, '_');
-    if(rows.length >= SALLE_EXPORT_CSV_THRESHOLD){
+    if(shouldPreferSalleExportCsvPath(sessionEntries.length)){
       const csvHeaders = ['Salle', 'Jour', 'Date audience', 'Tribunal', ...headers];
       const csvBlob = await createMappedCsvBlobChunked({
         headers: csvHeaders,
-        items: rows,
-        mapRow: (row)=>[
-          salleLabel || '-',
-          dayKey || '-',
-          dateAudience || '-',
-          tribunalLabel || '-',
-          ...(Array.isArray(row) ? row : [])
-        ],
+        items: sessionEntries.length ? sessionEntries : [null],
+        mapRow: (entry)=>{
+          if(!entry){
+            return [
+              salleLabel || '-',
+              dayKey || '-',
+              dateAudience || '-',
+              tribunalLabel || '-',
+              '-', '-', '-', '-', '-', '-', '-', '-'
+            ];
+          }
+          const session = entry.session || {};
+          return [
+            salleLabel || '-',
+            dayKey || '-',
+            dateAudience || '-',
+            tribunalLabel || '-',
+            session.client || '-',
+            session.debiteur || '-',
+            session.ref || '-',
+            entry.judgeName || '-',
+            session.instruction || '-',
+            session.statut || 'En cours',
+            session.ordonnance || '',
+            ''
+          ];
+        },
         progressLabel: 'Export salle CSV',
-        chunkSize: 120
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 80
       });
       await saveBlobDirectOrDownload(csvBlob, `audiences_${safeSalle || 'salle'}_${safeDay || 'jour'}.csv`);
       return;
     }
+
+    const rows = sessionEntries.length
+      ? await mapChunked(sessionEntries, async (entry)=>{
+        const session = entry.session || {};
+        return [
+          session.client || '-',
+          session.debiteur || '-',
+          session.ref || '-',
+          entry.judgeName || '-',
+          session.instruction || '-',
+          session.statut || 'En cours',
+          session.ordonnance || '',
+          ''
+        ];
+      }, {
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+      })
+      : [['-', '-', '-', '-', '-', '-', '-', '-']];
 
     await exportAudienceWorkbookXlsxStyled({
       headers,
@@ -8896,6 +9106,19 @@ function buildAudienceClosedStatusLookup(){
       });
     });
   });
+  return lookup;
+}
+
+function getAudienceClosedStatusLookupCached(){
+  if(
+    audienceClosedStatusLookupCache
+    && audienceClosedStatusLookupCacheVersion === audienceRowsRawDataVersion
+  ){
+    return audienceClosedStatusLookupCache;
+  }
+  const lookup = buildAudienceClosedStatusLookup();
+  audienceClosedStatusLookupCache = lookup;
+  audienceClosedStatusLookupCacheVersion = audienceRowsRawDataVersion;
   return lookup;
 }
 
@@ -13878,7 +14101,14 @@ function showView(v, options = {}){
     if(visible){
       el.style.display = 'block';
       el.classList.remove('section-enter');
-      requestAnimationFrame(()=>el.classList.add('section-enter'));
+      const shouldAnimateSectionEnter = !(
+        isLargeDatasetMode()
+        || importInProgress
+        || heavyUiOperationCount > 0
+      );
+      if(shouldAnimateSectionEnter){
+        requestAnimationFrame(()=>el.classList.add('section-enter'));
+      }
     }else{
       el.style.display = 'none';
       el.classList.remove('section-enter');
@@ -14409,7 +14639,7 @@ function renderClients(options = {}){
       rowsHtml,
       [
         'clients-rows',
-        audienceRowsRawDataVersion,
+        dossierDataVersion,
         pageData.page,
         pageData.rows.length,
         q,
@@ -14753,79 +14983,23 @@ function getSuiviBaseRowsCached(){
   const viewerKey = getAudienceViewerCacheKey();
   if(
     suiviBaseRowsCache
-    && suiviBaseRowsCacheVersion === audienceRowsRawDataVersion
+    && suiviBaseRowsCacheVersion === dossierDataVersion
     && suiviBaseRowsCacheViewerKey === viewerKey
   ){
     return suiviBaseRowsCache;
   }
 
-  const rawRows = [];
-  getVisibleClients().forEach(c=>{
-    c.dossiers.forEach((d, index)=>{
-      const procSource = normalizeProcedures(d);
-      const procSet = new Set(procSource);
-      const tribunalLabels = [];
-      Object.values(d.procedureDetails || {}).forEach(p=>{
-        const tribunal = normalizeLooseText(p?.tribunal || '');
-        if(tribunal) tribunalLabels.push(tribunal);
-      });
-      rawRows.push({
-        c,
-        d,
-        index,
-        createdAtTs: getDossierCreatedAtSortValue(d),
-        procSource,
-        procSet,
-        hasPendingDepot: false,
-        __suiviPairKey: '',
-        __suiviRefParts: undefined,
-        tribunalLabels: [...new Set(tribunalLabels)],
-        tribunalKeys: [],
-        tribunalList: []
-      });
-    });
-  });
+  const rawRows = getVisibleClients().flatMap(client=>buildSuiviRowsForClient(client));
+  const hydratedBase = hydrateSuiviBaseRows(rawRows);
+  const sortedDefaultRows = buildSortedSuiviRows(hydratedBase.rawRows);
 
-  const tribunalState = buildTribunalClusterStateFromLabels(rawRows.flatMap(row=>row.tribunalLabels || []));
-  const tribunalLabelByKey = new Map(tribunalState.options.map(v=>[v.key, v.label]));
-  const rowsMeta = [];
-  rawRows.forEach(row=>{
-    row.__suiviPairKey = buildSuiviRefDebiteurKey(row);
-    row.__suiviRefParts = parseSuiviReferenceParts(row?.d?.referenceClient || '');
-    row.hasPendingDepot = hasSuiviPendingDepotRow(row);
-    const tribunalKeys = [...new Set((row.tribunalLabels || [])
-      .map(label=>resolveSuiviTribunalFilterKey(label))
-      .filter(Boolean))];
-    const tribunalList = tribunalKeys
-      .map(key=>tribunalLabelByKey.get(key) || '')
-      .filter(Boolean);
-    row.tribunalKeys = tribunalKeys;
-    row.tribunalList = tribunalList;
-    rowsMeta.push({ procSet: row.procSet, tribunalList, tribunalKeys });
-  });
-
-  let sortedDefaultRows = rawRows;
-  const visibleClientCount = getVisibleClients().length;
-  const shouldSkipDefaultSort =
-    rawRows.length > SUIVI_DEFAULT_SORT_MAX_ROWS
-    || (visibleClientCount >= SUIVI_HEAVY_SORT_MAX_CLIENTS && rawRows.length >= SUIVI_HEAVY_SORT_MAX_ROWS);
-  if(!shouldSkipDefaultSort){
-    const duplicatePairCounts = new Map();
-    rawRows.forEach(row=>{
-      const key = row.__suiviPairKey || buildSuiviRefDebiteurKey(row);
-      if(!key) return;
-      duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
-    });
-    applySuiviDuplicateCounts(rawRows, duplicatePairCounts);
-    sortedDefaultRows = rawRows
-      .slice()
-      .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
-  }else{
-    applySuiviDuplicateCounts(rawRows);
-  }
-
-  suiviBaseRowsCache = { rawRows, rowsMeta, tribunalState, sortedDefaultRows };
-  suiviBaseRowsCacheVersion = audienceRowsRawDataVersion;
+  suiviBaseRowsCache = {
+    rawRows: hydratedBase.rawRows,
+    rowsMeta: hydratedBase.rowsMeta,
+    tribunalState: hydratedBase.tribunalState,
+    sortedDefaultRows
+  };
+  suiviBaseRowsCacheVersion = dossierDataVersion;
   suiviBaseRowsCacheViewerKey = viewerKey;
   return suiviBaseRowsCache;
 }
@@ -15545,6 +15719,128 @@ function openDossierDetails(clientId, index){
   }
 }
 
+function getClientByIdWithIndex(clientId){
+  const index = AppState.clients.findIndex(client=>Number(client?.id) === Number(clientId));
+  return {
+    index,
+    client: index >= 0 ? AppState.clients[index] : null
+  };
+}
+
+function replaceRowsForClientIds(sourceRows, clientIds, buildRowsForClientId, getRowClientId){
+  const rows = Array.isArray(sourceRows) ? sourceRows : [];
+  const ids = [...new Set(
+    (Array.isArray(clientIds) ? clientIds : [])
+      .map(value=>Number(value))
+      .filter(value=>Number.isFinite(value))
+  )];
+  if(!ids.length) return rows;
+  const targetIds = new Set(ids);
+  const insertedIds = new Set();
+  const nextRows = [];
+  rows.forEach((row)=>{
+    const rowClientId = Number(typeof getRowClientId === 'function' ? getRowClientId(row) : NaN);
+    if(!targetIds.has(rowClientId)){
+      nextRows.push(row);
+      return;
+    }
+    if(insertedIds.has(rowClientId)) return;
+    insertedIds.add(rowClientId);
+    const replacementRows = typeof buildRowsForClientId === 'function' ? buildRowsForClientId(rowClientId) : [];
+    if(Array.isArray(replacementRows) && replacementRows.length){
+      nextRows.push(...replacementRows);
+    }
+  });
+  ids.forEach((clientId)=>{
+    if(insertedIds.has(clientId)) return;
+    const replacementRows = typeof buildRowsForClientId === 'function' ? buildRowsForClientId(clientId) : [];
+    if(Array.isArray(replacementRows) && replacementRows.length){
+      nextRows.push(...replacementRows);
+    }
+  });
+  return nextRows;
+}
+
+function collectSuiviTribunalLabels(dossier){
+  const labels = [];
+  Object.values(dossier?.procedureDetails || {}).forEach((p)=>{
+    const tribunal = normalizeLooseText(p?.tribunal || '');
+    if(tribunal) labels.push(tribunal);
+  });
+  return [...new Set(labels)];
+}
+
+function buildSuiviRowForDossier(client, dossier, index){
+  const procSource = normalizeProcedures(dossier);
+  return {
+    c: client,
+    d: dossier,
+    index,
+    createdAtTs: getDossierCreatedAtSortValue(dossier),
+    procSource,
+    procSet: new Set(procSource),
+    hasPendingDepot: false,
+    __suiviPairKey: '',
+    __suiviRefParts: undefined,
+    tribunalLabels: collectSuiviTribunalLabels(dossier),
+    tribunalKeys: [],
+    tribunalList: []
+  };
+}
+
+function buildSuiviRowsForClient(client){
+  if(!client || !canViewClient(client)) return [];
+  return (Array.isArray(client?.dossiers) ? client.dossiers : []).map((dossier, index)=>{
+    return buildSuiviRowForDossier(client, dossier, index);
+  });
+}
+
+function hydrateSuiviBaseRows(rawRows){
+  const rows = Array.isArray(rawRows) ? rawRows : [];
+  const tribunalState = buildTribunalClusterStateFromLabels(rows.flatMap(row=>row.tribunalLabels || []));
+  const tribunalLabelByKey = new Map(tribunalState.options.map(v=>[v.key, v.label]));
+  const rowsMeta = [];
+  rows.forEach((row)=>{
+    row.__suiviPairKey = buildSuiviRefDebiteurKey(row);
+    row.__suiviRefParts = parseSuiviReferenceParts(row?.d?.referenceClient || '');
+    row.hasPendingDepot = hasSuiviPendingDepotRow(row);
+    const tribunalKeys = [...new Set((row.tribunalLabels || [])
+      .map(label=>resolveSuiviTribunalFilterKey(label))
+      .filter(Boolean))];
+    const tribunalList = tribunalKeys
+      .map(key=>tribunalLabelByKey.get(key) || '')
+      .filter(Boolean);
+    row.tribunalKeys = tribunalKeys;
+    row.tribunalList = tribunalList;
+    rowsMeta.push({ procSet: row.procSet, tribunalList, tribunalKeys });
+  });
+  return { rawRows: rows, rowsMeta, tribunalState };
+}
+
+function buildSortedSuiviRows(rawRows){
+  const rows = Array.isArray(rawRows) ? rawRows : [];
+  let sortedDefaultRows = rows;
+  const visibleClientCount = getVisibleClients().length;
+  const shouldSkipDefaultSort =
+    rows.length > SUIVI_DEFAULT_SORT_MAX_ROWS
+    || (visibleClientCount >= SUIVI_HEAVY_SORT_MAX_CLIENTS && rows.length >= SUIVI_HEAVY_SORT_MAX_ROWS);
+  if(!shouldSkipDefaultSort){
+    const duplicatePairCounts = new Map();
+    rows.forEach((row)=>{
+      const key = row.__suiviPairKey || buildSuiviRefDebiteurKey(row);
+      if(!key) return;
+      duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
+    });
+    applySuiviDuplicateCounts(rows, duplicatePairCounts);
+    sortedDefaultRows = rows
+      .slice()
+      .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
+  }else{
+    applySuiviDuplicateCounts(rows);
+  }
+  return sortedDefaultRows;
+}
+
 function getDossierByIds(clientId, index){
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client) return null;
@@ -16044,7 +16340,7 @@ function toggleDiligencePrintSelectionEncoded(clientId, dossierIndex, procedureE
 }
 
 function syncDiligencePrintSelection(allRows){
-  const currentDataVersion = audienceRowsRawDataVersion;
+  const currentDataVersion = dossierDataVersion;
   if(currentDataVersion === diligencePrintSelectionPruneDataVersion){
     updateDiligenceCheckedCount();
     return;
@@ -16208,7 +16504,7 @@ function getDiligenceRows(){
   const viewerKey = getAudienceViewerCacheKey();
   if(
     diligenceRowsCache
-    && diligenceRowsCacheVersion === audienceRowsRawDataVersion
+    && diligenceRowsCacheVersion === dossierDataVersion
     && diligenceRowsCacheViewerKey === viewerKey
   ){
     return diligenceRowsCache;
@@ -16267,7 +16563,7 @@ function getDiligenceRows(){
   });
   const out = dedupeDiligenceRowsByReferenceAndDebiteur(rows);
   diligenceRowsCache = out;
-  diligenceRowsCacheVersion = audienceRowsRawDataVersion;
+  diligenceRowsCacheVersion = dossierDataVersion;
   diligenceRowsCacheViewerKey = viewerKey;
   return out;
 }
@@ -18196,7 +18492,7 @@ function getDashboardSnapshot(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
     dashboardSnapshotCache
-    && dashboardSnapshotCacheVersion === audienceRowsRawDataVersion
+    && dashboardSnapshotCacheVersion === dossierDataVersion
     && dashboardSnapshotCacheUserKey === userKey
   ){
     return dashboardSnapshotCache;
@@ -18218,7 +18514,7 @@ function getDashboardSnapshot(){
     clotureCount: totals.clotureCount
   };
   dashboardSnapshotCache = snapshot;
-  dashboardSnapshotCacheVersion = audienceRowsRawDataVersion;
+  dashboardSnapshotCacheVersion = dossierDataVersion;
   dashboardSnapshotCacheUserKey = userKey;
   return snapshot;
 }
@@ -18227,7 +18523,7 @@ function getDashboardAudienceMetrics(){
   const userKey = getCurrentClientAccessCacheKey();
   if(
     dashboardAudienceMetricsCache
-    && dashboardAudienceMetricsCacheVersion === audienceRowsRawDataVersion
+    && dashboardAudienceMetricsCacheVersion === dossierDataVersion
     && dashboardAudienceMetricsCacheUserKey === userKey
   ){
     return dashboardAudienceMetricsCache;
@@ -18238,7 +18534,7 @@ function getDashboardAudienceMetrics(){
     audienceErrors: getAudienceErrorDossierCount()
   };
   dashboardAudienceMetricsCache = metrics;
-  dashboardAudienceMetricsCacheVersion = audienceRowsRawDataVersion;
+  dashboardAudienceMetricsCacheVersion = dossierDataVersion;
   dashboardAudienceMetricsCacheUserKey = userKey;
   return metrics;
 }
@@ -19015,7 +19311,7 @@ function buildAudienceSelectedExportDatasetBase(rowsOverride = null, options = {
   const audienceRows = Array.isArray(rowsOverride)
     ? rowsOverride.slice()
     : getSelectedAudienceRowsForExport();
-  const closedStatusLookup = audienceRows.length ? buildAudienceClosedStatusLookup() : null;
+  const closedStatusLookup = audienceRows.length ? getAudienceClosedStatusLookupCached() : null;
   const headers = omitSort ? [
     'Client',
     'Adversaire',
@@ -19162,6 +19458,10 @@ function buildAudienceExportColumnWidths(headers, rows, baseColWidths = []){
     ? baseColWidths
     : safeHeaders.map(()=>({ wch: 22 }))
   ).map((item)=>({ wch: Math.max(8, Number(item?.wch || item || 22)) }));
+
+  if(safeRows.length >= 2000){
+    return nextWidths;
+  }
 
   const applyDynamicWidth = (index, { min = 12, max = 60, factor = 1.15, padding = 2 } = {})=>{
     if(index < 0 || index >= nextWidths.length) return;
@@ -19670,6 +19970,65 @@ function hasAudienceProcedureData(procData, draftData, dossier){
   return fields.some(value=>String(value || '').trim().length > 0);
 }
 
+function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
+  if(!client || !canViewClient(client)) return [];
+  const rows = [];
+  (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach((dossier, dossierIndex)=>{
+    let procKeys = Object.keys(dossier.procedureDetails || {});
+    if(!procKeys.length){
+      procKeys = normalizeProcedures(dossier);
+    }
+    if(!procKeys.length) return;
+    procKeys.forEach((procKey)=>{
+      if(!isAudienceProcedure(procKey)) return;
+      const p = getAudienceProcedure(clientIndex, dossierIndex, procKey);
+      const key = makeAudienceDraftKey(clientIndex, dossierIndex, procKey);
+      const draft = audienceDraft[key] || {};
+      if(!hasAudienceProcedureData(p, draft, dossier)) return;
+      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || dossier?.referenceClient || '').trim();
+      const refDossier = normalizeReferenceForAudienceLookup(draftReferenceValue);
+      const procedureNorm = String(procKey || '').trim().toLowerCase();
+      const debiteurNorm = String(dossier?.debiteur || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const duplicateKey = (refDossier && procedureNorm && debiteurNorm)
+        ? `${procedureNorm}__${debiteurNorm}__${refDossier}`
+        : '';
+      const audienceDateDisplay = formatAudienceDateDisplayValue(draft?.dateAudience || p?.audience || '');
+      const sortMeta = {
+        ref: refDossier,
+        parts: parseAudienceReferenceParts(refDossier),
+        client: String(client?.name || ''),
+        refClient: String(dossier?.referenceClient || ''),
+        debiteur: String(dossier?.debiteur || '')
+      };
+      const row = {
+        c: client,
+        d: dossier,
+        procKey,
+        p,
+        key,
+        draft,
+        ci: clientIndex,
+        di: dossierIndex,
+        __dupKey: duplicateKey,
+        __procFilterKey: getAudienceProcedureFilterKey(procKey),
+        __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
+        __rowReference: refDossier,
+        __sortMeta: sortMeta,
+        __audienceDateDisplay: audienceDateDisplay
+      };
+      const resolvedStatus = resolveAudienceRowStatusSnapshot(row, closedStatusLookup);
+      row.__resolvedStatus = resolvedStatus.statut;
+      row.__resolvedStatusDetail = resolvedStatus.detail;
+      row.__effectiveColor = getAudienceRowEffectiveColor(row);
+      if(row.__sortMeta && typeof row.__sortMeta === 'object'){
+        row.__sortMeta.colorPriority = getAudienceSortColorPriority(row);
+      }
+      rows.push(row);
+    });
+  });
+  return rows;
+}
+
 function getAudienceRowsRawCached(){
   const viewerKey = getAudienceViewerCacheKey();
   if(
@@ -19679,63 +20038,9 @@ function getAudienceRowsRawCached(){
   ){
     return audienceRowsRawCache;
   }
-  const rows = [];
-  const closedStatusLookup = buildAudienceClosedStatusLookup();
-  AppState.clients.forEach((c, ci)=>{
-    if(!canViewClient(c)) return;
-    c.dossiers.forEach((d, di)=>{
-      let procKeys = Object.keys(d.procedureDetails || {});
-      if(!procKeys.length){
-        procKeys = normalizeProcedures(d);
-      }
-      if(!procKeys.length) return;
-      procKeys.forEach(procKey=>{
-        if(!isAudienceProcedure(procKey)) return;
-        const p = getAudienceProcedure(ci, di, procKey);
-        const key = makeAudienceDraftKey(ci, di, procKey);
-        const draft = audienceDraft[key] || {};
-        if(!hasAudienceProcedureData(p, draft, d)) return;
-        const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || d?.referenceClient || '').trim();
-        const refDossier = normalizeReferenceForAudienceLookup(draftReferenceValue);
-        const procedureNorm = String(procKey || '').trim().toLowerCase();
-        const debiteurNorm = String(d?.debiteur || '').trim().toLowerCase().replace(/\s+/g, ' ');
-        const duplicateKey = (refDossier && procedureNorm && debiteurNorm)
-          ? `${procedureNorm}__${debiteurNorm}__${refDossier}`
-          : '';
-        const audienceDateDisplay = formatAudienceDateDisplayValue(draft?.dateAudience || p?.audience || '');
-        const sortMeta = {
-          ref: refDossier,
-          parts: parseAudienceReferenceParts(refDossier),
-          client: String(c?.name || ''),
-          refClient: String(d?.referenceClient || ''),
-          debiteur: String(d?.debiteur || '')
-        };
-        const row = {
-          c,
-          d,
-          procKey,
-          p,
-          key,
-          draft,
-          ci,
-          di,
-          __dupKey: duplicateKey,
-          __procFilterKey: getAudienceProcedureFilterKey(procKey),
-          __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
-          __rowReference: refDossier,
-          __sortMeta: sortMeta,
-          __audienceDateDisplay: audienceDateDisplay
-        };
-        const resolvedStatus = resolveAudienceRowStatusSnapshot(row, closedStatusLookup);
-        row.__resolvedStatus = resolvedStatus.statut;
-        row.__resolvedStatusDetail = resolvedStatus.detail;
-        row.__effectiveColor = getAudienceRowEffectiveColor(row);
-        if(row.__sortMeta && typeof row.__sortMeta === 'object'){
-          row.__sortMeta.colorPriority = getAudienceSortColorPriority(row);
-        }
-        rows.push(row);
-      });
-    });
+  const closedStatusLookup = getAudienceClosedStatusLookupCached();
+  const rows = AppState.clients.flatMap((client, clientIndex)=>{
+    return buildAudienceRowsForClient(client, clientIndex, closedStatusLookup);
   });
   audienceRowsRawCache = rows;
   audienceRowsRawCacheVersion = audienceRowsRawDataVersion;
@@ -19979,7 +20284,7 @@ function getAudienceRowsForSidebarProjectedCached(){
   ){
     return audienceSidebarProjectionCache;
   }
-  const closedStatusLookup = buildAudienceClosedStatusLookup();
+  const closedStatusLookup = getAudienceClosedStatusLookupCached();
   const projectedRows = getAudienceRowsDedupedCached().map((row)=>{
     const audienceDateRaw = row?.draft?.dateAudience || row?.p?.audience || '';
     const parsedAudienceDate = parseDateForAge(audienceDateRaw);
@@ -20050,11 +20355,27 @@ function getAudienceRowsForRegularExport(){
 async function exportAudienceRegularXLS(){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = await buildAudienceSelectedExportDatasetAsync(null, { omitSort: true });
-    if(!dataset.rows.length){
-      alert('Cochez au moins une ligne pour exporter.');
+    const exportRows = getAudienceRowsForRegularExport();
+    if(!exportRows.length){
+      alert("Aucune ligne d'audience à exporter.");
       return;
     }
+    if(shouldPreferAudienceRegularExportCsvPath(exportRows.length)){
+      const dataset = buildAudienceSelectedExportDatasetBase(exportRows, { omitSort: true });
+      const csvBlob = await createMappedCsvBlobChunked({
+        headers: dataset.headers,
+        items: dataset.rows,
+        mapRow: (row)=>buildAudienceSelectedExportTableRow(row, {
+          omitSort: true,
+          closedStatusLookup: dataset.closedStatusLookup
+        }),
+        progressLabel: 'Export audience CSV',
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+      });
+      await saveBlobDirectOrDownload(csvBlob, 'audience_export.csv');
+      return;
+    }
+    const dataset = await buildAudienceSelectedExportDatasetAsync(exportRows, { omitSort: true });
     await exportAudienceWorkbookXlsxStyled({
       headers: dataset.headers,
       rows: dataset.tableRows,

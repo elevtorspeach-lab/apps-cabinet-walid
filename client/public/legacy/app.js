@@ -208,6 +208,7 @@ let remoteRefreshTimer = null;
 let remoteSyncRenderTimer = null;
 let remoteSyncRenderSections = new Set();
 let remoteDashboardLightRefreshPending = false;
+let remoteSectionLastRenderAt = new Map();
 let lastPingMs = null;
 let lastLiveDelayMs = null;
 let syncMetricsRenderQueued = false;
@@ -524,12 +525,26 @@ const SALLE_SIDEBAR_SESSION_RENDER_LIMIT_VERY_LARGE = 8;
 const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 60000;
 const STYLED_XLSX_MAX_ROWS = 12000;
 const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD = 40000;
+const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_LARGE = 24000;
+const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE = 12000;
 const SELECTED_EXPORT_CSV_THRESHOLD = 200;
 const SALLE_EXPORT_CSV_THRESHOLD = 250;
+const SALLE_EXPORT_CSV_THRESHOLD_LARGE = 160;
+const SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE = 80;
 const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 300;
 const LARGE_DATASET_DOSSIERS_THRESHOLD = 30000;
 const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 450;
 const ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD = 50000;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS = 900;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS = 1600;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION = Object.freeze({
+  dashboard: 2200,
+  clients: 1400,
+  suivi: 1000,
+  audience: 1100,
+  diligence: 1200,
+  salle: 2600
+});
 const SUIVI_VIRTUAL_MIN_ROWS = 40;
 const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
 const SUIVI_HEAVY_SORT_MAX_CLIENTS = 500;
@@ -1578,6 +1593,72 @@ function shouldPreferFastWorkbookPath(rowCount = 0){
   return totalRows >= 200;
 }
 
+function shouldPreferAudienceRegularExportCsvPath(rowCount = 0){
+  const totalRows = Math.max(0, Number(rowCount) || 0);
+  if(totalRows <= 0) return false;
+  if(totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD) return true;
+  if(isVeryLargeLiveSyncMode()){
+    return totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE;
+  }
+  if(isLargeDatasetMode() || heavyUiOperationCount > 0){
+    return totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_LARGE;
+  }
+  return false;
+}
+
+function shouldPreferSalleExportCsvPath(rowCount = 0){
+  const totalRows = Math.max(0, Number(rowCount) || 0);
+  if(totalRows <= 0) return false;
+  if(totalRows >= SALLE_EXPORT_CSV_THRESHOLD) return true;
+  if(isVeryLargeLiveSyncMode()){
+    return totalRows >= SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE;
+  }
+  if(isLargeDatasetMode() || heavyUiOperationCount > 0){
+    return totalRows >= SALLE_EXPORT_CSV_THRESHOLD_LARGE;
+  }
+  return false;
+}
+
+function getRemoteSyncSectionMinInterval(sectionKey, options = {}){
+  if(options?.livePatch !== true) return 0;
+  const safeKey = String(sectionKey || '').trim();
+  if(!safeKey) return 0;
+  let baseDelay = 0;
+  if(isVeryLargeLiveSyncMode()){
+    baseDelay = REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS;
+  }else if(isLargeDatasetMode()){
+    baseDelay = REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS;
+  }
+  const sectionDelay = Number(REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION[safeKey]) || 0;
+  if(safeKey === 'dashboard' && remoteDashboardLightRefreshPending){
+    return Math.max(baseDelay, sectionDelay);
+  }
+  return Math.max(baseDelay, sectionDelay);
+}
+
+function getRemoteSyncRenderCooldownDelay(sectionKeys = [], options = {}){
+  const keys = sectionKeys instanceof Set ? [...sectionKeys] : (Array.isArray(sectionKeys) ? sectionKeys : []);
+  const now = Date.now();
+  return keys.reduce((maxDelay, key)=>{
+    const safeKey = String(key || '').trim();
+    if(!safeKey) return maxDelay;
+    const minIntervalMs = getRemoteSyncSectionMinInterval(safeKey, options);
+    if(minIntervalMs <= 0) return maxDelay;
+    const lastRenderedAt = Number(remoteSectionLastRenderAt.get(safeKey) || 0);
+    const remaining = minIntervalMs - (now - lastRenderedAt);
+    return Math.max(maxDelay, remaining > 0 ? remaining : 0);
+  }, 0);
+}
+
+function markRemoteSyncSectionsRendered(sectionKeys = []){
+  const now = Date.now();
+  (Array.isArray(sectionKeys) ? sectionKeys : []).forEach((key)=>{
+    const safeKey = String(key || '').trim();
+    if(!safeKey) return;
+    remoteSectionLastRenderAt.set(safeKey, now);
+  });
+}
+
 function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   const visibleKeys = new Set(getVisibleDeferredSectionKeys());
   const requestedKeys = Array.isArray(sectionKeys) && sectionKeys.length
@@ -1592,34 +1673,42 @@ function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   if(shouldRender('dashboard')){
     const lightRefresh = remoteDashboardLightRefreshPending;
     remoteDashboardLightRefreshPending = false;
-    if(!queueDeferredRemoteSectionRender('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), 50)){
+    if(lightRefresh && isVeryLargeLiveSyncMode() && typeof renderDashboardLiveLite === 'function'){
+      renderDashboardLiveLite();
+    }else if(!queueDeferredRemoteSectionRender('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), 50)){
       renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {});
     }
+    markRemoteSyncSectionsRendered(['dashboard']);
   }
   if(shouldRender('clients')){
     if(!queueDeferredRemoteSectionRender('clients', ()=>renderClients(), 50)){
       renderClients();
     }
+    markRemoteSyncSectionsRendered(['clients']);
   }
   if(shouldRender('suivi')){
     if(!queueDeferredRemoteSectionRender('suivi', ()=>renderSuivi(), 70)){
       renderSuivi();
     }
+    markRemoteSyncSectionsRendered(['suivi']);
   }
   if(shouldRender('audience')){
     if(!queueDeferredRemoteSectionRender('audience', ()=>renderAudience(), 70)){
       renderAudience();
     }
+    markRemoteSyncSectionsRendered(['audience']);
   }
   if(shouldRender('diligence')){
     if(!queueDeferredRemoteSectionRender('diligence', ()=>renderDiligence(), 70)){
       renderDiligence();
     }
+    markRemoteSyncSectionsRendered(['diligence']);
   }
   if(shouldRender('salle')){
     if(!queueDeferredRemoteSectionRender('salle', ()=>renderSalle(), 80)){
       renderSalle();
     }
+    markRemoteSyncSectionsRendered(['salle']);
   }
   if(shouldRender('equipe')) renderEquipe();
   if(shouldRender('recycle')) renderRecycleBin();
@@ -1646,7 +1735,9 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
     if(safeKey) remoteSyncRenderSections.add(safeKey);
   });
   if(!remoteSyncRenderSections.size) return;
-  const delayMs = getAdaptiveUiBatchDelay(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, {
+  const cooldownDelay = getRemoteSyncRenderCooldownDelay(remoteSyncRenderSections, options);
+  const baseDelay = Math.max(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, cooldownDelay);
+  const delayMs = getAdaptiveUiBatchDelay(baseDelay, {
     ultraLargeDatasetExtraMs: 900,
     largeDatasetExtraMs: 180,
     busyExtraMs: 320,
@@ -2286,12 +2377,21 @@ function finalizeRemoteStateUpdateLocally(options = {}){
     includeAudience: false
   }).filter(section=>!refreshSections.includes(section));
   if(options.livePatch === true && hasAudienceImpact && isVeryLargeLiveSyncMode()){
-    if(secondaryRefreshSections.includes('dashboard')){
+    if(refreshSections.includes('dashboard') || secondaryRefreshSections.includes('dashboard')){
       remoteDashboardLightRefreshPending = true;
+    }
+    const salleIndex = refreshSections.indexOf('salle');
+    if(salleIndex !== -1){
+      refreshSections.splice(salleIndex, 1);
+      if(!secondaryRefreshSections.includes('salle')){
+        secondaryRefreshSections.push('salle');
+      }
     }
     for(let index = secondaryRefreshSections.length - 1; index >= 0; index -= 1){
       if(secondaryRefreshSections[index] === 'salle'){
-        secondaryRefreshSections.splice(index, 1);
+        if(!isDeferredRenderSectionVisible('salle')){
+          secondaryRefreshSections.splice(index, 1);
+        }
       }
     }
   }
@@ -2317,9 +2417,10 @@ function finalizeRemoteStateUpdateLocally(options = {}){
   }else{
     markDeferredRenderDirty(...refreshSections, ...secondaryRefreshSections);
   }
-  queueRemoteSyncRender(refreshSections);
+  queueRemoteSyncRender(refreshSections, { livePatch: options.livePatch === true });
   if(secondaryRefreshSections.length){
     queueRemoteSyncRender(secondaryRefreshSections, {
+      livePatch: options.livePatch === true,
       delayMs: getAdaptiveUiBatchDelay(250, {
         largeDatasetExtraMs: 450,
         busyExtraMs: 650,
@@ -8591,61 +8692,92 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
     }
 
     const headers = ['Client', 'Adversaire', 'N° Dossier', 'Juge', 'Instruction', 'Statut', 'Ordonnance', 'Sort'];
-    const rows = [];
+    const sessionEntries = [];
     let dateAudience = '';
     const tribunalLabelsRaw = [];
-    [...judgeMap.entries()]
-      .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
-      .forEach(([judgeName, sessions])=>{
+    const judgeEntries = [...judgeMap.entries()]
+      .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }));
+    await runChunked(judgeEntries, async ([judgeName, sessions])=>{
         const visibleSessions = sessions
           .filter(s=>isSalleSessionMatchingTribunal(s))
           .filter(s=>isSalleSessionMatchingDate(s))
           .sort((a, b)=>(parseDateForAge(b.date)?.getTime() || 0) - (parseDateForAge(a.date)?.getTime() || 0));
-        visibleSessions
-          .forEach(s=>{
+        await runChunked(visibleSessions, async (s)=>{
             const maybeDate = String(s?.date || '').trim();
             if(!dateAudience && maybeDate && maybeDate !== '-') dateAudience = maybeDate;
             const tribunalText = String(s?.tribunal || '').trim();
             if(tribunalText && tribunalText !== '-') tribunalLabelsRaw.push(tribunalText);
-            rows.push([
-              s.client || '-',
-              s.debiteur || '-',
-              s.ref || '-',
-              judgeName || '-',
-              s.instruction || '-',
-              s.statut || 'En cours',
-              s.ordonnance || '',
-              ''
-            ]);
-          });
-      });
-    if(!rows.length){
-      rows.push(['-', '-', '-', '-', '-', '-', '-', '-']);
-    }
+            sessionEntries.push({
+              judgeName: judgeName || '-',
+              session: s
+            });
+        }, {
+          chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+        });
+    }, {
+      chunkSize: 1
+    });
     const tribunalClusterState = buildTribunalClusterStateFromLabels(tribunalLabelsRaw);
     const tribunalLabels = tribunalClusterState.options.map(v=>String(v?.label || '').trim()).filter(Boolean);
     const tribunalLabel = tribunalLabels.length ? tribunalLabels.join(' / ') : '-';
 
     const safeSalle = salleLabel.replace(/[^\w\-]+/g, '_');
     const safeDay = dayKey.replace(/[^\w\-]+/g, '_');
-    if(rows.length >= SALLE_EXPORT_CSV_THRESHOLD){
+    if(shouldPreferSalleExportCsvPath(sessionEntries.length)){
       const csvHeaders = ['Salle', 'Jour', 'Date audience', 'Tribunal', ...headers];
       const csvBlob = await createMappedCsvBlobChunked({
         headers: csvHeaders,
-        items: rows,
-        mapRow: (row)=>[
-          salleLabel || '-',
-          dayKey || '-',
-          dateAudience || '-',
-          tribunalLabel || '-',
-          ...(Array.isArray(row) ? row : [])
-        ],
+        items: sessionEntries.length ? sessionEntries : [null],
+        mapRow: (entry)=>{
+          if(!entry){
+            return [
+              salleLabel || '-',
+              dayKey || '-',
+              dateAudience || '-',
+              tribunalLabel || '-',
+              '-', '-', '-', '-', '-', '-', '-', '-'
+            ];
+          }
+          const session = entry.session || {};
+          return [
+            salleLabel || '-',
+            dayKey || '-',
+            dateAudience || '-',
+            tribunalLabel || '-',
+            session.client || '-',
+            session.debiteur || '-',
+            session.ref || '-',
+            entry.judgeName || '-',
+            session.instruction || '-',
+            session.statut || 'En cours',
+            session.ordonnance || '',
+            ''
+          ];
+        },
         progressLabel: 'Export salle CSV',
-        chunkSize: 120
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 80
       });
       await saveBlobDirectOrDownload(csvBlob, `audiences_${safeSalle || 'salle'}_${safeDay || 'jour'}.csv`);
       return;
     }
+
+    const rows = sessionEntries.length
+      ? await mapChunked(sessionEntries, async (entry)=>{
+        const session = entry.session || {};
+        return [
+          session.client || '-',
+          session.debiteur || '-',
+          session.ref || '-',
+          entry.judgeName || '-',
+          session.instruction || '-',
+          session.statut || 'En cours',
+          session.ordonnance || '',
+          ''
+        ];
+      }, {
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+      })
+      : [['-', '-', '-', '-', '-', '-', '-', '-']];
 
     await exportAudienceWorkbookXlsxStyled({
       headers,
@@ -20223,14 +20355,27 @@ function getAudienceRowsForRegularExport(){
 async function exportAudienceRegularXLS(){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
-    const dataset = await buildAudienceSelectedExportDatasetAsync(
-      getAudienceRowsForRegularExport(),
-      { omitSort: true }
-    );
-    if(!dataset.rows.length){
+    const exportRows = getAudienceRowsForRegularExport();
+    if(!exportRows.length){
       alert("Aucune ligne d'audience à exporter.");
       return;
     }
+    if(shouldPreferAudienceRegularExportCsvPath(exportRows.length)){
+      const dataset = buildAudienceSelectedExportDatasetBase(exportRows, { omitSort: true });
+      const csvBlob = await createMappedCsvBlobChunked({
+        headers: dataset.headers,
+        items: dataset.rows,
+        mapRow: (row)=>buildAudienceSelectedExportTableRow(row, {
+          omitSort: true,
+          closedStatusLookup: dataset.closedStatusLookup
+        }),
+        progressLabel: 'Export audience CSV',
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+      });
+      await saveBlobDirectOrDownload(csvBlob, 'audience_export.csv');
+      return;
+    }
+    const dataset = await buildAudienceSelectedExportDatasetAsync(exportRows, { omitSort: true });
     await exportAudienceWorkbookXlsxStyled({
       headers: dataset.headers,
       rows: dataset.tableRows,
@@ -21299,4 +21444,8 @@ function renderCustomProcedures(){
 }
 
 
-document.addEventListener('DOMContentLoaded', initApplication);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApplication);
+} else {
+  initApplication();
+}

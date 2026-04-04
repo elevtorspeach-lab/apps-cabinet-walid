@@ -1,0 +1,82 @@
+/* Offline-safe icon glyphs.
+   This keeps the UI readable without relying on a remote icon font. */
+i[class^="fa-"],
+i[class*=" fa-"]{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:1.25em;
+  min-width:1.25em;
+  font-style:normal;
+  font-family:inherit;
+  line-height:1;
+  vertical-align:-0.12em;
+}
+
+i[class^="fa-"]::before,
+i[class*=" fa-"]::before{
+  content:"•";
+  font-size:1em;
+  font-weight:700;
+  font-family:"Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol","Noto Sans Symbols 2","Noto Sans Symbols",sans-serif;
+  color:currentColor;
+  opacity:1;
+}
+
+i.fa-regular::before,
+i.fa-solid::before{
+  content:"";
+}
+
+i.fa-2x::before{
+  font-size:2em;
+}
+
+i.fa-shield-halved::before{content:"🛡";}
+i.fa-gavel::before{content:"⚖";}
+i.fa-user::before{content:"👤";}
+i.fa-key::before{content:"🔑";}
+i.fa-file-lines::before{content:"📄";}
+i.fa-file-import::before{content:"📥";}
+i.fa-chart-pie::before{content:"◔";}
+i.fa-users::before{content:"👥";}
+i.fa-folder-plus::before{content:"📁";}
+i.fa-folder-open::before{content:"📂";}
+i.fa-list-check::before{content:"☑";}
+i.fa-door-open::before{content:"🚪";}
+i.fa-user-group::before{content:"👪";}
+i.fa-trash-arrow-up::before{content:"↩";}
+i.fa-right-from-bracket::before{content:"⇦";}
+i.fa-chevron-left::before{content:"‹";}
+i.fa-chevron-right::before{content:"›";}
+i.fa-spinner::before{content:"◌";}
+i.fa-check::before{content:"✓";}
+i.fa-hourglass-half::before{content:"⏳";}
+i.fa-triangle-exclamation::before{content:"⚠";}
+i.fa-calendar-days::before{content:"📅";}
+i.fa-floppy-disk::before{content:"💾";}
+i.fa-square-check::before{content:"☑";}
+i.fa-check-double::before{content:"✔";}
+i.fa-eraser::before{content:"⌫";}
+i.fa-file-export::before{content:"📤";}
+i.fa-filter::before{content:"⚲";}
+i.fa-clipboard-list::before{content:"📋";}
+i.fa-users-viewfinder::before{content:"⊚";}
+i.fa-plus::before{content:"+";}
+i.fa-user-plus::before{content:"👤";}
+i.fa-rotate-left::before{content:"↺";}
+i.fa-magnifying-glass::before{content:"🔍";}
+i.fa-file-circle-plus::before{content:"⊕";}
+i.fa-cloud-arrow-up::before{content:"☁";}
+i.fa-xmark::before{content:"✕";}
+i.fa-copy::before{content:"⧉";}
+i.fa-rotate::before{content:"↻";}
+i.fa-eye::before{content:"👁";}
+i.fa-pen::before{content:"✎";}
+i.fa-layer-group::before{content:"▤";}
+i.fa-trash::before{content:"🗑";}
+i.fa-trash-can::before{content:"🗑";}
+i.fa-calendar-check::before{content:"🗓";}
+i.fa-clock-rotate-left::before{content:"🕘";}
+i.fa-file-arrow-down::before{content:"📩";}
+i.fa-paperclip::before{content:"📎";}
