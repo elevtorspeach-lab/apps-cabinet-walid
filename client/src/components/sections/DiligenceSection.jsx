@@ -82,12 +82,17 @@ function DiligenceSection() {
                   <th>Ordonnance</th>
                   <th>Notification N°</th>
                   <th>Sort notification</th>
-                  <th>Certificat non appel / Lettre Rec</th>
-                  <th>Execution N° / Curateur N°</th>
-                  <th>Ville / ORD</th>
-                  <th>Délégation / Notif curateur</th>
-                  <th>Huissier / Sort notif</th>
-                  <th>Avis curateur</th>
+                  <th>Lettre Rec</th>
+                  <th>Curateur N°</th>
+                  <th>ORD</th>
+                  <th>Notif curateur</th>
+                  <th>Sort notif</th>
+                  <th>PV Police</th>
+                  <th>Certificat non appel</th>
+                  <th>Execution N°</th>
+                  <th>Ville</th>
+                  <th>Délégation</th>
+                  <th>Huissier</th>
                   <th>Tribunal</th>
                 </tr>
               </thead>

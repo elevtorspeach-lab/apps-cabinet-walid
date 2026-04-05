@@ -156,6 +156,8 @@ let remoteAuthToken = '';
 let persistTimer = null;
 let queuedPersistPayload = null;
 let dossierPatchPersistTimer = null;
+let dossierPatchRetryTimer = null;
+let dossierPatchRetryBackoffMs = 0;
 let queuedDossierPatchEntries = new Map();
 let desktopStatePersistTimer = null;
 let desktopStatePersistInFlight = false;
@@ -209,6 +211,13 @@ let remoteSyncRenderTimer = null;
 let remoteSyncRenderSections = new Set();
 let remoteDashboardLightRefreshPending = false;
 let remoteSectionLastRenderAt = new Map();
+let pendingRemoteLiveUpdateTimer = null;
+let pendingRemoteLiveUpdateOptions = {
+  audience: false,
+  sections: new Set(),
+  secondarySections: new Set(),
+  refreshClientDropdown: false
+};
 let lastPingMs = null;
 let lastLiveDelayMs = null;
 let syncMetricsRenderQueued = false;
@@ -341,6 +350,9 @@ let editableClientsDropdownMarkupUserKey = '';
 let clientListSummaryCache = null;
 let clientListSummaryCacheVersion = -1;
 let clientListSummaryCacheUserKey = '';
+let clientClotureCountCacheValue = 0;
+let clientClotureCountCacheVersion = -1;
+let clientClotureCountCacheUserKey = '';
 let largeDatasetModeCacheValue = false;
 let largeDatasetModeCacheVersion = -1;
 let largeDatasetModeCacheUserKey = '';
@@ -374,11 +386,17 @@ let audienceErrorCountCacheVersion = -1;
 let audienceErrorCountCacheValue = 0;
 let knownJudgesCache = null;
 let knownJudgesCacheVersion = -1;
+let knownJudgesDatalistRenderKey = '';
 let salleAssignmentsVersion = 0;
 let salleAudienceMapCache = null;
 let salleAudienceMapCacheVersion = -1;
 let salleAudienceMapAssignmentsVersion = -1;
 let salleAudienceMapCacheUserKey = '';
+let filteredSalleAudienceMapCache = null;
+let filteredSalleAudienceMapCacheVersion = -1;
+let filteredSalleAudienceMapAssignmentsVersion = -1;
+let filteredSalleAudienceMapCacheUserKey = '';
+let filteredSalleAudienceMapFilterKey = '';
 let lastSalleRenderKey = '';
 let loginPostBootTimer = null;
 const dashboardMetricState = new Map();
@@ -495,7 +513,7 @@ const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
 const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 15000;
 const REMOTE_SYNC_STREAM_RETRY_BASE_MS = 2000;
 const REMOTE_SYNC_STREAM_RETRY_MAX_MS = 15000;
-const REMOTE_SYNC_RENDER_DEBOUNCE_MS = 180;
+const REMOTE_SYNC_RENDER_DEBOUNCE_MS = 320;
 const REMOTE_SYNC_RENDER_BLOCKED_RETRY_MS = 800;
 const REMOTE_APPLIED_CACHE_WRITE_LARGE_MIN_INTERVAL_MS = 2 * 60 * 1000;
 const LINKED_SECTION_RENDER_DEBOUNCE_MS = 180;
@@ -512,7 +530,8 @@ const PAGINATION_PAGE_SIZES = {
   audience: 20,
   suivi: 20,
   diligence: 20,
-  recycle: 30
+  recycle: 20,
+  equipe: 20
 };
 const IMPORT_CHUNK_SIZE = 80;
 const IMPORT_EXCEL_CHUNK_SIZE = 60;
@@ -535,15 +554,15 @@ const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 300;
 const LARGE_DATASET_DOSSIERS_THRESHOLD = 30000;
 const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 450;
 const ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD = 50000;
-const REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS = 900;
-const REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS = 1600;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS = 1200;
+const REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS = 3200;
 const REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION = Object.freeze({
-  dashboard: 2200,
-  clients: 1400,
-  suivi: 1000,
-  audience: 1100,
-  diligence: 1200,
-  salle: 2600
+  dashboard: 4200,
+  clients: 2600,
+  suivi: 2400,
+  audience: 2600,
+  diligence: 2600,
+  salle: 5200
 });
 const SUIVI_VIRTUAL_MIN_ROWS = 40;
 const SUIVI_DEFAULT_SORT_MAX_ROWS = 60000;
@@ -584,7 +603,7 @@ const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 5000;
 const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 8000;
 const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 25000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 20000;
-const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 2200;
+const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 4000 : 8000;
 const REMOTE_STATE_PAGED_LOAD_CLIENT_PAGE_SIZE = IS_REMOTE_WEB_HOST ? 25 : 40;
 const REMOTE_STATE_PAGED_LOAD_MAX_PAGES = 2000;
 const REMOTE_STATE_CHUNK_UPLOAD_MIN_LENGTH = IS_REMOTE_WEB_HOST ? 350000 : 1200000;
@@ -603,6 +622,7 @@ const AUDIENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/audience-filter
 const SUIVI_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/suivi-filter.worker.js' : '/workers/suivi-filter.worker.js';
 const DILIGENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/diligence-filter.worker.js' : '/workers/diligence-filter.worker.js';
 const EXPORT_XLSX_WORKER_URL = IS_FILE_PROTOCOL ? './workers/export-xlsx.worker.js' : '/workers/export-xlsx.worker.js';
+const SALLE_SIDEBAR_WORKER_URL = IS_FILE_PROTOCOL ? './workers/salle-sidebar.worker.js' : '/workers/salle-sidebar.worker.js';
 let xlsxLoadPromise = null;
 let excelJsLoadPromise = null;
 let audienceExportTemplateBase64ScriptPromise = null;
@@ -615,6 +635,7 @@ let creationDropdownRenderTimer = null;
 let creationDropdownRenderSeq = 0;
 let dashboardDeferredRenderTimer = null;
 let dashboardDeferredRenderSeq = 0;
+let sectionRenderDepthByKey = new Map();
 let audienceFilterWorker = null;
 let audienceFilterWorkerFailed = false;
 let audienceFilterRequestSeq = 0;
@@ -637,6 +658,9 @@ let diligenceFilterRequestSeq = 0;
 let exportXlsxWorker = null;
 let exportXlsxWorkerFailed = false;
 let exportXlsxWorkerRequestSeq = 0;
+let salleSidebarWorker = null;
+let salleSidebarWorkerFailed = false;
+let salleSidebarWorkerRequestSeq = 0;
 const SALLE_WEEKDAY_OPTIONS = [
   { key: 'lundi', label: 'Lundi' },
   { key: 'mardi', label: 'Mardi' },
@@ -1122,6 +1146,8 @@ function invalidateDerivedCaches(options = {}){
   const preserveClientAccessCaches = options.preserveClientAccessCaches === true;
   const preserveClientListSummary = options.preserveClientListSummary === true;
   const preserveDashboardSnapshot = options.preserveDashboardSnapshot === true;
+  const preserveDashboardAudienceMetrics = options.preserveDashboardAudienceMetrics === true;
+  const preserveKnownJudgesCache = options.preserveKnownJudgesCache === true;
   dossierDataVersion += 1;
   if(audience) audienceRowsRawDataVersion += 1;
   backgroundDataWarmupVersion = -1;
@@ -1137,15 +1163,20 @@ function invalidateDerivedCaches(options = {}){
     clientListSummaryCache = null;
     clientListSummaryCacheVersion = -1;
     clientListSummaryCacheUserKey = '';
+    clientClotureCountCacheValue = 0;
+    clientClotureCountCacheVersion = -1;
+    clientClotureCountCacheUserKey = '';
   }
   if(!preserveDashboardSnapshot){
     dashboardSnapshotCache = null;
     dashboardSnapshotCacheVersion = -1;
     dashboardSnapshotCacheUserKey = '';
   }
-  dashboardAudienceMetricsCache = null;
-  dashboardAudienceMetricsCacheVersion = -1;
-  dashboardAudienceMetricsCacheUserKey = '';
+  if(!preserveDashboardAudienceMetrics){
+    dashboardAudienceMetricsCache = null;
+    dashboardAudienceMetricsCacheVersion = -1;
+    dashboardAudienceMetricsCacheUserKey = '';
+  }
   if(!preserveBaseRowCaches){
     suiviBaseRowsCache = null;
   }
@@ -1206,11 +1237,19 @@ function invalidateDerivedCaches(options = {}){
   audienceClosedStatusLookupCacheVersion = -1;
   audienceExactSearchIndexCacheInput = null;
   audienceExactSearchIndexCacheOutput = null;
-  knownJudgesCache = null;
-  knownJudgesCacheVersion = -1;
+  if(!preserveKnownJudgesCache){
+    knownJudgesCache = null;
+    knownJudgesCacheVersion = -1;
+    knownJudgesDatalistRenderKey = '';
+  }
   salleAudienceMapCache = null;
   salleAudienceMapCacheVersion = -1;
   salleAudienceMapCacheUserKey = '';
+  filteredSalleAudienceMapCache = null;
+  filteredSalleAudienceMapCacheVersion = -1;
+  filteredSalleAudienceMapAssignmentsVersion = -1;
+  filteredSalleAudienceMapCacheUserKey = '';
+  filteredSalleAudienceMapFilterKey = '';
   lastSalleRenderKey = '';
   if(!preserveBaseRowCaches){
     audienceRowsRawCache = null;
@@ -1232,8 +1271,16 @@ function invalidateDerivedCaches(options = {}){
   audienceMismatchRefClientSetCacheOutput = new Set();
 }
 
-function markAudienceRowsCacheDirty(){
-  invalidateDerivedCaches({ audience: true });
+function markAudienceRowsCacheDirty(options = {}){
+  invalidateDerivedCaches({
+    audience: true,
+    preserveBaseRowCaches: options.preserveBaseRowCaches === true,
+    preserveClientAccessCaches: options.preserveClientAccessCaches === true,
+    preserveClientListSummary: options.preserveClientListSummary === true,
+    preserveDashboardSnapshot: options.preserveDashboardSnapshot === true,
+    preserveDashboardAudienceMetrics: options.preserveDashboardAudienceMetrics === true,
+    preserveKnownJudgesCache: options.preserveKnownJudgesCache === true
+  });
   audienceErrorRowsCacheInput = null;
   audienceErrorRowsCacheOutput = [];
   audienceSelectedExportRowsCacheInput = null;
@@ -1285,6 +1332,12 @@ function invalidateSalleAssignmentsCaches(){
   salleAudienceMapCacheVersion = -1;
   salleAudienceMapAssignmentsVersion = -1;
   salleAudienceMapCacheUserKey = '';
+  filteredSalleAudienceMapCache = null;
+  filteredSalleAudienceMapCacheVersion = -1;
+  filteredSalleAudienceMapAssignmentsVersion = -1;
+  filteredSalleAudienceMapCacheUserKey = '';
+  filteredSalleAudienceMapFilterKey = '';
+  knownJudgesDatalistRenderKey = '';
   lastSalleRenderKey = '';
 }
 
@@ -1296,7 +1349,14 @@ function handleDossierDataChange(options = {}){
   const hasAudienceImpact = options.audience === true;
   const rerenderLinked = options.rerenderLinked === true;
   if(hasAudienceImpact){
-    markAudienceRowsCacheDirty();
+    markAudienceRowsCacheDirty({
+      preserveBaseRowCaches: options.preserveBaseRowCaches === true,
+      preserveClientAccessCaches: options.preserveClientAccessCaches === true,
+      preserveClientListSummary: options.preserveClientListSummary === true,
+      preserveDashboardSnapshot: options.preserveDashboardSnapshot === true,
+      preserveDashboardAudienceMetrics: options.preserveDashboardAudienceMetrics === true,
+      preserveKnownJudgesCache: options.preserveKnownJudgesCache === true
+    });
   }else{
     invalidateDerivedCaches({
       audience: false,
@@ -1577,7 +1637,10 @@ function isUltraLargeDatasetMode(){
 }
 
 function isVeryLargeLiveSyncMode(){
-  return isUltraLargeDatasetMode() || (isLargeDatasetMode() && getVisibleClients().length >= 500);
+  if(isUltraLargeDatasetMode()) return true;
+  if(!isLargeDatasetMode()) return false;
+  if(remoteSyncStreamConnected || hasRemoteAuthSession()) return true;
+  return getVisibleClients().length >= 250 || getVisibleDossierCount() >= 35000;
 }
 
 function shouldPreferFastWorkbookPath(rowCount = 0){
@@ -1668,50 +1731,50 @@ function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   const shouldUseDeferredHeavyRender = isLargeDatasetMode() || importInProgress || heavyUiOperationCount > 0;
   const queueDeferredRemoteSectionRender = (sectionKey, renderFn, delayMs = 60)=>{
     if(!shouldUseDeferredHeavyRender) return false;
-    return scheduleDeferredSectionRender(sectionKey, renderFn, { delayMs });
+    return scheduleDeferredSectionRender(sectionKey, ()=>runSectionRenderSafely(sectionKey, renderFn, { delayMs }), { delayMs });
   };
   if(shouldRender('dashboard')){
     const lightRefresh = remoteDashboardLightRefreshPending;
     remoteDashboardLightRefreshPending = false;
     if(lightRefresh && isVeryLargeLiveSyncMode() && typeof renderDashboardLiveLite === 'function'){
-      renderDashboardLiveLite();
+      runSectionRenderSafely('dashboard', ()=>renderDashboardLiveLite(), { delayMs: 50 });
     }else if(!queueDeferredRemoteSectionRender('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), 50)){
-      renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {});
+      runSectionRenderSafely('dashboard', ()=>renderDashboard(lightRefresh ? { includeAudienceMetrics: false } : {}), { delayMs: 50 });
     }
     markRemoteSyncSectionsRendered(['dashboard']);
   }
   if(shouldRender('clients')){
     if(!queueDeferredRemoteSectionRender('clients', ()=>renderClients(), 50)){
-      renderClients();
+      runSectionRenderSafely('clients', ()=>renderClients(), { delayMs: 50 });
     }
     markRemoteSyncSectionsRendered(['clients']);
   }
   if(shouldRender('suivi')){
     if(!queueDeferredRemoteSectionRender('suivi', ()=>renderSuivi(), 70)){
-      renderSuivi();
+      runSectionRenderSafely('suivi', ()=>renderSuivi(), { delayMs: 70 });
     }
     markRemoteSyncSectionsRendered(['suivi']);
   }
   if(shouldRender('audience')){
     if(!queueDeferredRemoteSectionRender('audience', ()=>renderAudience(), 70)){
-      renderAudience();
+      runSectionRenderSafely('audience', ()=>renderAudience(), { delayMs: 70 });
     }
     markRemoteSyncSectionsRendered(['audience']);
   }
   if(shouldRender('diligence')){
     if(!queueDeferredRemoteSectionRender('diligence', ()=>renderDiligence(), 70)){
-      renderDiligence();
+      runSectionRenderSafely('diligence', ()=>renderDiligence(), { delayMs: 70 });
     }
     markRemoteSyncSectionsRendered(['diligence']);
   }
   if(shouldRender('salle')){
     if(!queueDeferredRemoteSectionRender('salle', ()=>renderSalle(), 80)){
-      renderSalle();
+      runSectionRenderSafely('salle', ()=>renderSalle(), { delayMs: 80 });
     }
     markRemoteSyncSectionsRendered(['salle']);
   }
-  if(shouldRender('equipe')) renderEquipe();
-  if(shouldRender('recycle')) renderRecycleBin();
+  if(shouldRender('equipe')) runSectionRenderSafely('equipe', ()=>renderEquipe(), { delayMs: 80 });
+  if(shouldRender('recycle')) runSectionRenderSafely('recycle', ()=>renderRecycleBin(), { delayMs: 80 });
   if(shouldRender('creation')) updateClientDropdown();
 }
 
@@ -1738,9 +1801,9 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
   const cooldownDelay = getRemoteSyncRenderCooldownDelay(remoteSyncRenderSections, options);
   const baseDelay = Math.max(Number(options.delayMs) || REMOTE_SYNC_RENDER_DEBOUNCE_MS, cooldownDelay);
   const delayMs = getAdaptiveUiBatchDelay(baseDelay, {
-    ultraLargeDatasetExtraMs: 900,
-    largeDatasetExtraMs: 180,
-    busyExtraMs: 320,
+    ultraLargeDatasetExtraMs: 1800,
+    largeDatasetExtraMs: 260,
+    busyExtraMs: 420,
     importExtraMs: 420
   });
   if(remoteSyncRenderTimer) clearTimeout(remoteSyncRenderTimer);
@@ -1761,7 +1824,7 @@ function flushLinkedSectionRenderQueue(){
   const shouldRender = (key)=>sectionKeys.includes(key);
   if(shouldRender('dashboard')){
     if(isDeferredRenderSectionVisible('dashboard')){
-      renderDashboard();
+      runSectionRenderSafely('dashboard', ()=>renderDashboard(), { delayMs: 50 });
     }else{
       markDeferredRenderDirty('dashboard');
     }
@@ -1769,9 +1832,9 @@ function flushLinkedSectionRenderQueue(){
   if(shouldRender('audience')){
     if(isDeferredRenderSectionVisible('audience')){
       if(keepAudiencePosition){
-        renderAudienceKeepingPosition();
+        runSectionRenderSafely('audience', ()=>renderAudienceKeepingPosition(), { delayMs: 70 });
       }else{
-        renderAudience();
+        runSectionRenderSafely('audience', ()=>renderAudience(), { delayMs: 70 });
       }
     }else{
       markDeferredRenderDirty('audience');
@@ -1779,7 +1842,7 @@ function flushLinkedSectionRenderQueue(){
   }
   if(shouldRender('suivi')){
     if(isDeferredRenderSectionVisible('suivi')){
-      renderSuivi();
+      runSectionRenderSafely('suivi', ()=>renderSuivi(), { delayMs: 70 });
     }else{
       markDeferredRenderDirty('suivi');
     }
@@ -1977,6 +2040,34 @@ function applyIncrementalRemoteDossierCaches(meta){
   }
 
   if(
+    clientClotureCountCacheVersion === dossierDataVersion
+    && clientClotureCountCacheUserKey === userKey
+  ){
+    let clotureDelta = 0;
+    if(meta.action === 'create'){
+      if(meta.targetVisible){
+        clotureDelta += getDossierClotureContribution(meta.nextDossier);
+      }
+    }else if(meta.action === 'delete'){
+      if(meta.sourceVisible){
+        clotureDelta -= getDossierClotureContribution(meta.previousDossier);
+      }
+    }else if(meta.action === 'update' && meta.sourceClientId !== meta.targetClientId){
+      if(meta.sourceVisible){
+        clotureDelta -= getDossierClotureContribution(meta.previousDossier);
+      }
+      if(meta.targetVisible){
+        clotureDelta += getDossierClotureContribution(meta.nextDossier);
+      }
+    }else if(meta.action === 'update' && meta.targetVisible){
+      clotureDelta += getDossierClotureContribution(meta.nextDossier) - getDossierClotureContribution(meta.previousDossier);
+    }
+    if(clotureDelta){
+      clientClotureCountCacheValue = Math.max(0, Number(clientClotureCountCacheValue || 0) + clotureDelta);
+    }
+  }
+
+  if(
     dashboardSnapshotCache
     && dashboardSnapshotCacheVersion === dossierDataVersion
     && dashboardSnapshotCacheUserKey === userKey
@@ -2084,6 +2175,52 @@ function normalizeRemoteSyncSectionList(sectionKeys = [], options = {}){
   return [...next];
 }
 
+function buildDiligenceRelevantProcedureDetailsSnapshot(dossier){
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  const procedureNames = new Set([
+    ...normalizeProcedures(dossier),
+    ...Object.keys(details)
+  ]);
+  const snapshot = {};
+  procedureNames.forEach((procName)=>{
+    const baseProc = getDiligenceProcedureFilterValue(procName);
+    if(
+      baseProc !== 'ASS'
+      && baseProc !== 'SFDC'
+      && baseProc !== 'S/bien'
+      && baseProc !== 'Injonction'
+      && baseProc !== 'Commandement'
+    ){
+      return;
+    }
+    const procDetails = details?.[procName];
+    snapshot[procName] = procDetails && typeof procDetails === 'object'
+      ? procDetails
+      : {};
+  });
+  return snapshot;
+}
+
+function buildDiligenceRelevantDossierSignature(dossier){
+  if(!dossier || typeof dossier !== 'object') return '';
+  try{
+    return JSON.stringify({
+      referenceClient: String(dossier?.referenceClient || '').trim(),
+      debiteur: String(dossier?.debiteur || '').trim(),
+      ville: String(dossier?.ville || '').trim(),
+      procedureDetails: buildDiligenceRelevantProcedureDetailsSnapshot(dossier)
+    });
+  }catch(_){
+    return '';
+  }
+}
+
+function remoteDossierPatchAffectsDiligence(previousDossier, nextDossier){
+  return buildDiligenceRelevantDossierSignature(previousDossier) !== buildDiligenceRelevantDossierSignature(nextDossier);
+}
+
 function buildRemoteDossierRefreshOptions(meta){
   const patchMeta = meta && typeof meta === 'object' ? meta : {};
   const action = String(patchMeta.action || '').trim().toLowerCase();
@@ -2096,7 +2233,18 @@ function buildRemoteDossierRefreshOptions(meta){
     secondarySections.add('salle');
   }else{
     sections.add('suivi');
-    secondarySections.add('diligence');
+    const sourceClientId = Number(patchMeta.sourceClientId);
+    const targetClientId = Number(patchMeta.targetClientId);
+    const movedAcrossClients =
+      Number.isFinite(sourceClientId)
+      && Number.isFinite(targetClientId)
+      && sourceClientId !== targetClientId;
+    const shouldRefreshDiligence = action !== 'update'
+      || movedAcrossClients
+      || remoteDossierPatchAffectsDiligence(patchMeta.previousDossier, patchMeta.nextDossier);
+    if(shouldRefreshDiligence){
+      secondarySections.add('diligence');
+    }
   }
 
   const sourceClientId = Number(patchMeta.sourceClientId);
@@ -2107,6 +2255,7 @@ function buildRemoteDossierRefreshOptions(meta){
     && sourceClientId !== targetClientId;
 
   const shouldRefreshCounts = action === 'create' || action === 'delete' || movedAcrossClients;
+  const isInPlaceUpdate = action === 'update' && !movedAcrossClients;
   if(shouldRefreshCounts){
     secondarySections.add('dashboard');
     secondarySections.add('clients');
@@ -2116,6 +2265,8 @@ function buildRemoteDossierRefreshOptions(meta){
     livePatch: true,
     audience: patchMeta.audienceImpact === true,
     incrementalPatch: patchMeta.patchCount ? null : patchMeta,
+    preserveDashboardAudienceMetrics: isInPlaceUpdate,
+    preserveKnownJudgesCache: isInPlaceUpdate,
     sections: [...sections],
     secondarySections: [...secondarySections]
   };
@@ -2370,6 +2521,8 @@ function finalizeRemoteStateUpdateLocally(options = {}){
     : null;
   const hasAudienceImpact = options.audience === true;
   const useIncrementalCaches = !!incrementalPatch;
+  const preserveDashboardAudienceMetrics = options.preserveDashboardAudienceMetrics === true;
+  const preserveKnownJudgesCache = options.preserveKnownJudgesCache === true;
   const refreshSections = normalizeRemoteSyncSectionList(options.sections, {
     includeAudience: hasAudienceImpact
   });
@@ -2400,7 +2553,9 @@ function finalizeRemoteStateUpdateLocally(options = {}){
     preserveBaseRowCaches: useIncrementalCaches,
     preserveClientAccessCaches: useIncrementalCaches,
     preserveClientListSummary: useIncrementalCaches,
-    preserveDashboardSnapshot: useIncrementalCaches
+    preserveDashboardSnapshot: useIncrementalCaches,
+    preserveDashboardAudienceMetrics: useIncrementalCaches && preserveDashboardAudienceMetrics,
+    preserveKnownJudgesCache: useIncrementalCaches && preserveKnownJudgesCache
   });
   if(useIncrementalCaches){
     applyIncrementalRemoteDossierCaches(incrementalPatch);
@@ -2825,6 +2980,100 @@ function createXlsxBlobInWorker({ headers, rows, subtitle = '', editionLabel = '
   });
 }
 
+function createCsvBlobInWorker({ headers, rows, separator = ';' } = {}){
+  const worker = getExportXlsxWorker();
+  if(!worker) return Promise.resolve(null);
+  const requestId = ++exportXlsxWorkerRequestSeq;
+  return new Promise((resolve)=>{
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'csv-export-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      if(data.ok !== true || !data.buffer){
+        resolve(null);
+        return;
+      }
+      resolve(new Blob(
+        [data.buffer],
+        { type: 'text/csv;charset=utf-8;' }
+      ));
+    };
+    const handleError = (err)=>{
+      console.warn('CSV export worker error', err);
+      cleanup();
+      exportXlsxWorkerFailed = true;
+      if(exportXlsxWorker){
+        try{ exportXlsxWorker.terminate(); }catch(_){}
+      }
+      exportXlsxWorker = null;
+      resolve(null);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'csv-export',
+      requestId,
+      headers: Array.isArray(headers) ? headers : [],
+      rows: Array.isArray(rows) ? rows : [],
+      separator: String(separator || ';')
+    });
+  });
+}
+
+function getSalleSidebarWorker(){
+  if(salleSidebarWorkerFailed) return null;
+  if(salleSidebarWorker) return salleSidebarWorker;
+  if(typeof Worker === 'undefined') return null;
+  try{
+    salleSidebarWorker = new Worker(SALLE_SIDEBAR_WORKER_URL);
+    return salleSidebarWorker;
+  }catch(err){
+    console.warn('Salle sidebar worker indisponible', err);
+    salleSidebarWorkerFailed = true;
+    return null;
+  }
+}
+
+function runSalleSidebarWorker(payload, requestId){
+  const worker = getSalleSidebarWorker();
+  if(!worker) return Promise.resolve(null);
+  return new Promise((resolve)=>{
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'salle-sidebar-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      resolve(data.summary && typeof data.summary === 'object' ? data.summary : null);
+    };
+    const handleError = (err)=>{
+      console.warn('Salle sidebar worker error', err);
+      cleanup();
+      salleSidebarWorkerFailed = true;
+      if(salleSidebarWorker){
+        try{ salleSidebarWorker.terminate(); }catch(_){}
+      }
+      salleSidebarWorker = null;
+      resolve(null);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'salle-sidebar-summary',
+      requestId,
+      payload
+    });
+  });
+}
+
 function captureSyncStatusSnapshot(){
   const text = $('syncStatusText');
   return {
@@ -2964,7 +3213,10 @@ function shouldPreferSelectedExportCsvPath(rowCount = 0){
   const totalRows = Math.max(0, Number(rowCount) || 0);
   if(totalRows <= 0) return false;
   if(totalRows >= STYLED_XLSX_MAX_ROWS) return true;
-  return isVeryLargeLiveSyncMode() && totalRows >= SELECTED_EXPORT_CSV_THRESHOLD;
+  if(isVeryLargeLiveSyncMode()){
+    return totalRows >= Math.min(SELECTED_EXPORT_CSV_THRESHOLD, 80);
+  }
+  return isLargeDatasetMode() && totalRows >= Math.min(SELECTED_EXPORT_CSV_THRESHOLD, 140);
 }
 
 function getRenderForSection(section){
@@ -3954,6 +4206,8 @@ function getRemoteSaveTimeoutMs(pathname, body){
   if(safePath === '/state/dossiers'){
     const action = String(body?.action || '').trim().toLowerCase();
     if(action === 'update' || action === 'delete'){
+      if(isUltraLargeDatasetMode()) return baseTimeout + 55000;
+      if(isLargeDatasetMode()) return baseTimeout + 28000;
       return baseTimeout + 8000;
     }
   }
@@ -3964,6 +4218,8 @@ function getRemoteSaveTimeoutMs(pathname, body){
       return action === 'update' || action === 'delete';
     });
     if(safeOnly){
+      if(isUltraLargeDatasetMode()) return baseTimeout + 70000;
+      if(isLargeDatasetMode()) return baseTimeout + 36000;
       return baseTimeout + 10000;
     }
   }
@@ -3987,6 +4243,16 @@ function shouldRetryPersistRequest(pathname, body, error){
     });
   }
   return false;
+}
+
+function isRecoverableDossierPersistFailure(error){
+  const message = String(error?.message || error || '').trim().toLowerCase();
+  const name = String(error?.name || '').trim();
+  return name === 'AbortError'
+    || message.includes('abort')
+    || message.includes('networkerror')
+    || message.includes('failed to fetch')
+    || message.includes('load failed');
 }
 
 function hasRemoteAuthSession(){
@@ -4034,7 +4300,7 @@ async function loginRemoteSession(username, password){
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
-    }, API_AUTH_LOGIN_TIMEOUT_MS);
+    }, getApiAuthLoginTimeoutMs());
     if(res.status === 401){
       remoteServerReachable = true;
       clearRemoteAuthSession();
@@ -4465,6 +4731,80 @@ function shouldDeferHeavySectionRender(rowCount = 0, options = {}){
   return totalRows >= 1200;
 }
 
+function scheduleSectionRenderRetry(sectionKey, renderFn, options = {}){
+  const safeKey = String(sectionKey || '').trim();
+  if(typeof renderFn !== 'function' || !safeKey) return false;
+  const delayMs = Math.max(
+    80,
+    Number(options.delayMs) || getPrimaryViewDeferredRenderDelay(safeKey) || 120
+  );
+  if(scheduleDeferredSectionRender(safeKey, renderFn, {
+    delayMs,
+    timeoutMs: Math.max(1800, delayMs + 1200)
+  })){
+    return true;
+  }
+  setTimeout(()=>{
+    try{
+      renderFn();
+    }catch(err){
+      console.warn(`Rendu différé impossible pour ${safeKey}`, err);
+    }
+  }, delayMs);
+  return true;
+}
+
+function runSectionRenderSafely(sectionKey, renderFn, options = {}){
+  const safeKey = String(sectionKey || '').trim();
+  if(typeof renderFn !== 'function'){
+    return false;
+  }
+  if(!safeKey){
+    renderFn();
+    return true;
+  }
+  const currentDepth = Number(sectionRenderDepthByKey.get(safeKey) || 0);
+  if(currentDepth > 0){
+    markDeferredRenderDirty(safeKey);
+    if(options.scheduleOnReentry !== false){
+      scheduleSectionRenderRetry(safeKey, ()=>runSectionRenderSafely(safeKey, renderFn, {
+        ...options,
+        scheduleOnReentry: false
+      }), {
+        delayMs: options.delayMs
+      });
+    }
+    return false;
+  }
+  sectionRenderDepthByKey.set(safeKey, currentDepth + 1);
+  try{
+    renderFn();
+    return true;
+  }catch(err){
+    const message = String(err?.message || err || '').trim();
+    const isStackOverflow = err instanceof RangeError || message.includes('Maximum call stack size exceeded');
+    if(isStackOverflow){
+      console.warn(`Boucle de rendu évitée sur ${safeKey}`, err);
+      markDeferredRenderDirty(safeKey);
+      scheduleSectionRenderRetry(safeKey, ()=>runSectionRenderSafely(safeKey, renderFn, {
+        ...options,
+        scheduleOnReentry: false
+      }), {
+        delayMs: Math.max(140, Number(options.delayMs) || 0)
+      });
+      return false;
+    }
+    throw err;
+  }finally{
+    const nextDepth = Math.max(0, Number(sectionRenderDepthByKey.get(safeKey) || 1) - 1);
+    if(nextDepth <= 0){
+      sectionRenderDepthByKey.delete(safeKey);
+    }else{
+      sectionRenderDepthByKey.set(safeKey, nextDepth);
+    }
+  }
+}
+
 function scheduleDeferredSectionRender(sectionKey, renderFn, options = {}){
   if(typeof renderFn !== 'function') return false;
   const stateMap = {
@@ -4583,15 +4923,59 @@ function getClientListSummaries(){
     name: String(client?.name || ''),
     nameLower: normalizeCaseInsensitiveSearchText(client?.name || ''),
     dossierCount: Array.isArray(client?.dossiers) ? client.dossiers.length : 0,
-    clotureCount: Array.isArray(client?.dossiers)
-      ? client.dossiers.reduce((sum, dossier)=>sum + getDossierClotureContribution(dossier), 0)
-      : 0,
     canEdit: canEditClient(client)
   }));
   clientListSummaryCache = next;
   clientListSummaryCacheVersion = dossierDataVersion;
   clientListSummaryCacheUserKey = userKey;
   return next;
+}
+
+function getClientClotureCountTotal(){
+  const userKey = getCurrentClientAccessCacheKey();
+  if(
+    clientClotureCountCacheVersion === dossierDataVersion
+    && clientClotureCountCacheUserKey === userKey
+  ){
+    return clientClotureCountCacheValue;
+  }
+  const total = getVisibleClients().reduce((sum, client)=>{
+    const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+    return sum + dossiers.reduce((clientSum, dossier)=>clientSum + getDossierClotureContribution(dossier), 0);
+  }, 0);
+  clientClotureCountCacheValue = total;
+  clientClotureCountCacheVersion = dossierDataVersion;
+  clientClotureCountCacheUserKey = userKey;
+  return total;
+}
+
+function refreshKnownJudgesDatalist(options = {}){
+  const jugeInput = $('salleJudgeInput');
+  if(!jugeInput) return;
+  const listId = 'knownJudgesList';
+  let datalist = $(listId);
+  if(!datalist){
+    datalist = document.createElement('datalist');
+    datalist.id = listId;
+    document.body.appendChild(datalist);
+  }
+  jugeInput.setAttribute('list', listId);
+  const shouldDefer = isVeryLargeLiveSyncMode() && options.force !== true && document.activeElement !== jugeInput;
+  if(shouldDefer) return;
+  const renderKey = [
+    audienceRowsRawDataVersion,
+    getCurrentClientAccessCacheKey(),
+    shouldDefer ? 'deferred' : 'ready'
+  ].join('||');
+  if(renderKey === knownJudgesDatalistRenderKey) return;
+  const known = getKnownJudges();
+  setElementHtmlWithRenderKey(
+    datalist,
+    known.map(v=>`<option value="${escapeAttr(v)}"></option>`).join(''),
+    renderKey,
+    { trustRenderKey: true }
+  );
+  knownJudgesDatalistRenderKey = renderKey;
 }
 
 function scheduleCreationDropdownRender(delayMs = 60){
@@ -5431,6 +5815,25 @@ async function createMappedCsvBlobChunked({ headers, items, mapRow, separator = 
   const list = Array.isArray(items) ? items : [];
   const mapper = typeof mapRow === 'function' ? mapRow : (value)=>value;
   const safeSeparator = String(separator || ';');
+  const useWorker = list.length >= 1000;
+  if(useWorker){
+    const mappedRows = new Array(list.length);
+    await runChunked(list, async (item, index, total)=>{
+      const row = await mapper(item, index, total);
+      mappedRows[index] = Array.isArray(row) ? row : [];
+    }, {
+      chunkSize,
+      onProgress: makeProgressReporter(progressLabel)
+    });
+    const workerBlob = await createCsvBlobInWorker({
+      headers,
+      rows: mappedRows,
+      separator: safeSeparator
+    });
+    if(workerBlob){
+      return workerBlob;
+    }
+  }
   const parts = ['\uFEFF'];
   if(Array.isArray(headers) && headers.length){
     parts.push(headers.map(escapeCsvCell).join(safeSeparator), '\r\n');
@@ -7197,7 +7600,11 @@ async function migrateUsersToSecureStorage(users){
 }
 
 async function hardenUsersOnBoot(){
-  const migration = await migrateUsersToSecureStorage(ensureManagerUser(Array.isArray(USERS) ? USERS : []));
+  USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+  if(!LOCAL_ONLY_MODE){
+    return false;
+  }
+  const migration = await migrateUsersToSecureStorage(USERS);
   USERS = ensureManagerUser(migration.users);
   if(!migration.changed) return false;
   try{
@@ -7225,6 +7632,12 @@ function showLoginError(message){
   if(!errorMsg) return;
   errorMsg.textContent = String(message || "Nom d'utilisateur ou mot de passe incorrect");
   errorMsg.style.display = 'block';
+  
+  const loginBtn = $('loginBtn');
+  if(loginBtn){
+    loginBtn.disabled = false;
+    loginBtn.innerHTML = 'Se connecter';
+  }
 }
 
 function clearLoginError(){
@@ -8252,19 +8665,24 @@ function getPrimaryViewDeferredRenderDelay(key){
 
 function refreshDeferredSectionIfNeeded(key, renderFn, options = {}){
   if(typeof renderFn !== 'function') return;
+  const safeKey = String(key || '').trim();
   const force = options.force === true;
   const include = options.include === true;
   const shouldDefer = !force
     && (isLargeDatasetMode() || importInProgress || heavyUiOperationCount > 0)
-    && ['dashboard', 'clients', 'suivi', 'audience', 'diligence', 'salle'].includes(String(key || '').trim());
+    && ['dashboard', 'clients', 'suivi', 'audience', 'diligence', 'salle'].includes(safeKey);
   if(force || include || isDeferredRenderSectionVisible(key)){
     if(shouldDefer){
-      const scheduled = scheduleDeferredSectionRender(String(key || '').trim(), ()=>renderFn({}), {
+      const scheduled = scheduleDeferredSectionRender(safeKey, ()=>runSectionRenderSafely(safeKey, ()=>renderFn({}), {
+        delayMs: getPrimaryViewDeferredRenderDelay(safeKey)
+      }), {
         delayMs: getPrimaryViewDeferredRenderDelay(key)
       });
       if(scheduled) return;
     }
-    renderFn(force ? { force: true } : {});
+    runSectionRenderSafely(safeKey, ()=>renderFn(force ? { force: true } : {}), {
+      delayMs: getPrimaryViewDeferredRenderDelay(safeKey)
+    });
     return;
   }
   markDeferredRenderDirty(key);
@@ -8612,9 +9030,178 @@ function getSalleSidebarSessionRenderLimit(){
   return Number.POSITIVE_INFINITY;
 }
 
+function buildSalleAudienceSidebarSummary(dayKey = selectedSalleDay, options = {}){
+  const targetDay = normalizeSalleWeekday(dayKey);
+  const renderLimit = Number.isFinite(Number(options.renderLimit))
+    ? Math.max(1, Number(options.renderLimit))
+    : getSalleSidebarSessionRenderLimit();
+  const tribunalFilter = String(options.tribunalFilter || filterSalleTribunal || 'all').trim() || 'all';
+  const dateFilter = String(options.dateFilter || filterSalleAudienceDate || '').trim();
+  const normalizedAssignments = Array.isArray(options.assignments)
+    ? options.assignments
+    : normalizeSalleAssignments(AppState.salleAssignments);
+  const audienceRows = Array.isArray(options.audienceRows)
+    ? options.audienceRows
+    : getAudienceRowsForSidebarProjectedCached();
+  const salleLookup = new Map();
+  const judgeTargetsByKey = new Map();
+  normalizedAssignments.forEach((row)=>{
+    if(normalizeSalleWeekday(row?.day) !== targetDay) return;
+    const salleLabel = normalizeSalleName(row?.salle || '');
+    const judgeName = normalizeJudgeName(row?.juge || '');
+    if(!salleLabel || !judgeName) return;
+    let judgeMap = salleLookup.get(salleLabel);
+    if(!judgeMap){
+      judgeMap = new Map();
+      salleLookup.set(salleLabel, judgeMap);
+    }
+    if(judgeMap.has(judgeName)) return;
+    const summary = {
+      judgeName,
+      totalSessionCount: 0,
+      hiddenSessionCount: 0,
+      sessions: []
+    };
+    judgeMap.set(judgeName, summary);
+    const judgeKey = makeJudgeMatchKey(judgeName);
+    if(!judgeKey) return;
+    const existingTargets = judgeTargetsByKey.get(judgeKey) || [];
+    existingTargets.push(summary);
+    judgeTargetsByKey.set(judgeKey, existingTargets);
+  });
+  if(!salleLookup.size) return [];
+
+  const targetJudgeKeys = [...judgeTargetsByKey.keys()];
+  const matchedJudgeTargetCache = new Map();
+  audienceRows.forEach((row)=>{
+    if(!Array.isArray(row?.judgeKeys) || !row.judgeKeys.length || !row.session) return;
+    const session = row.session;
+    if(tribunalFilter !== 'all' && String(session?.tribunalCategory || '').trim() !== tribunalFilter) return;
+    if(dateFilter && String(session?.dateKey || '').trim() !== dateFilter) return;
+    const matchedTargets = new Set();
+    row.judgeKeys.forEach((candidateKey)=>{
+      let matchedKeys = matchedJudgeTargetCache.get(candidateKey);
+      if(!matchedKeys){
+        matchedKeys = targetJudgeKeys.filter((targetJudgeKey)=>
+          candidateKey === targetJudgeKey
+          || candidateKey.includes(targetJudgeKey)
+          || targetJudgeKey.includes(candidateKey)
+        );
+        matchedJudgeTargetCache.set(candidateKey, matchedKeys);
+      }
+      matchedKeys.forEach((targetJudgeKey)=>{
+        const summaries = judgeTargetsByKey.get(targetJudgeKey) || [];
+        summaries.forEach((summary)=>matchedTargets.add(summary));
+      });
+    });
+    matchedTargets.forEach((summary)=>{
+      summary.totalSessionCount += 1;
+      if(summary.sessions.length < renderLimit){
+        summary.sessions.push(session);
+      }
+    });
+  });
+
+  return [...salleLookup.entries()]
+    .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
+    .map(([salleLabel, judgeMap])=>({
+      salleLabel,
+      judges: [...judgeMap.values()]
+        .map((summary)=>({
+          ...summary,
+          sessions: summary.sessions.slice().sort((a, b)=>(Number(b?.sortTime) || 0) - (Number(a?.sortTime) || 0)),
+          hiddenSessionCount: Math.max(0, Number(summary.totalSessionCount || 0) - summary.sessions.length)
+        }))
+        .sort((a, b)=>a.judgeName.localeCompare(b.judgeName, 'fr', { sensitivity: 'base' }))
+    }));
+}
+
+function renderSalleSidebarSummaryHtml(summaryRows, dayLabel){
+  const rows = Array.isArray(summaryRows) ? summaryRows : [];
+  if(!rows.length) return '';
+  const html = rows.map(({ salleLabel, judges })=>{
+    const salleEncoded = encodeURIComponent(String(salleLabel));
+    const dayEncoded = encodeURIComponent(String(selectedSalleDay));
+    const judgeHtml = judges.map((summary)=>{
+      const sessionHtml = summary.sessions.length
+        ? summary.sessions
+          .map((session)=>`<div class="sidebar-salle-session">${escapeHtml(session.date)} | ${escapeHtml(session.ref)} | ${escapeHtml(session.debiteur)}</div>`)
+          .join('')
+          + (summary.hiddenSessionCount > 0
+            ? `<div class="sidebar-salle-session">+${summary.hiddenSessionCount} audience(s) supplementaire(s)</div>`
+            : '')
+        : '<div class="sidebar-salle-session">Aucune audience</div>';
+      return `
+        <div class="sidebar-salle-item">
+          <div class="sidebar-salle-judge">${escapeHtml(summary.judgeName)}</div>
+          ${sessionHtml}
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="sidebar-salle-item">
+        <div class="sidebar-salle-title-row">
+          <div class="sidebar-salle-title">${escapeHtml(salleLabel)}</div>
+          <button type="button" class="btn-primary btn-salle-export" onclick="exportSalleAudiences('${salleEncoded}','${dayEncoded}')">
+            <i class="fa-solid fa-file-export"></i> Exporter
+          </button>
+        </div>
+        ${judgeHtml}
+      </div>
+    `;
+  }).join('');
+  return `<h4><i class="fa-solid fa-calendar-check"></i> Audiences par salle - ${escapeHtml(dayLabel)}</h4>${html}`;
+}
+
+function getFilteredSalleAudienceMap(dayKey = selectedSalleDay){
+  const targetDay = normalizeSalleWeekday(dayKey);
+  const userKey = getCurrentClientAccessCacheKey();
+  const filterKey = [
+    targetDay,
+    filterSalleTribunal,
+    filterSalleAudienceDate,
+    userKey
+  ].join('||');
+  if(
+    filteredSalleAudienceMapCache
+    && filteredSalleAudienceMapCacheVersion === audienceRowsRawDataVersion
+    && filteredSalleAudienceMapAssignmentsVersion === salleAssignmentsVersion
+    && filteredSalleAudienceMapCacheUserKey === userKey
+    && filteredSalleAudienceMapFilterKey === filterKey
+  ){
+    return filteredSalleAudienceMapCache;
+  }
+
+  const sourceMap = buildSalleAudienceMap(targetDay);
+  const filteredMap = new Map();
+  sourceMap.forEach((judgeMap, salleLabel)=>{
+    const nextJudgeMap = new Map();
+    judgeMap.forEach((sessions, judgeName)=>{
+      const visibleSessions = (Array.isArray(sessions) ? sessions : [])
+        .filter(session=>isSalleSessionMatchingTribunal(session))
+        .filter(session=>isSalleSessionMatchingDate(session))
+        .sort((a, b)=>(Number(b?.sortTime) || 0) - (Number(a?.sortTime) || 0));
+      nextJudgeMap.set(judgeName, visibleSessions);
+    });
+    filteredMap.set(salleLabel, nextJudgeMap);
+  });
+
+  filteredSalleAudienceMapCache = filteredMap;
+  filteredSalleAudienceMapCacheVersion = audienceRowsRawDataVersion;
+  filteredSalleAudienceMapAssignmentsVersion = salleAssignmentsVersion;
+  filteredSalleAudienceMapCacheUserKey = userKey;
+  filteredSalleAudienceMapFilterKey = filterKey;
+  return filteredMap;
+}
+
 function renderSidebarSalleSessions(){
   const container = $('sidebarSalleSessions');
   if(!container) return;
+  if(typeof shouldRenderSidebarSalleSessionsNow === 'function' && !shouldRenderSidebarSalleSessionsNow()){
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
   if(!currentUser){
     container.style.display = 'none';
     container.innerHTML = '';
@@ -8622,7 +9209,67 @@ function renderSidebarSalleSessions(){
   }
 
   const dayLabel = getSalleWeekdayLabel(selectedSalleDay);
-  const bySalleAndJudge = buildSalleAudienceMap(selectedSalleDay);
+  if(isVeryLargeLiveSyncMode()){
+    const requestId = ++salleSidebarWorkerRequestSeq;
+    const renderKey = [
+      audienceRowsRawDataVersion,
+      salleAssignmentsVersion,
+      selectedSalleDay,
+      filterSalleTribunal,
+      filterSalleAudienceDate,
+      getCurrentClientAccessCacheKey(),
+      'worker'
+    ].join('||');
+    setElementHtmlWithRenderKey(
+      container,
+      '<div class="diligence-empty">Chargement des audiences par salle...</div>',
+      `sidebar-salle-loading::${renderKey}`,
+      { trustRenderKey: true }
+    );
+    container.style.display = '';
+    runSalleSidebarWorker({
+      dayKey: selectedSalleDay,
+      renderLimit: getSalleSidebarSessionRenderLimit(),
+      tribunalFilter: filterSalleTribunal,
+      dateFilter: filterSalleAudienceDate,
+      assignments: normalizeSalleAssignments(AppState.salleAssignments),
+      audienceRows: getAudienceRowsForSidebarProjectedCached()
+    }, requestId).then((summary)=>{
+      if(requestId !== salleSidebarWorkerRequestSeq) return;
+      const summaryRows = Array.isArray(summary?.salles) ? summary.salles : null;
+      const fallbackRows = summaryRows || buildSalleAudienceSidebarSummary(selectedSalleDay);
+      if(!fallbackRows.length){
+        container.style.display = 'none';
+        setElementHtmlWithRenderKey(container, '', `sidebar-salle-empty::${renderKey}`, { trustRenderKey: true });
+        return;
+      }
+      setElementHtmlWithRenderKey(
+        container,
+        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel),
+        `sidebar-salle-summary::${renderKey}::${fallbackRows.length}`,
+        { trustRenderKey: true }
+      );
+      container.style.display = '';
+    }).catch(()=>{
+      if(requestId !== salleSidebarWorkerRequestSeq) return;
+      const fallbackRows = buildSalleAudienceSidebarSummary(selectedSalleDay);
+      if(!fallbackRows.length){
+        container.style.display = 'none';
+        setElementHtmlWithRenderKey(container, '', `sidebar-salle-empty::${renderKey}`, { trustRenderKey: true });
+        return;
+      }
+      setElementHtmlWithRenderKey(
+        container,
+        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel),
+        `sidebar-salle-summary::${renderKey}::fallback::${fallbackRows.length}`,
+        { trustRenderKey: true }
+      );
+      container.style.display = '';
+    });
+    return;
+  }
+
+  const bySalleAndJudge = getFilteredSalleAudienceMap(selectedSalleDay);
   const renderLimit = getSalleSidebarSessionRenderLimit();
   if(!bySalleAndJudge.size){
     container.style.display = 'none';
@@ -8638,10 +9285,7 @@ function renderSidebarSalleSessions(){
       const judgeHtml = [...judgeMap.entries()]
         .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
         .map(([judgeName, sessions])=>{
-          const visibleSessions = sessions
-            .filter(s=>isSalleSessionMatchingTribunal(s))
-            .filter(s=>isSalleSessionMatchingDate(s))
-            .sort((a, b)=>(Number(b?.sortTime) || 0) - (Number(a?.sortTime) || 0));
+          const visibleSessions = Array.isArray(sessions) ? sessions : [];
           const hiddenSessionCount = Number.isFinite(renderLimit) && visibleSessions.length > renderLimit
             ? visibleSessions.length - renderLimit
             : 0;
@@ -8684,7 +9328,7 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
   return runWithHeavyUiOperation(async ()=>{
     const salleLabel = decodeURIComponent(String(salleEncoded || ''));
     const dayKey = normalizeSalleWeekday(decodeURIComponent(String(dayEncoded || selectedSalleDay)));
-    const bySalleAndJudge = buildSalleAudienceMap(dayKey);
+    const bySalleAndJudge = getFilteredSalleAudienceMap(dayKey);
     const judgeMap = bySalleAndJudge.get(salleLabel);
     if(!judgeMap){
       alert('Salle introuvable.');
@@ -8698,10 +9342,7 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
     const judgeEntries = [...judgeMap.entries()]
       .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }));
     await runChunked(judgeEntries, async ([judgeName, sessions])=>{
-        const visibleSessions = sessions
-          .filter(s=>isSalleSessionMatchingTribunal(s))
-          .filter(s=>isSalleSessionMatchingDate(s))
-          .sort((a, b)=>(parseDateForAge(b.date)?.getTime() || 0) - (parseDateForAge(a.date)?.getTime() || 0));
+        const visibleSessions = Array.isArray(sessions) ? sessions : [];
         await runChunked(visibleSessions, async (s)=>{
             const maybeDate = String(s?.date || '').trim();
             if(!dateAudience && maybeDate && maybeDate !== '-') dateAudience = maybeDate;
@@ -8712,7 +9353,7 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
               session: s
             });
         }, {
-          chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+          chunkSize: isVeryLargeLiveSyncMode() ? 12 : (isLargeDatasetMode() ? 24 : 60)
         });
     }, {
       chunkSize: 1
@@ -8723,7 +9364,7 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 
     const safeSalle = salleLabel.replace(/[^\w\-]+/g, '_');
     const safeDay = dayKey.replace(/[^\w\-]+/g, '_');
-    if(shouldPreferSalleExportCsvPath(sessionEntries.length)){
+    if(isVeryLargeLiveSyncMode() || shouldPreferSalleExportCsvPath(sessionEntries.length)){
       const csvHeaders = ['Salle', 'Jour', 'Date audience', 'Tribunal', ...headers];
       const csvBlob = await createMappedCsvBlobChunked({
         headers: csvHeaders,
@@ -8755,7 +9396,7 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
           ];
         },
         progressLabel: 'Export salle CSV',
-        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 80
+        chunkSize: isVeryLargeLiveSyncMode() ? 12 : (isLargeDatasetMode() ? 24 : 80)
       });
       await saveBlobDirectOrDownload(csvBlob, `audiences_${safeSalle || 'salle'}_${safeDay || 'jour'}.csv`);
       return;
@@ -8890,6 +9531,12 @@ function buildAppStatePayload(){
     recycleArchive: Array.isArray(AppState.recycleArchive) ? AppState.recycleArchive : [],
     importHistory: normalizeImportHistoryEntries(AppState.importHistory)
   };
+}
+
+function resolveAppStateSnapshotPayload(payload){
+  return payload && typeof payload === 'object'
+    ? payload
+    : buildAppStatePayload();
 }
 
 function buildRemoteStateVersionSignature(source){
@@ -10031,14 +10678,15 @@ function shouldSkipFullLocalStorageCache(payload){
   return audienceDraftCount >= LOCAL_STORAGE_CACHE_MAX_AUDIENCE_DRAFTS;
 }
 
-async function persistLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+async function persistLocalStateSnapshot(payload = null, options = {}){
   const source = String(options?.source || 'persist');
+  const safePayload = resolveAppStateSnapshotPayload(payload);
   const nextSignature = typeof options.signature === 'string'
     ? options.signature
-    : getStateSignatureFromPayload(payload);
+    : getStateSignatureFromPayload(safePayload);
   if(!options.force && nextSignature && nextSignature === lastLocalSnapshotSignature){
-    queueDesktopStateFilePersist(payload, { signature: nextSignature });
-    return payload;
+    queueDesktopStateFilePersist(safePayload, { signature: nextSignature });
+    return safePayload;
   }
   if(nextSignature){
     lastPersistedStateSignature = nextSignature;
@@ -10047,35 +10695,36 @@ async function persistLocalStateSnapshot(payload = buildAppStatePayload(), optio
   const preferDeferredCacheWrite = options.force !== true && (
     heavyUiOperationCount > 0
     || importInProgress
-    || shouldSkipFullLocalStorageCache(payload)
+    || shouldSkipFullLocalStorageCache(safePayload)
     || isLargeDatasetMode()
   );
   if(preferDeferredCacheWrite){
-    queueDeferredStateCacheWrite(payload, {
+    queueDeferredStateCacheWrite(safePayload, {
       indexedDb: true,
       localStorage: true
     });
   }else{
-    await writeStateToIndexedDb(payload);
-    writeStateToLocalStorage(payload);
+    await writeStateToIndexedDb(safePayload);
+    writeStateToLocalStorage(safePayload);
   }
-  await createAutoBackupSnapshot(payload, { source, signature: nextSignature });
-  queueDesktopStateFilePersist(payload, { signature: nextSignature });
-  return payload;
+  await createAutoBackupSnapshot(safePayload, { source, signature: nextSignature });
+  queueDesktopStateFilePersist(safePayload, { signature: nextSignature });
+  return safePayload;
 }
 
-function queueDeferredLocalStateSnapshot(payload = buildAppStatePayload(), options = {}){
+function queueDeferredLocalStateSnapshot(payload = null, options = {}){
   const source = String(options?.source || 'persist');
+  const hasProvidedPayload = !!(payload && typeof payload === 'object');
   const nextSignature = typeof options.signature === 'string'
     ? options.signature
-    : getStateSignatureFromPayload(payload);
+    : (hasProvidedPayload ? getStateSignatureFromPayload(payload) : '');
   if(nextSignature){
     lastPersistedStateSignature = nextSignature;
   }
-  deferredLocalSnapshotPayload = payload;
+  deferredLocalSnapshotPayload = hasProvidedPayload ? payload : null;
   deferredLocalSnapshotSource = source;
   deferredLocalSnapshotSignature = nextSignature;
-  if(deferredLocalSnapshotTimer) return payload;
+  if(deferredLocalSnapshotTimer) return hasProvidedPayload ? payload : null;
   deferredLocalSnapshotTimer = setTimeout(()=>{
     const pendingPayload = deferredLocalSnapshotPayload;
     const pendingSource = deferredLocalSnapshotSource;
@@ -10084,12 +10733,11 @@ function queueDeferredLocalStateSnapshot(payload = buildAppStatePayload(), optio
     deferredLocalSnapshotPayload = null;
     deferredLocalSnapshotSource = 'persist';
     deferredLocalSnapshotSignature = '';
-    if(!pendingPayload) return;
     persistLocalStateSnapshot(pendingPayload, { source: pendingSource, signature: pendingSignature }).catch((err)=>{
       console.warn('Impossible de sauvegarder le snapshot local différé', err);
     });
   }, DEFERRED_LOCAL_SNAPSHOT_DEBOUNCE_MS);
-  return payload;
+  return hasProvidedPayload ? payload : null;
 }
 
 async function persistRemoteRequestNow(pathname, body){
@@ -10196,8 +10844,8 @@ async function persistChunkedRemoteStateNow(payload, serializedPayload){
 }
 
 async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
+  await persistLocalStateSnapshot(null, { source: options.source || sliceKey, signature: '' });
   const payload = buildAppStatePayload();
-  await persistLocalStateSnapshot(payload, { source: options.source || sliceKey, signature: '' });
   const routeBySlice = {
     audienceDraft: '/state/audience-draft',
     users: '/state/users',
@@ -10211,8 +10859,7 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
 }
 
 async function persistClientPatchNow(patch, options = {}){
-  const payload = buildAppStatePayload();
-  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'clients', signature: '' });
+  queueDeferredLocalStateSnapshot(null, { source: options.source || 'clients', signature: '' });
   return persistRemoteRequestNow('/state/clients', patch);
 }
 
@@ -10225,6 +10872,62 @@ function getDossierPatchQueueKey(patch){
   const targetClientId = Number(patch.targetClientId);
   if(!Number.isFinite(clientId) || !Number.isFinite(dossierIndex)) return '';
   return `${action}:${clientId}:${dossierIndex}:${Number.isFinite(targetClientId) ? targetClientId : clientId}`;
+}
+
+function getNextDossierPatchRetryDelayMs(){
+  const baseDelay = Math.max(900, getDossierPatchPersistDelayMs() + 350);
+  const nextDelay = dossierPatchRetryBackoffMs > 0
+    ? Math.min(12000, Math.max(baseDelay, Math.round(dossierPatchRetryBackoffMs * 1.7)))
+    : baseDelay;
+  dossierPatchRetryBackoffMs = nextDelay;
+  return nextDelay;
+}
+
+function resetDossierPatchRetryState(){
+  dossierPatchRetryBackoffMs = 0;
+  if(dossierPatchRetryTimer){
+    clearTimeout(dossierPatchRetryTimer);
+    dossierPatchRetryTimer = null;
+  }
+}
+
+function scheduleDossierPatchRetry(delayMs = null){
+  if(dossierPatchRetryTimer) return;
+  const nextDelayMs = Math.max(250, Number(delayMs) || getNextDossierPatchRetryDelayMs());
+  dossierPatchRetryTimer = setTimeout(()=>{
+    dossierPatchRetryTimer = null;
+    flushQueuedDossierPatchesNow().catch((err)=>{
+      console.warn('Nouvelle tentative dossier impossible', err);
+    });
+  }, nextDelayMs);
+}
+
+function requeueQueuedDossierPatchEntries(entries){
+  const list = Array.isArray(entries) ? entries : [];
+  if(!list.length) return;
+  list.forEach((entry, index)=>{
+    const patch = entry?.patch && typeof entry.patch === 'object' ? entry.patch : null;
+    const queueKey = String(entry?.key || '').trim() || getDossierPatchQueueKey(patch) || `retry:${Date.now()}:${index}`;
+    const existing = queuedDossierPatchEntries.get(queueKey);
+    if(existing){
+      existing.patch = patch || existing.patch;
+      if(Array.isArray(entry?.resolvers) && entry.resolvers.length){
+        existing.resolvers.push(...entry.resolvers);
+      }
+      if(Array.isArray(entry?.rejecters) && entry.rejecters.length){
+        existing.rejecters.push(...entry.rejecters);
+      }
+      return;
+    }
+    queuedDossierPatchEntries.set(queueKey, {
+      key: queueKey,
+      patch,
+      resolvers: Array.isArray(entry?.resolvers) ? entry.resolvers.slice() : [],
+      rejecters: Array.isArray(entry?.rejecters) ? entry.rejecters.slice() : []
+    });
+  });
+  setSyncStatus('syncing');
+  scheduleDossierPatchRetry();
 }
 
 async function flushQueuedDossierPatchesNow(){
@@ -10242,6 +10945,11 @@ async function flushQueuedDossierPatchesNow(){
     if(entries.length === 1){
       const [entry] = entries;
       const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
+      if(result){
+        resetDossierPatchRetryState();
+      }else{
+        requeueQueuedDossierPatchEntries(entries);
+      }
       entry.resolvers.forEach(resolve=>resolve(result));
       results.push(result);
       return results;
@@ -10249,11 +10957,24 @@ async function flushQueuedDossierPatchesNow(){
     const result = await persistRemoteRequestNow('/state/dossiers/batch', {
       patches: entries.map(entry=>entry.patch)
     });
+    if(result){
+      resetDossierPatchRetryState();
+    }else{
+      requeueQueuedDossierPatchEntries(entries);
+    }
     entries.forEach((entry)=>{
       entry.resolvers.forEach(resolve=>resolve(result));
     });
     results.push(result);
   }catch(err){
+    if(isRecoverableDossierPersistFailure(err)){
+      console.warn('Persistance dossier saturée, replanification en arrière-plan', err);
+      requeueQueuedDossierPatchEntries(entries);
+      entries.forEach((entry)=>{
+        entry.resolvers.forEach(resolve=>resolve(false));
+      });
+      return [false];
+    }
     entries.forEach((entry)=>{
       entry.rejecters.forEach(reject=>reject(err));
     });
@@ -10263,8 +10984,7 @@ async function flushQueuedDossierPatchesNow(){
 }
 
 async function persistDossierPatchNow(patch, options = {}){
-  const payload = buildAppStatePayload();
-  queueDeferredLocalStateSnapshot(payload, { source: options.source || 'dossier', signature: '' });
+  queueDeferredLocalStateSnapshot(null, { source: options.source || 'dossier', signature: '' });
   const queueKey = getDossierPatchQueueKey(patch);
   if(!queueKey){
     await flushQueuedDossierPatchesNow();
@@ -10278,6 +10998,7 @@ async function persistDossierPatchNow(patch, options = {}){
       existing.rejecters.push(reject);
     }else{
       queuedDossierPatchEntries.set(queueKey, {
+        key: queueKey,
         patch,
         resolvers: [resolve],
         rejecters: [reject]
@@ -10285,6 +11006,10 @@ async function persistDossierPatchNow(patch, options = {}){
     }
     setSyncStatus('syncing');
     if(dossierPatchPersistTimer) clearTimeout(dossierPatchPersistTimer);
+    if(dossierPatchRetryTimer){
+      clearTimeout(dossierPatchRetryTimer);
+      dossierPatchRetryTimer = null;
+    }
     dossierPatchPersistTimer = setTimeout(()=>{
       flushQueuedDossierPatchesNow().catch((err)=>{
         console.warn('Impossible de sauvegarder les modifications dossier', err);
@@ -10435,6 +11160,50 @@ function mergeRemoteRefreshOptions(target, source){
   return next;
 }
 
+function resetPendingRemoteLiveUpdateOptions(){
+  pendingRemoteLiveUpdateOptions = {
+    audience: false,
+    sections: new Set(),
+    secondarySections: new Set(),
+    refreshClientDropdown: false
+  };
+}
+
+function queueRemoteLivePatchFinalize(options = {}){
+  const incomingSections = Array.isArray(options.sections) ? options.sections : [];
+  const incomingSecondarySections = Array.isArray(options.secondarySections) ? options.secondarySections : [];
+  if(options.audience === true) pendingRemoteLiveUpdateOptions.audience = true;
+  if(options.refreshClientDropdown === true) pendingRemoteLiveUpdateOptions.refreshClientDropdown = true;
+  incomingSections.forEach((section)=>{
+    const safeSection = String(section || '').trim();
+    if(safeSection) pendingRemoteLiveUpdateOptions.sections.add(safeSection);
+  });
+  incomingSecondarySections.forEach((section)=>{
+    const safeSection = String(section || '').trim();
+    if(safeSection) pendingRemoteLiveUpdateOptions.secondarySections.add(safeSection);
+  });
+  if(pendingRemoteLiveUpdateTimer) clearTimeout(pendingRemoteLiveUpdateTimer);
+  const baseDelayMs = isVeryLargeLiveSyncMode() ? 520 : 180;
+  const delayMs = getAdaptiveUiBatchDelay(baseDelayMs, {
+    ultraLargeDatasetExtraMs: 720,
+    largeDatasetExtraMs: 180,
+    busyExtraMs: 360,
+    importExtraMs: 420
+  });
+  pendingRemoteLiveUpdateTimer = setTimeout(()=>{
+    pendingRemoteLiveUpdateTimer = null;
+    const aggregated = {
+      livePatch: true,
+      audience: pendingRemoteLiveUpdateOptions.audience === true,
+      sections: [...pendingRemoteLiveUpdateOptions.sections],
+      secondarySections: [...pendingRemoteLiveUpdateOptions.secondarySections],
+      refreshClientDropdown: pendingRemoteLiveUpdateOptions.refreshClientDropdown === true
+    };
+    resetPendingRemoteLiveUpdateOptions();
+    finalizeRemoteStateUpdateLocally(aggregated);
+  }, delayMs);
+}
+
 async function applyRemoteStateChangesIncrementally(changePayload){
   const changes = Array.isArray(changePayload?.changes) ? changePayload.changes : [];
   if(!changes.length) return false;
@@ -10460,18 +11229,25 @@ async function applyRemoteStateChangesIncrementally(changePayload){
   }
   updateRemoteStateMetadata(changePayload);
   if(changePayload?.updatedAt) setLiveDelayMetricFromIso(changePayload.updatedAt);
-  finalizeRemoteStateUpdateLocally({
-    livePatch: true,
+  const livePatchOptions = {
     audience: aggregatedOptions.audience,
     sections: [...aggregatedOptions.sections],
     secondarySections: [...aggregatedOptions.secondarySections]
-  });
+  };
+  if(isVeryLargeLiveSyncMode()){
+    queueRemoteLivePatchFinalize(livePatchOptions);
+  }else{
+    finalizeRemoteStateUpdateLocally({
+      livePatch: true,
+      ...livePatchOptions
+    });
+  }
   const remoteSignature = buildRemoteStateVersionSignature(changePayload);
   if(remoteSignature){
     lastPersistedStateSignature = remoteSignature;
     lastLocalSnapshotSignature = remoteSignature;
   }
-  queueDeferredLocalStateSnapshot(buildAppStatePayload(), {
+  queueDeferredLocalStateSnapshot(null, {
     source: 'server',
     signature: remoteSignature
   });
@@ -10741,6 +11517,11 @@ function stopRemoteSync(){
     clearTimeout(remoteSyncRenderTimer);
     remoteSyncRenderTimer = null;
   }
+  if(pendingRemoteLiveUpdateTimer){
+    clearTimeout(pendingRemoteLiveUpdateTimer);
+    pendingRemoteLiveUpdateTimer = null;
+  }
+  resetPendingRemoteLiveUpdateOptions();
   remoteSyncRenderSections = new Set();
   if(!remoteSyncTimer) return;
   clearInterval(remoteSyncTimer);
@@ -10795,12 +11576,22 @@ function startRemoteSyncStream(){
             ? applyRemoteDossierPatchBatchLocally(payload?.patch?.patches || payload?.patches || [])
             : null;
         if(appliedDossierPatch){
-          finalizeRemoteStateUpdateLocally(buildRemoteDossierRefreshOptions(appliedDossierPatch));
+          const livePatchOptions = buildRemoteDossierRefreshOptions(appliedDossierPatch);
+          if(isVeryLargeLiveSyncMode()){
+            queueRemoteLivePatchFinalize(livePatchOptions);
+          }else{
+            finalizeRemoteStateUpdateLocally(livePatchOptions);
+          }
           remoteRefreshPending = false;
           return;
         }
         if(applyRemoteSlicePatchLocally(payload?.patchKind, payload?.patch)){
-          finalizeRemoteStateUpdateLocally(getRemoteSliceRefreshOptions(payload?.patchKind));
+          const livePatchOptions = getRemoteSliceRefreshOptions(payload?.patchKind);
+          if(isVeryLargeLiveSyncMode()){
+            queueRemoteLivePatchFinalize(livePatchOptions);
+          }else{
+            finalizeRemoteStateUpdateLocally(livePatchOptions);
+          }
           remoteRefreshPending = false;
           return;
         }
@@ -13882,6 +14673,9 @@ function setupEvents(){
       addSalleJudge();
     }
   });
+  $('salleJudgeInput')?.addEventListener('focus', ()=>{
+    refreshKnownJudgesDatalist({ force: true });
+  });
   $('salleJudgeInput')?.addEventListener('blur', ()=>{
     const salle = normalizeSalleName($('salleNameInput')?.value || '');
     const juge = normalizeJudgeName($('salleJudgeInput')?.value || '');
@@ -14130,19 +14924,19 @@ function showView(v, options = {}){
     if(target) target.classList.add('active');
   }
   if(shouldRefreshView){
-    if(nextView === 'dashboard') renderDashboard(sectionRenderOptions);
-    if(nextView === 'clients') renderClients(sectionRenderOptions);
+    if(nextView === 'dashboard') runSectionRenderSafely('dashboard', ()=>renderDashboard(sectionRenderOptions), { delayMs: 50 });
+    if(nextView === 'clients') runSectionRenderSafely('clients', ()=>renderClients(sectionRenderOptions), { delayMs: 50 });
     if(nextView === 'creation') updateClientDropdown(sectionRenderOptions);
     if(nextView === 'suivi'){
-      renderSuivi(sectionRenderOptions);
+      runSectionRenderSafely('suivi', ()=>renderSuivi(sectionRenderOptions), { delayMs: 70 });
     }
     if(nextView === 'audience'){
-      renderAudience(sectionRenderOptions);
+      runSectionRenderSafely('audience', ()=>renderAudience(sectionRenderOptions), { delayMs: 70 });
     }
-    if(nextView === 'diligence') renderDiligence(sectionRenderOptions);
-    if(nextView === 'salle') renderSalle(sectionRenderOptions);
-    if(nextView === 'equipe') renderEquipe(sectionRenderOptions);
-    if(nextView === 'recycle') renderRecycleBin(sectionRenderOptions);
+    if(nextView === 'diligence') runSectionRenderSafely('diligence', ()=>renderDiligence(sectionRenderOptions), { delayMs: 70 });
+    if(nextView === 'salle') runSectionRenderSafely('salle', ()=>renderSalle(sectionRenderOptions), { delayMs: 80 });
+    if(nextView === 'equipe') runSectionRenderSafely('equipe', ()=>renderEquipe(sectionRenderOptions), { delayMs: 80 });
+    if(nextView === 'recycle') runSectionRenderSafely('recycle', ()=>renderRecycleBin(sectionRenderOptions), { delayMs: 80 });
   }
   currentView = nextView;
   if(nextView === 'dashboard' && options.warmup !== false && !isSameView){
@@ -14168,6 +14962,21 @@ async function login(){
   }
 
   loginInFlight = true;
+  const loginBtn = $('loginBtn');
+  const oldLoginText = loginBtn ? loginBtn.innerHTML : 'Se connecter';
+  if(loginBtn){
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connexion en cours...';
+  }
+  
+  const restoreLoginBtn = () => {
+    loginInFlight = false;
+    if(loginBtn){
+      loginBtn.disabled = false;
+      loginBtn.innerHTML = oldLoginText;
+    }
+  };
+
   try{
     const rawUsernameInput = $('username').value || '';
     const usernameInput = resolveLocalLoginUsername(rawUsernameInput);
@@ -14325,18 +15134,30 @@ async function login(){
         loginPostBootTimer = null;
         const deferInitialHeavyRender = isLargeDatasetMode();
         if(initialView === 'dashboard'){
-          safeRun(
-            'renderDashboard(immediate)',
-            ()=>renderDashboard({
-              force: !deferInitialHeavyRender,
-              immediate: true,
-              deferHeavy: true,
-              includeAudienceMetrics: false
-            })
-          );
           if(deferInitialHeavyRender){
+            setTimeout(()=>{
+              if(!currentUser || currentView !== 'dashboard') return;
+              safeRun(
+                'renderDashboard(deferred-login)',
+                ()=>runSectionRenderSafely('dashboard', ()=>renderDashboard({
+                  force: false,
+                  immediate: true,
+                  deferHeavy: true,
+                  includeAudienceMetrics: false
+                }), { delayMs: 60 })
+              );
+            }, 900);
             safeRun('queueLargeDatasetDashboardWarmup', ()=>queueLargeDatasetDashboardWarmup(120));
           }else{
+            safeRun(
+              'renderDashboard(immediate)',
+              ()=>runSectionRenderSafely('dashboard', ()=>renderDashboard({
+                force: true,
+                immediate: true,
+                deferHeavy: true,
+                includeAudienceMetrics: false
+              }), { delayMs: 40 })
+            );
             safeRun('queueSidebarSalleSessionsRender', ()=>queueSidebarSalleSessionsRender(2800));
             safeRun('scheduleBackgroundDataWarmup', ()=>scheduleBackgroundDataWarmup(2200));
           }
@@ -14362,7 +15183,7 @@ async function login(){
     safeRun('applyRoleUI', ()=>applyRoleUI({ skipNavigation: true }));
     safeRun('primeDashboardTotalClients', ()=>animateDashboardMetric('totalClients', getVisibleClients().length, { immediate: true }));
     queueLoginPostBoot();
-    if(shouldUpgradePasswordSecurity){
+    if(shouldUpgradePasswordSecurity && (LOCAL_ONLY_MODE || !hasRemoteAuthSession())){
       setTimeout(async ()=>{
         try{
           const latestUser = USERS[userIndex];
@@ -14419,6 +15240,7 @@ async function login(){
     closePasswordSetupModal();
   }finally{
     loginInFlight = false;
+    restoreLoginBtn();
   }
 }
 
@@ -18064,7 +18886,9 @@ function renderEquipe(options = {}){
     updateTeamClientSelectorState();
   }
 
-  body.innerHTML = USERS.map(u=>{
+  const pagination = paginateRows(USERS, 'equipe');
+
+  body.innerHTML = pagination.rows.map(u=>{
     const roleLabel = getRoleLabel(u.role);
     const clients = (Array.isArray(u.clientIds) ? u.clientIds : [])
       .map(getClientNameById)
@@ -18085,6 +18909,8 @@ function renderEquipe(options = {}){
       </tr>
     `;
   }).join('');
+
+  renderPagination('equipe', pagination);
 }
 
 function addSalleJudge(){
@@ -18220,19 +19046,7 @@ function renderSalle(options = {}){
 
   body.innerHTML = rowsHtml || `<tr><td colspan="3" class="diligence-empty">Aucun résultat.</td></tr>`;
 
-  const jugeInput = $('salleJudgeInput');
-  if(jugeInput){
-    const listId = 'knownJudgesList';
-    let datalist = $(listId);
-    if(!datalist){
-      datalist = document.createElement('datalist');
-      datalist.id = listId;
-      document.body.appendChild(datalist);
-      jugeInput.setAttribute('list', listId);
-    }
-    const known = getKnownJudges();
-    datalist.innerHTML = known.map(v=>`<option value="${escapeAttr(v)}"></option>`).join('');
-  }
+  refreshKnownJudgesDatalist({ force: options.force === true && !isVeryLargeLiveSyncMode() });
   lastSalleRenderKey = salleRenderKey;
   queueSidebarSalleSessionsRender();
 }
@@ -18498,20 +19312,12 @@ function getDashboardSnapshot(){
     return dashboardSnapshotCache;
   }
   const clientSummaries = getClientListSummaries();
-  const totals = clientSummaries.reduce((summary, client)=>{
-    const dossierCount = Number(client?.dossierCount || 0);
-    const clotureCount = Number(client?.clotureCount || 0);
-    summary.enCours += Math.max(0, dossierCount - clotureCount);
-    summary.clotureCount += clotureCount;
-    return summary;
-  }, {
-    enCours: 0,
-    clotureCount: 0
-  });
+  const clotureCount = getClientClotureCountTotal();
+  const totalDossiers = clientSummaries.reduce((sum, client)=>sum + Math.max(0, Number(client?.dossierCount || 0)), 0);
   const snapshot = {
     totalClients: clientSummaries.length,
-    enCours: totals.enCours,
-    clotureCount: totals.clotureCount
+    enCours: Math.max(0, totalDossiers - clotureCount),
+    clotureCount
   };
   dashboardSnapshotCache = snapshot;
   dashboardSnapshotCacheVersion = dossierDataVersion;
@@ -19769,9 +20575,10 @@ function queueSidebarSalleSessionsRender(delayMs = 80){
     sidebarSalleRenderTimer = null;
   }
   const nextDelayMs = getAdaptiveUiBatchDelay(delayMs, {
-    largeDatasetExtraMs: 120,
-    busyExtraMs: 220,
-    importExtraMs: 300
+    ultraLargeDatasetExtraMs: 380,
+    largeDatasetExtraMs: 160,
+    busyExtraMs: 260,
+    importExtraMs: 340
   });
   sidebarSalleRenderTimer = setTimeout(()=>{
     sidebarSalleRenderTimer = null;
@@ -20306,20 +21113,6 @@ function getAudienceRowsForSidebarProjectedCached(){
     const statutValue = getAudienceExportStatusValue(row, closedStatusLookup);
     const ordonnanceValue = getAudienceExportOrdonnanceValue(row);
     return {
-      color: String(row?.p?.color || '').trim(),
-      calendarDateKey,
-      calendarEvent: {
-        client: row?.c?.name || '-',
-        procedure: row?.procKey || '-',
-        debiteur: row?.d?.debiteur || '-',
-        ref: String(row?.draft?.refDossier || row?.p?.referenceClient || row?.d?.referenceClient || '').trim() || '-',
-        juge: judgeValue || '-',
-        tribunal: tribunalValue || '-',
-        sort: sortValue || '-',
-        statut: statutValue || 'En cours',
-        ordonnance: ordonnanceValue || '',
-        date: normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim() || '-'
-      },
       judgeKeys,
       session: judgeKeys.length ? {
         date: normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim() || '-',
@@ -20346,7 +21139,11 @@ function getAudienceRowsForSidebarProjectedCached(){
 
 function getAudienceRowsForRegularExport(){
   const rows = getAudienceRows();
-  if(rows.length > AUDIENCE_DEFAULT_SORT_MAX_ROWS){
+  if(
+    rows.length >= AUDIENCE_DEFAULT_SORT_MAX_ROWS
+    || isVeryLargeLiveSyncMode()
+    || shouldPreferAudienceRegularExportCsvPath(rows.length)
+  ){
     return rows;
   }
   return rows.slice().sort(compareAudienceRowsByReferenceProximity);
@@ -21444,4 +22241,17 @@ function renderCustomProcedures(){
 }
 
 
-document.addEventListener('DOMContentLoaded', initApplication);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApplication);
+} else {
+  initApplication();
+}
+function getApiAuthLoginTimeoutMs(){
+  let timeoutMs = API_AUTH_LOGIN_TIMEOUT_MS;
+  try{
+    if(typeof hasLoadedState !== 'undefined' && hasLoadedState && isLargeDatasetMode()){
+      timeoutMs += isUltraLargeDatasetMode() ? 10000 : 5000;
+    }
+  }catch(_){}
+  return timeoutMs;
+}

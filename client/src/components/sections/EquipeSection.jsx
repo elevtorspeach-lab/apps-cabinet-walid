@@ -42,7 +42,7 @@ function EquipeSection() {
             </div>
           </div>
         </div>
-        <div className="table-container" style={{ marginTop: '12px' }}>
+        <div id="equipeTableContainer" className="table-container" style={{ marginTop: '12px' }}>
           <table>
             <thead>
               <tr>
@@ -56,6 +56,7 @@ function EquipeSection() {
             <tbody id="teamUsersBody"></tbody>
           </table>
         </div>
+        <div id="equipePagination" className="table-pagination"></div>
       </div>
     </div>
   )

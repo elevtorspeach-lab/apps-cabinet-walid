@@ -124,6 +124,19 @@ function getSidebarSalleRenderKey(){
   ].join('||');
 }
 
+function shouldRenderSidebarSalleSessionsNow(){
+  const container = typeof $ === 'function' ? $('sidebarSalleSessions') : document.getElementById('sidebarSalleSessions');
+  const section = typeof $ === 'function' ? $('salleSection') : document.getElementById('salleSection');
+  if(!container || !section) return false;
+  if(typeof currentView === 'string' && currentView && currentView !== 'salle') return false;
+  if(section.style?.display === 'none') return false;
+  if(typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'){
+    const sectionStyle = window.getComputedStyle(section);
+    if(sectionStyle?.display === 'none' || sectionStyle?.visibility === 'hidden') return false;
+  }
+  return true;
+}
+
 let lastQueuedSidebarSalleSessionsKey = '';
 let lastAudienceRenderCacheKey = '';
 let lastSuiviRenderCacheKey = '';
@@ -233,6 +246,10 @@ function renderAudienceVirtualWindow(force = false){
 }
 
 function shouldQueueSidebarSalleSessionsRender(){
+  if(!shouldRenderSidebarSalleSessionsNow()){
+    lastQueuedSidebarSalleSessionsKey = '';
+    return false;
+  }
   const key = getSidebarSalleRenderKey();
   if(key === lastQueuedSidebarSalleSessionsKey){
     return false;

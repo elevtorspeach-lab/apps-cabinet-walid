@@ -1,7 +1,0 @@
-Windows: download this file only
-release/windows/applicationversion1-windows.zip
-
-After download:
-1) Extract All
-2) Open folder
-3) Run LANCER_OFFLINE.bat

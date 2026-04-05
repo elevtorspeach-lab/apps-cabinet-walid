@@ -29,8 +29,8 @@ const STATE_JOURNAL_FILE = path.join(DATA_DIR, 'state.journal');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const SERVER_BACKUP_RETENTION_COUNT = 20;
 const SERVER_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
-const SERVER_SNAPSHOT_FLUSH_DELAY_MS = 250;
-const SERVER_SNAPSHOT_FLUSH_MAX_PENDING = 40;
+const SERVER_SNAPSHOT_FLUSH_DELAY_MS = 3000;
+const SERVER_SNAPSHOT_FLUSH_MAX_PENDING = 160;
 const SERVER_KEEP_ALIVE_TIMEOUT_MS = 120000;
 const SERVER_HEADERS_TIMEOUT_MS = 125000;
 const SERVER_REQUEST_TIMEOUT_MS = 0;
@@ -68,6 +68,7 @@ let cachedStateExportStatsVersion = -1;
 let cachedStateCompressionToken = 0;
 let cachedScopedStatePayloads = new Map();
 let cachedPagedStateExportPayloads = new Map();
+let cachedJournalEntries = null;
 let lastBackupSignature = '';
 let lastBackupAt = 0;
 const sseClients = new Set();
@@ -558,15 +559,23 @@ function normalizeJournalEntry(entry) {
 }
 
 async function readJournalEntries() {
+  if (Array.isArray(cachedJournalEntries)) {
+    return cachedJournalEntries.slice();
+  }
   try {
     const journalRaw = await fsp.readFile(STATE_JOURNAL_FILE, 'utf8');
-    if (!journalRaw.trim()) return [];
-    return journalRaw
+    if (!journalRaw.trim()) {
+      cachedJournalEntries = [];
+      return [];
+    }
+    cachedJournalEntries = journalRaw
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => JSON.parse(line));
+    return cachedJournalEntries.slice();
   } catch {
+    cachedJournalEntries = [];
     return [];
   }
 }
@@ -769,6 +778,7 @@ async function writeStateSnapshot(safeState, options = {}) {
     }
     await fsp.writeFile(STATE_JOURNAL_FILE, '', 'utf8');
     pendingJournalMutationCount = 0;
+    cachedJournalEntries = [];
   }
   setCachedState(safeState);
   await maybeWriteBackupSnapshot(safeState);
@@ -1307,6 +1317,10 @@ function applyMutationToState(currentState, mutation) {
 
 async function appendMutationJournalEntry(entry) {
   await fsp.appendFile(STATE_JOURNAL_FILE, `${JSON.stringify(entry)}\n`, 'utf8');
+  if (!Array.isArray(cachedJournalEntries)) {
+    cachedJournalEntries = [];
+  }
+  cachedJournalEntries.push(entry);
 }
 
 function scheduleSnapshotFlush(delayMs = SERVER_SNAPSHOT_FLUSH_DELAY_MS) {
@@ -1362,6 +1376,10 @@ async function persistJournalMutations(mutations, options = {}) {
   const journalPayload = `${journalEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
   try {
     await fsp.appendFile(STATE_JOURNAL_FILE, journalPayload, 'utf8');
+    if (!Array.isArray(cachedJournalEntries)) {
+      cachedJournalEntries = [];
+    }
+    cachedJournalEntries.push(...journalEntries);
     pendingJournalMutationCount += safeMutations.length;
     if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
       await writeStateSnapshot(saved, { clearJournal: true });
