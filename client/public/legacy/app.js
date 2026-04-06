@@ -14890,7 +14890,7 @@ function setupEvents(){
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
   $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
-  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS());
+  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS({ openAfterExport: true, browserOpenInline: true }));
   $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
     return exportAudienceXLS({
       blankSort: true
@@ -18282,6 +18282,9 @@ function applyDiligenceFilterSelectionToCheckedRows(field, value){
   if(nextValue !== 'all'){
     applyDiligenceBatchValueToCheckedRows(field, nextValue);
   }
+  if(typeof clearDiligencePrintSelection === 'function'){
+    clearDiligencePrintSelection({ immediate: true });
+  }
   return nextValue;
 }
 
@@ -21281,7 +21284,7 @@ function getAudienceRowsForRegularExport(){
   return rows.slice().sort(compareAudienceRowsByReferenceProximity);
 }
 
-async function exportAudienceRegularXLS(){
+async function exportAudienceRegularXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     const exportRows = getAudienceRowsForRegularExport();
@@ -21310,10 +21313,10 @@ async function exportAudienceRegularXLS(){
       rows: dataset.tableRows,
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
-      colWidths: dataset.colWidths,
-      filename: "Export d'audience Excel.xlsx"
-      ,
-      layoutPreset: 'audience-reference'
+      filename: "Export d'audience Excel.xlsx",
+      layoutPreset: 'audience-reference',
+      openAfterExport: options?.openAfterExport === true,
+      browserOpenInline: options?.browserOpenInline === true
     });
   });
 }

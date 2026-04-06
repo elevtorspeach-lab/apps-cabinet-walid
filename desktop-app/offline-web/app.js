@@ -603,11 +603,11 @@ const IS_REMOTE_WEB_HOST = (() => {
   if(hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   return true;
 })();
-const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 5000;
-const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 8000;
+const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 2500;
+const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 4000;
 const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 25000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 20000;
-const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 4000 : 8000;
+const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 4000 : 5000;
 const REMOTE_STATE_PAGED_LOAD_CLIENT_PAGE_SIZE = IS_REMOTE_WEB_HOST ? 25 : 40;
 const REMOTE_STATE_PAGED_LOAD_MAX_PAGES = 2000;
 const REMOTE_STATE_CHUNK_UPLOAD_MIN_LENGTH = IS_REMOTE_WEB_HOST ? 350000 : 1200000;
@@ -6781,19 +6781,23 @@ function normalizeDossierReferenceValue(value){
   if(!raw) return '';
 
   const unified = raw
-    .replace(/[’'`´]/g, '')
-    .replace(/[\\\/⁄∕／]+/g, '/')
+    .replace(/['\u2018\u2019`\u00b4]/g, '')
+    .replace(/[\\\/\u2044\u2215\uff0f]+/g, '/')
     .replace(/[_\-.]+/g, '/')
     .replace(/\s+/g, '');
 
   let parts = null;
+  let matchIndex = -1;
   const slashMatch = unified.match(/(\d{1,10})\/(\d{1,10})\/(\d{2,4})/);
   if(slashMatch){
     parts = [slashMatch[1], slashMatch[2], slashMatch[3]];
+    matchIndex = slashMatch.index;
   }else{
     const numericParts = unified.match(/\d+/g) || [];
     if(numericParts.length >= 3){
       parts = [numericParts[0], numericParts[1], numericParts[2]];
+      // Find where the first numeric part starts in the unified string.
+      matchIndex = unified.indexOf(numericParts[0]);
     }
   }
   if(!parts) return '';
@@ -6807,7 +6811,18 @@ function normalizeDossierReferenceValue(value){
   const year = parts[2].length === 2
     ? (yearNum >= 70 ? 1900 + yearNum : 2000 + yearNum)
     : yearNum;
-  return `${firstNum}/${secondNum}/${year}`;
+  // Preserve any letter prefix before the numeric portion so that
+  // references like "Sanlam 1/23/2024" and "Bank 1/23/2024" stay distinct.
+  let prefix = '';
+  if(matchIndex > 0){
+    const rawPrefix = unified.slice(0, matchIndex)
+      .replace(/[\/\-_. ]+$/g, '')
+      .toUpperCase();
+    if(rawPrefix && /[A-Z]/i.test(rawPrefix)){
+      prefix = rawPrefix + '/';
+    }
+  }
+  return `${prefix}${firstNum}/${secondNum}/${year}`;
 }
 
 function clearCreationReferenceClientError(){
@@ -10797,8 +10812,14 @@ async function persistRemoteRequestNow(pathname, body){
     return true;
   }
   if(!hasRemoteAuthSession()){
-    setSyncStatus('error', 'Session serveur absente');
-    return false;
+    setSyncStatus('error', 'Mode local (offline)');
+    return true;
+  }
+  // Fast-path: if the server was previously found unreachable, skip the
+  // remote save entirely so that local operations never block.
+  if(!remoteServerReachable){
+    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    return true;
   }
   setSyncStatus('syncing');
   try{
@@ -10836,9 +10857,10 @@ async function persistRemoteRequestNow(pathname, body){
     setSyncStatus('ok');
     return true;
   }catch(err){
-    setSyncStatus('error');
+    remoteServerReachable = false;
+    setSyncStatus('error', 'Mode local (serveur indisponible)');
     console.warn('Impossible de sauvegarder sur le serveur', err);
-    return false;
+    return true;
   }
 }
 
@@ -11082,7 +11104,11 @@ async function persistAppStateNow(payload = null){
 function queuePersistAppState(){
   markAudienceRowsCacheDirty();
   queuedPersistPayload = buildAppStatePayload();
-  setSyncStatus('syncing');
+  // Only show 'syncing' indicator if the server is actually reachable;
+  // otherwise keep the local-mode status so the UI never freezes.
+  if(remoteServerReachable && !LOCAL_ONLY_MODE && hasRemoteAuthSession()){
+    setSyncStatus('syncing');
+  }
   if(persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(()=>{
     persistTimer = null;
@@ -11522,6 +11548,10 @@ function startRemoteSync(){
   if(LOCAL_ONLY_MODE){
     updateRemoteStateMetadata({ version: 0, updatedAt: '' });
     setSyncStatus('error', 'Mode local (offline)');
+    return;
+  }
+  if(!remoteServerReachable){
+    setSyncStatus('error', 'Mode local (serveur indisponible)');
     return;
   }
   if(!hasRemoteAuthSession()){
@@ -14344,10 +14374,19 @@ async function exportBackupExcelImportable(){
 
 // ================== INIT ==================
 async function initApplication(){
-  setSyncStatus(LOCAL_ONLY_MODE ? 'error' : 'syncing', LOCAL_ONLY_MODE ? 'Mode local (offline)' : undefined);
+  setSyncStatus(LOCAL_ONLY_MODE ? 'error' : 'pending', LOCAL_ONLY_MODE ? 'Mode local (offline)' : 'Vérification serveur...');
   renderSyncMetrics();
   if(!LOCAL_ONLY_MODE){
-    await resolveApiBase();
+    try{
+      await resolveApiBase();
+    }catch(err){
+      console.warn('Résolution API impossible, passage en mode local', err);
+    }
+    // If the server wasn't found during boot, immediately switch to local
+    // mode so the app never appears frozen.
+    if(!remoteServerReachable){
+      setSyncStatus('error', 'Mode local (serveur indisponible)');
+    }
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
@@ -14402,13 +14441,17 @@ async function bootstrapApplication(){
   try{
     await initApplication();
     if(!hasRemoteAuthSession()){
-      await refreshPreLoginServerStatus();
+      try{
+        await refreshPreLoginServerStatus();
+      }catch(err){
+        console.warn('Vérification serveur pré-connexion impossible', err);
+        setSyncStatus('error', 'Mode local (serveur indisponible)');
+      }
     }
   }catch(err){
-    applicationBootFailed = true;
+    applicationBootFailed = false;
     console.error('Initialisation application impossible', err);
     setSyncStatus('error', LOCAL_ONLY_MODE ? 'Mode local (offline)' : 'Mode local (serveur indisponible)');
-    showLoginError('Initialisation impossible. Rechargez la page ou verifiez le serveur.');
   }
 }
 
@@ -14847,7 +14890,7 @@ function setupEvents(){
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
   $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
-  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS());
+  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS({ openAfterExport: true, browserOpenInline: true }));
   $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
     return exportAudienceXLS({
       blankSort: true
@@ -15934,6 +15977,7 @@ function parseSuiviReferenceParts(value){
 function buildSuiviRefDebiteurKey(row){
   if(typeof row?.__suiviPairKey === 'string' && row.__suiviPairKey) return row.__suiviPairKey;
   const rawReference = String(row?.d?.referenceClient || '').trim();
+  if(isLetterOnlyClientReference(rawReference)) return '';
   const dossierRef = normalizeReferenceForAudienceLookup(rawReference);
   const ref = dossierRef || normalizeReferenceValue(rawReference);
   const debiteur = String(row?.d?.debiteur || '')
@@ -18237,6 +18281,9 @@ function applyDiligenceFilterSelectionToCheckedRows(field, value){
   const nextValue = String(value || 'all').trim() || 'all';
   if(nextValue !== 'all'){
     applyDiligenceBatchValueToCheckedRows(field, nextValue);
+  }
+  if(typeof clearDiligencePrintSelection === 'function'){
+    clearDiligencePrintSelection({ immediate: true });
   }
   return nextValue;
 }
@@ -21237,7 +21284,7 @@ function getAudienceRowsForRegularExport(){
   return rows.slice().sort(compareAudienceRowsByReferenceProximity);
 }
 
-async function exportAudienceRegularXLS(){
+async function exportAudienceRegularXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     const exportRows = getAudienceRowsForRegularExport();
@@ -21266,10 +21313,10 @@ async function exportAudienceRegularXLS(){
       rows: dataset.tableRows,
       subtitle: dataset.subtitle,
       sheetName: 'Audience',
-      colWidths: dataset.colWidths,
-      filename: "Export d'audience Excel.xlsx"
-      ,
-      layoutPreset: 'audience-reference'
+      filename: "Export d'audience Excel.xlsx",
+      layoutPreset: 'audience-reference',
+      openAfterExport: options?.openAfterExport === true,
+      browserOpenInline: options?.browserOpenInline === true
     });
   });
 }
