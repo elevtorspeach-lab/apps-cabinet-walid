@@ -21329,14 +21329,16 @@ function getAudienceRowsForSidebarProjectedCached(){
 
 function getAudienceRowsForRegularExport(){
   const rows = getAudienceRows();
+  const selectedRows = rows.filter(row => isAudienceSelectedForPrint(row.ci, row.di, row.procKey));
+  
   if(
-    rows.length >= AUDIENCE_DEFAULT_SORT_MAX_ROWS
+    selectedRows.length >= AUDIENCE_DEFAULT_SORT_MAX_ROWS
     || isVeryLargeLiveSyncMode()
-    || shouldPreferAudienceRegularExportCsvPath(rows.length)
+    || shouldPreferAudienceRegularExportCsvPath(selectedRows.length)
   ){
-    return rows;
+    return selectedRows;
   }
-  return rows.slice().sort(compareAudienceRowsForExport);
+  return selectedRows.slice().sort(compareAudienceRowsForExport);
 }
 
 async function exportAudienceRegularXLS(options = {}){
