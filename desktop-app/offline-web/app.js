@@ -18309,6 +18309,23 @@ function updateDiligenceFieldEncoded(clientId, dossierIndex, procKeyEncoded, fie
   updateDiligenceField(clientId, dossierIndex, decodeURIComponent(String(procKeyEncoded)), field, value);
 }
 
+function extractYearFromReferenceDiligence(ref) {
+  if (!ref) return 9999;
+  const str = String(ref).trim();
+  const match = str.match(/\/(20\d{2})$|\/(19\d{2})$/);
+  if (match) {
+    return parseInt(match[1] || match[2], 10);
+  }
+  const parts = str.split('/');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i].trim();
+    if (p.length === 4 && !isNaN(p)) {
+      return parseInt(p, 10);
+    }
+  }
+  return 9999;
+}
+
 function getFilteredDiligenceRows(allRows){
   const q = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
   const executionOnlyQuery = isDiligenceExecutionOnlyQuery(q);
@@ -18342,6 +18359,15 @@ function getFilteredDiligenceRows(allRows){
     const searchValues = row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row));
     return searchValues.some(value=>value.includes(q));
   });
+  
+  filteredRows.sort((a, b) => {
+    const refA = getDiligenceReferenceDossierValue(a);
+    const refB = getDiligenceReferenceDossierValue(b);
+    const yearA = extractYearFromReferenceDiligence(refA);
+    const yearB = extractYearFromReferenceDiligence(refB);
+    return yearA - yearB;
+  });
+
   diligenceFilteredRowsCacheInput = allRows;
   diligenceFilteredRowsCacheKey = filterKey;
   diligenceFilteredRowsCacheOutput = filteredRows;
