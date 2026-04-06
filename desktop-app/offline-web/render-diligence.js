@@ -122,7 +122,7 @@ function buildDiligenceHeadHtml(){
     ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
     <th>Ordonnance</th>
     ${showSharedNotificationColumns ? '<th>Notification N°</th><th>Sort notification</th>' : ''}
-    ${showAssFollowupColumns ? '<th>Lettre Rec</th><th>Curateur N°</th><th>ORD</th><th>Notif curateur</th><th>Sort notif</th><th>PV Police</th>' : ''}
+    ${showAssFollowupColumns ? '<th>Lettre Rec</th><th>Curateur N°</th><th>ORD</th><th>Notif curateur</th><th>Sort notif</th><th>Avis curateur</th><th>PV Police</th>' : ''}
     ${showSharedNotificationColumns ? '<th>Certificat non appel</th>' : ''}
     <th>Execution N°</th>
     <th>Ville</th>
@@ -222,9 +222,10 @@ function renderDiligenceRowHtml(row){
       <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'notifCurateur', row.details?.notifCurateur || '')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'sortNotif', row.details?.sortNotif || '')}</td>
+      <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue)}</td>
     `
-    : (showAssFollowupColumns ? '<td></td><td></td><td></td><td></td><td></td><td></td>' : '');
+    : (showAssFollowupColumns ? '<td></td><td></td><td></td><td></td><td></td><td></td><td></td>' : '');
   const standardCells = `
     ${showSharedNotificationColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>` : ''}
     <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>

@@ -6757,6 +6757,12 @@ function normalizeReferenceValue(value){
     .toUpperCase();
 }
 
+function isLetterOnlyClientReference(value){
+  const normalized = normalizeReferenceValue(value).replace(/[\/]+/g, '');
+  if(!normalized) return false;
+  return /\p{L}/u.test(normalized) && !/\d/.test(normalized);
+}
+
 function isStrictDuplicateProtectedClientReference(value){
   const normalized = normalizeReferenceValue(value);
   if(!normalized) return false;
@@ -7016,6 +7022,11 @@ function getClientReferenceMatchKeys(value){
     .replace(/\r\n/g, '\n')
     .trim();
   if(!raw) return [];
+
+  if(isLetterOnlyClientReference(raw)){
+    const strict = normalizeReferenceValue(raw);
+    return strict ? [strict] : [];
+  }
 
   const out = new Set();
   const pushCandidate = (candidate)=>{
@@ -17762,17 +17773,21 @@ function getDiligenceLettreRecValue(value){
 function normalizeDiligenceAvisCurateur(value){
   const raw = String(value ?? '').trim().toLowerCase();
   if(!raw) return '';
-  if(raw.includes('pub') || raw.includes('auj') || raw.includes('au j') || raw.includes('anj') || raw.includes('pliie') || raw.includes('plie')){
-    return 'PUB AU J';
+  if(raw.includes('pub au j') || raw.includes('pubauj') || raw.includes('auj') || raw.includes('au j') || raw.includes('anj')){
+    return 'pub au J';
   }
-  if(raw === 'ok' || raw.includes(' ok')) return 'OK';
-  if(raw.includes('tr')) return 'envoyer au TR';
+  if(raw.includes('att pub') || raw === 'ok' || raw.includes(' ok')){
+    return 'Att Pub.';
+  }
+  if(raw.includes('tr') || raw.includes('avis') || raw.includes('envoyer')){
+    return 'Avis en TR';
+  }
   return String(value ?? '').trim();
 }
 
 function getDiligenceAvisCurateurValue(value){
   const normalized = normalizeDiligenceAvisCurateur(value);
-  return normalized || 'envoyer au TR';
+  return normalized || 'Avis en TR';
 }
 
 function getDiligencePvPliceValue(value){
@@ -17993,9 +18008,9 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="envoyer au TR" ${status === 'envoyer au TR' ? 'selected' : ''}>1 envoyer au TR</option>
-        <option value="OK" ${status === 'OK' ? 'selected' : ''}>2 OK</option>
-        <option value="PUB AU J" ${status === 'PUB AU J' ? 'selected' : ''}>3 PUB AU J</option>
+        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 Avis en TR</option>
+        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 Att Pub.</option>
+        <option value="pub au J" ${status === 'pub au J' ? 'selected' : ''}>3 pub au J</option>
       </select>
     `;
   }
@@ -20602,6 +20617,7 @@ function buildAudienceDuplicateKey(row){
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
+  if(isLetterOnlyClientReference(refDossier)) return '';
   if(!refDossier || !debiteur || !procedure) return '';
   // Audience rows are unique per procedure for the same dossier/debiteur.
   return `${procedure}__${debiteur}__${refDossier}`;
@@ -20659,7 +20675,9 @@ function getAudienceRowContentScore(row){
 }
 
 function getDiligenceRowReferenceValue(row){
-  return normalizeReferenceValue(String(row?.details?.referenceClient ?? '').trim());
+  const ref = normalizeReferenceValue(String(row?.details?.referenceClient ?? '').trim());
+  if(isLetterOnlyClientReference(ref)) return '';
+  return ref;
 }
 
 function buildDiligenceDuplicateKey(row){
