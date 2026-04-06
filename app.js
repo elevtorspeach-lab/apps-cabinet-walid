@@ -544,6 +544,7 @@ const SALLE_SIDEBAR_SESSION_RENDER_LIMIT = 18;
 const SALLE_SIDEBAR_SESSION_RENDER_LIMIT_VERY_LARGE = 8;
 const AUDIENCE_DEFAULT_SORT_MAX_ROWS = 60000;
 const STYLED_XLSX_MAX_ROWS = 12000;
+const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_STABLE = 8000;
 const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD = 40000;
 const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_LARGE = 24000;
 const AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE = 12000;
@@ -551,6 +552,8 @@ const SELECTED_EXPORT_CSV_THRESHOLD = 200;
 const SALLE_EXPORT_CSV_THRESHOLD = 250;
 const SALLE_EXPORT_CSV_THRESHOLD_LARGE = 160;
 const SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE = 80;
+const SALLE_SIDEBAR_COMPACT_RENDER_AUDIENCE_THRESHOLD = 4000;
+const SALLE_SIDEBAR_COMPACT_RENDER_JUDGE_THRESHOLD = 40;
 const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 300;
 const LARGE_DATASET_DOSSIERS_THRESHOLD = 30000;
 const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 450;
@@ -1660,6 +1663,7 @@ function shouldPreferFastWorkbookPath(rowCount = 0){
 function shouldPreferAudienceRegularExportCsvPath(rowCount = 0){
   const totalRows = Math.max(0, Number(rowCount) || 0);
   if(totalRows <= 0) return false;
+  if(totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_STABLE) return true;
   if(totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD) return true;
   if(isVeryLargeLiveSyncMode()){
     return totalRows >= AUDIENCE_REGULAR_EXPORT_CSV_THRESHOLD_VERY_LARGE;
@@ -8965,22 +8969,13 @@ function buildSalleAudienceMap(dayKey = selectedSalleDay){
     bySalleAndJudge.set(salleLabel, judgeMap);
   });
 
-  const targetJudgeKeys = [...judgeTargetsByKey.keys()];
   const matchedJudgeTargetCache = new Map();
   const audienceRows = getAudienceRowsForSidebarProjectedCached();
   audienceRows.forEach(row=>{
     if(!Array.isArray(row?.judgeKeys) || !row.judgeKeys.length || !row.session) return;
     const matchedSessionLists = new Set();
     row.judgeKeys.forEach(candidateKey=>{
-      let matchedKeys = matchedJudgeTargetCache.get(candidateKey);
-      if(!matchedKeys){
-        matchedKeys = targetJudgeKeys.filter(targetJudgeKey=>
-          candidateKey === targetJudgeKey
-          || candidateKey.includes(targetJudgeKey)
-          || targetJudgeKey.includes(candidateKey)
-        );
-        matchedJudgeTargetCache.set(candidateKey, matchedKeys);
-      }
+      const matchedKeys = getMatchedJudgeTargetKeys(candidateKey, judgeTargetsByKey, matchedJudgeTargetCache);
       matchedKeys.forEach((targetJudgeKey)=>{
         const sessionLists = judgeTargetsByKey.get(targetJudgeKey) || [];
         sessionLists.forEach(list=>matchedSessionLists.add(list));
@@ -9050,10 +9045,42 @@ function getSalleSidebarSessionRenderLimit(){
   return Number.POSITIVE_INFINITY;
 }
 
+function getMatchedJudgeTargetKeys(candidateKey, judgeTargetsByKey, cache){
+  const safeCandidateKey = String(candidateKey || '').trim();
+  if(!safeCandidateKey) return [];
+  if(cache instanceof Map && cache.has(safeCandidateKey)){
+    return cache.get(safeCandidateKey);
+  }
+  const matchedKeys = judgeTargetsByKey instanceof Map && judgeTargetsByKey.has(safeCandidateKey)
+    ? [safeCandidateKey]
+    : [];
+  if(cache instanceof Map){
+    cache.set(safeCandidateKey, matchedKeys);
+  }
+  return matchedKeys;
+}
+
+function countSalleSidebarJudges(summaryRows){
+  return (Array.isArray(summaryRows) ? summaryRows : []).reduce((total, row)=>{
+    const judges = Array.isArray(row?.judges) ? row.judges.length : 0;
+    return total + judges;
+  }, 0);
+}
+
+function shouldUseCompactSalleSidebarSummary(summaryRows, options = {}){
+  if(filterSalleAudienceDate || filterSalleTribunal !== 'all') return false;
+  if(options.forceCompact === true) return true;
+  const audienceRowCount = Math.max(0, Number(options.audienceRowCount) || 0);
+  if(audienceRowCount >= SALLE_SIDEBAR_COMPACT_RENDER_AUDIENCE_THRESHOLD){
+    return true;
+  }
+  return countSalleSidebarJudges(summaryRows) >= SALLE_SIDEBAR_COMPACT_RENDER_JUDGE_THRESHOLD;
+}
+
 function buildSalleAudienceSidebarSummary(dayKey = selectedSalleDay, options = {}){
   const targetDay = normalizeSalleWeekday(dayKey);
   const renderLimit = Number.isFinite(Number(options.renderLimit))
-    ? Math.max(1, Number(options.renderLimit))
+    ? Math.max(0, Number(options.renderLimit))
     : getSalleSidebarSessionRenderLimit();
   const tribunalFilter = String(options.tribunalFilter || filterSalleTribunal || 'all').trim() || 'all';
   const dateFilter = String(options.dateFilter || filterSalleAudienceDate || '').trim();
@@ -9091,7 +9118,6 @@ function buildSalleAudienceSidebarSummary(dayKey = selectedSalleDay, options = {
   });
   if(!salleLookup.size) return [];
 
-  const targetJudgeKeys = [...judgeTargetsByKey.keys()];
   const matchedJudgeTargetCache = new Map();
   audienceRows.forEach((row)=>{
     if(!Array.isArray(row?.judgeKeys) || !row.judgeKeys.length || !row.session) return;
@@ -9100,15 +9126,7 @@ function buildSalleAudienceSidebarSummary(dayKey = selectedSalleDay, options = {
     if(dateFilter && String(session?.dateKey || '').trim() !== dateFilter) return;
     const matchedTargets = new Set();
     row.judgeKeys.forEach((candidateKey)=>{
-      let matchedKeys = matchedJudgeTargetCache.get(candidateKey);
-      if(!matchedKeys){
-        matchedKeys = targetJudgeKeys.filter((targetJudgeKey)=>
-          candidateKey === targetJudgeKey
-          || candidateKey.includes(targetJudgeKey)
-          || targetJudgeKey.includes(candidateKey)
-        );
-        matchedJudgeTargetCache.set(candidateKey, matchedKeys);
-      }
+      const matchedKeys = getMatchedJudgeTargetKeys(candidateKey, judgeTargetsByKey, matchedJudgeTargetCache);
       matchedKeys.forEach((targetJudgeKey)=>{
         const summaries = judgeTargetsByKey.get(targetJudgeKey) || [];
         summaries.forEach((summary)=>matchedTargets.add(summary));
@@ -9136,21 +9154,26 @@ function buildSalleAudienceSidebarSummary(dayKey = selectedSalleDay, options = {
     }));
 }
 
-function renderSalleSidebarSummaryHtml(summaryRows, dayLabel){
+function renderSalleSidebarSummaryHtml(summaryRows, dayLabel, options = {}){
   const rows = Array.isArray(summaryRows) ? summaryRows : [];
+  const compact = options.compact === true;
   if(!rows.length) return '';
   const html = rows.map(({ salleLabel, judges })=>{
     const salleEncoded = encodeURIComponent(String(salleLabel));
     const dayEncoded = encodeURIComponent(String(selectedSalleDay));
     const judgeHtml = judges.map((summary)=>{
-      const sessionHtml = summary.sessions.length
-        ? summary.sessions
-          .map((session)=>`<div class="sidebar-salle-session">${escapeHtml(session.date)} | ${escapeHtml(session.ref)} | ${escapeHtml(session.debiteur)}</div>`)
-          .join('')
-          + (summary.hiddenSessionCount > 0
-            ? `<div class="sidebar-salle-session">+${summary.hiddenSessionCount} audience(s) supplementaire(s)</div>`
-            : '')
-        : '<div class="sidebar-salle-session">Aucune audience</div>';
+      const sessionHtml = compact
+        ? `<div class="sidebar-salle-session">${Math.max(0, Number(summary.totalSessionCount) || 0)} audience(s)</div>`
+        : (
+          summary.sessions.length
+            ? summary.sessions
+              .map((session)=>`<div class="sidebar-salle-session">${escapeHtml(session.date)} | ${escapeHtml(session.ref)} | ${escapeHtml(session.debiteur)}</div>`)
+              .join('')
+              + (summary.hiddenSessionCount > 0
+                ? `<div class="sidebar-salle-session">+${summary.hiddenSessionCount} audience(s) supplementaire(s)</div>`
+                : '')
+            : '<div class="sidebar-salle-session">Aucune audience</div>'
+        );
       return `
         <div class="sidebar-salle-item">
           <div class="sidebar-salle-judge">${escapeHtml(summary.judgeName)}</div>
@@ -9229,7 +9252,10 @@ function renderSidebarSalleSessions(){
   }
 
   const dayLabel = getSalleWeekdayLabel(selectedSalleDay);
-  if(isVeryLargeLiveSyncMode()){
+  const projectedAudienceRows = getAudienceRowsForSidebarProjectedCached();
+  const preferCompactSummary = projectedAudienceRows.length >= SALLE_SIDEBAR_COMPACT_RENDER_AUDIENCE_THRESHOLD;
+  const preferredRenderLimit = preferCompactSummary ? 0 : getSalleSidebarSessionRenderLimit();
+  if(isVeryLargeLiveSyncMode() || preferCompactSummary){
     const requestId = ++salleSidebarWorkerRequestSeq;
     const renderKey = [
       audienceRowsRawDataVersion,
@@ -9238,6 +9264,7 @@ function renderSidebarSalleSessions(){
       filterSalleTribunal,
       filterSalleAudienceDate,
       getCurrentClientAccessCacheKey(),
+      preferCompactSummary ? 'compact' : 'full',
       'worker'
     ].join('||');
     setElementHtmlWithRenderKey(
@@ -9249,39 +9276,53 @@ function renderSidebarSalleSessions(){
     container.style.display = '';
     runSalleSidebarWorker({
       dayKey: selectedSalleDay,
-      renderLimit: getSalleSidebarSessionRenderLimit(),
+      renderLimit: preferredRenderLimit,
       tribunalFilter: filterSalleTribunal,
       dateFilter: filterSalleAudienceDate,
       assignments: normalizeSalleAssignments(AppState.salleAssignments),
-      audienceRows: getAudienceRowsForSidebarProjectedCached()
+      audienceRows: projectedAudienceRows
     }, requestId).then((summary)=>{
       if(requestId !== salleSidebarWorkerRequestSeq) return;
       const summaryRows = Array.isArray(summary?.salles) ? summary.salles : null;
-      const fallbackRows = summaryRows || buildSalleAudienceSidebarSummary(selectedSalleDay);
+      const fallbackRows = summaryRows || buildSalleAudienceSidebarSummary(selectedSalleDay, {
+        renderLimit: preferredRenderLimit,
+        audienceRows: projectedAudienceRows
+      });
       if(!fallbackRows.length){
         container.style.display = 'none';
         setElementHtmlWithRenderKey(container, '', `sidebar-salle-empty::${renderKey}`, { trustRenderKey: true });
         return;
       }
+      const compact = shouldUseCompactSalleSidebarSummary(fallbackRows, {
+        audienceRowCount: projectedAudienceRows.length,
+        forceCompact: preferCompactSummary
+      });
       setElementHtmlWithRenderKey(
         container,
-        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel),
-        `sidebar-salle-summary::${renderKey}::${fallbackRows.length}`,
+        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel, { compact }),
+        `sidebar-salle-summary::${renderKey}::${fallbackRows.length}::${compact ? 'compact' : 'full'}`,
         { trustRenderKey: true }
       );
       container.style.display = '';
     }).catch(()=>{
       if(requestId !== salleSidebarWorkerRequestSeq) return;
-      const fallbackRows = buildSalleAudienceSidebarSummary(selectedSalleDay);
+      const fallbackRows = buildSalleAudienceSidebarSummary(selectedSalleDay, {
+        renderLimit: preferredRenderLimit,
+        audienceRows: projectedAudienceRows
+      });
       if(!fallbackRows.length){
         container.style.display = 'none';
         setElementHtmlWithRenderKey(container, '', `sidebar-salle-empty::${renderKey}`, { trustRenderKey: true });
         return;
       }
+      const compact = shouldUseCompactSalleSidebarSummary(fallbackRows, {
+        audienceRowCount: projectedAudienceRows.length,
+        forceCompact: preferCompactSummary
+      });
       setElementHtmlWithRenderKey(
         container,
-        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel),
-        `sidebar-salle-summary::${renderKey}::fallback::${fallbackRows.length}`,
+        renderSalleSidebarSummaryHtml(fallbackRows, dayLabel, { compact }),
+        `sidebar-salle-summary::${renderKey}::fallback::${fallbackRows.length}::${compact ? 'compact' : 'full'}`,
         { trustRenderKey: true }
       );
       container.style.display = '';
@@ -9289,59 +9330,38 @@ function renderSidebarSalleSessions(){
     return;
   }
 
-  const bySalleAndJudge = getFilteredSalleAudienceMap(selectedSalleDay);
-  const renderLimit = getSalleSidebarSessionRenderLimit();
-  if(!bySalleAndJudge.size){
-    container.style.display = 'none';
-    container.innerHTML = '';
-    return;
+  try{
+    const summaryRows = buildSalleAudienceSidebarSummary(selectedSalleDay, {
+      renderLimit: preferredRenderLimit,
+      audienceRows: projectedAudienceRows
+    });
+    if(!summaryRows.length){
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    const compact = shouldUseCompactSalleSidebarSummary(summaryRows, {
+      audienceRowCount: projectedAudienceRows.length
+    });
+    container.innerHTML = renderSalleSidebarSummaryHtml(summaryRows, dayLabel, { compact });
+    container.style.display = '';
+  }catch(err){
+    const message = String(err?.message || err || '').trim();
+    const isStackOverflow = err instanceof RangeError || message.includes('Maximum call stack size exceeded');
+    if(!isStackOverflow) throw err;
+    console.warn('Sidebar salle compacte de secours activee', err);
+    const fallbackRows = buildSalleAudienceSidebarSummary(selectedSalleDay, {
+      renderLimit: 0,
+      audienceRows: projectedAudienceRows
+    });
+    if(!fallbackRows.length){
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML = renderSalleSidebarSummaryHtml(fallbackRows, dayLabel, { compact: true });
+    container.style.display = '';
   }
-
-  const html = [...bySalleAndJudge.entries()]
-    .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
-    .map(([salleLabel, judgeMap])=>{
-      const salleEncoded = encodeURIComponent(String(salleLabel));
-      const dayEncoded = encodeURIComponent(String(selectedSalleDay));
-      const judgeHtml = [...judgeMap.entries()]
-        .sort((a, b)=>a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
-        .map(([judgeName, sessions])=>{
-          const visibleSessions = Array.isArray(sessions) ? sessions : [];
-          const hiddenSessionCount = Number.isFinite(renderLimit) && visibleSessions.length > renderLimit
-            ? visibleSessions.length - renderLimit
-            : 0;
-          const renderedSessions = hiddenSessionCount > 0
-            ? visibleSessions.slice(0, renderLimit)
-            : visibleSessions;
-          const sessionHtml = renderedSessions.length
-            ? renderedSessions
-              .map(s=>`<div class="sidebar-salle-session">${escapeHtml(s.date)} | ${escapeHtml(s.ref)} | ${escapeHtml(s.debiteur)}</div>`)
-              .join('')
-              + (hiddenSessionCount > 0
-                ? `<div class="sidebar-salle-session">+${hiddenSessionCount} audience(s) supplementaire(s)</div>`
-                : '')
-            : `<div class="sidebar-salle-session">Aucune audience</div>`;
-          return `
-            <div class="sidebar-salle-item">
-              <div class="sidebar-salle-judge">${escapeHtml(judgeName)}</div>
-              ${sessionHtml}
-            </div>
-          `;
-        }).join('');
-      return `
-        <div class="sidebar-salle-item">
-          <div class="sidebar-salle-title-row">
-            <div class="sidebar-salle-title">${escapeHtml(salleLabel)}</div>
-            <button type="button" class="btn-primary btn-salle-export" onclick="exportSalleAudiences('${salleEncoded}','${dayEncoded}')">
-              <i class="fa-solid fa-file-export"></i> Exporter
-            </button>
-          </div>
-          ${judgeHtml}
-        </div>
-      `;
-    }).join('');
-
-  container.innerHTML = `<h4><i class="fa-solid fa-calendar-check"></i> Audiences par salle - ${escapeHtml(dayLabel)}</h4>${html}`;
-  container.style.display = '';
 }
 
 async function exportSalleAudiences(salleEncoded, dayEncoded){
@@ -19197,7 +19217,7 @@ function parseDateForAge(value){
   const raw = String(value).trim();
   if(!raw) return null;
   const isoInText = raw.match(/(\d{4}-\d{2}-\d{2})/);
-  if(isoInText){
+  if(isoInText && isoInText[1] !== raw){
     return parseDateForAge(isoInText[1]);
   }
   const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
