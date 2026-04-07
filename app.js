@@ -13104,6 +13104,7 @@ async function applyExcelImport(payload, options = {}){
   };
   const opts = (options && typeof options === 'object' && !Array.isArray(options)) ? options : {};
   const importFileName = String(opts.importFileName || '').trim() || 'Import Excel';
+  const diligenceMode = opts.diligenceMode === true;
   const importDossiers = opts.importDossiers !== false;
   const importAudiences = opts.importAudiences !== false;
   const audienceOnlyMode = String(opts.audienceMode || '').trim().toLowerCase() === 'audience-only';
@@ -13644,6 +13645,51 @@ async function applyExcelImport(payload, options = {}){
       files: []
     };
 
+    let existingDossierToUpdate = null;
+    if(diligenceMode){
+      const rowRefDossier = String(row.refDossier || row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction || '').trim();
+      const rowRefDossierKey = normalizeReferenceForAudienceLookup(rowRefDossier);
+      const rowRefClientKeys = getClientReferenceMatchKeys(row.refClient || '');
+      const rowRefClientKey = rowRefClientKeys[0] || normalizeReferenceValue(row.refClient || '');
+      const rowDebiteur = String(row.debiteur || '').trim().toLowerCase();
+
+      let targetCandidates = [];
+      if(rowRefDossierKey){
+        targetCandidates = [...targetCandidates, ...(refToStateProcMap.get(rowRefDossierKey) || [])];
+      }
+      if(rowRefClientKey){
+        targetCandidates = [...targetCandidates, ...(rowRefClientToProcMap.get(rowRefClientKey) || [])];
+      }
+
+      if(targetCandidates.length){
+        let bestCandidate = null;
+        let bestScore = -1;
+        targetCandidates.forEach(c => {
+          let score = 0;
+          if(rowRefDossierKey && getDossierAudienceRefsCached(c.dossier).has(rowRefDossierKey)) score += 100;
+          if(rowRefClientKey && getDossierClientRefMatchKeysCached(c.dossier).has(rowRefClientKey)) score += 80;
+          if(rowDebiteur && String(c.dossier.debiteur || '').trim().toLowerCase() === rowDebiteur) score += 60;
+          if(score > bestScore){
+            bestScore = score;
+            bestCandidate = c.dossier;
+          }
+        });
+        if(bestScore >= 60){ // Require at least debiteur match if no ref match
+          existingDossierToUpdate = bestCandidate;
+        }
+      }
+    }
+
+    const targetDossier = existingDossierToUpdate || dossier;
+    if(existingDossierToUpdate){
+      // Update global fields if empty
+      if(!targetDossier.debiteur || targetDossier.debiteur === '-') targetDossier.debiteur = row.debiteur;
+      if(!targetDossier.boiteNo && row.boiteNo) targetDossier.boiteNo = row.boiteNo;
+      if(!targetDossier.ville && row.ville) targetDossier.ville = row.ville;
+      if(!targetDossier.adresse && row.adresse) targetDossier.adresse = row.adresse;
+      if(!targetDossier.nRef && row.nRef) targetDossier.nRef = String(row.nRef).trim();
+    }
+
     const procedureSet = new Set(procedures);
     const setProcRef = (proc, ref)=>{
       const refText = String(ref || '').trim();
@@ -13652,8 +13698,8 @@ async function applyExcelImport(payload, options = {}){
       dossierRefClientSet.add(refKey);
       const keepProcedureInDossier = !allowedDossierProcedureSet || allowedDossierProcedureSet.has(proc);
       if(keepProcedureInDossier){
-        if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
-        dossier.procedureDetails[proc].referenceClient = refText;
+        if(!targetDossier.procedureDetails[proc]) targetDossier.procedureDetails[proc] = {};
+        targetDossier.procedureDetails[proc].referenceClient = refText;
         if(!procedureSet.has(proc)){
           procedureSet.add(proc);
         }
@@ -13661,7 +13707,7 @@ async function applyExcelImport(payload, options = {}){
       const baseRowRefClientKeys = getClientReferenceMatchKeys(row.refClient || '');
       const baseRowRefClient = baseRowRefClientKeys[0] || normalizeReferenceValue(row.refClient || '');
       const candidate = {
-        dossier,
+        dossier: targetDossier,
         client,
         proc,
         rowRefClient: baseRowRefClient,
@@ -13695,8 +13741,23 @@ async function applyExcelImport(payload, options = {}){
     setProcRef('Injonction', injonctionReference);
     const executionNoValue = String(row.executionNo || '').trim();
     const importedDateDepotValue = normalizeDateDDMMYYYY(row.dateDepot || '') || String(row.dateDepot || '').trim();
-    const notificationSortValue = String(row.notificationSort || '').trim();
-    const notificationNoValue = String(row.notificationNo || '').trim();
+    let notificationSortValue = String(row.notificationSort || '').trim();
+    let notificationNoValue = String(row.notificationNo || '').trim();
+
+    if(diligenceMode){
+      const rawNotif = String(row.notificationNo || '').trim();
+      if(!rawNotif){
+        notificationSortValue = '-';
+        notificationNoValue = '';
+      } else {
+        const notifMatch = rawNotif.match(/^(notifier|nb)\s*(.*)$/i);
+        if(notifMatch){
+          notificationSortValue = notifMatch[1].toLowerCase() === 'nb' ? 'NB' : 'notifier';
+          notificationNoValue = notifMatch[2].trim();
+        }
+      }
+    }
+
     const sortValue = String(row.sortExecution || row.sort || '').trim();
     const importedOrdonnanceStatus = normalizeDiligenceOrdonnance(row.sortOrd || '');
     const tribunalValue = String(row.tribunal || '').trim();
@@ -13708,24 +13769,27 @@ async function applyExcelImport(payload, options = {}){
           || sortValue
           || tribunalValue
           || ((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus)
-          || (proc === 'Injonction' && (notificationSortValue || notificationNoValue))
+          || notificationSortValue
+          || notificationNoValue
         )
       ) return;
       if(!procedureSet.has(proc)) return;
-      if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
-      if(String(refValue || '').trim() && !String(dossier.procedureDetails[proc].referenceClient || '').trim()){
-        dossier.procedureDetails[proc].referenceClient = String(refValue || '').trim();
+      if(!targetDossier.procedureDetails[proc]) targetDossier.procedureDetails[proc] = {};
+      if(String(refValue || '').trim() && !String(targetDossier.procedureDetails[proc].referenceClient || '').trim()){
+        targetDossier.procedureDetails[proc].referenceClient = String(refValue || '').trim();
       }
-      if(executionNoValue) dossier.procedureDetails[proc].executionNo = executionNoValue;
-      if(importedDateDepotValue) dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
-      if(sortValue) dossier.procedureDetails[proc].sort = sortValue;
-      if(tribunalValue) dossier.procedureDetails[proc].tribunal = tribunalValue;
+      if(executionNoValue) targetDossier.procedureDetails[proc].executionNo = executionNoValue;
+      if(importedDateDepotValue) targetDossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
+      if(sortValue) targetDossier.procedureDetails[proc].sort = sortValue;
+      if(tribunalValue) targetDossier.procedureDetails[proc].tribunal = tribunalValue;
       if((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus){
-        dossier.procedureDetails[proc].attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
+        targetDossier.procedureDetails[proc].attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
       }
-      if(proc === 'Injonction' && notificationSortValue) dossier.procedureDetails[proc].notificationSort = notificationSortValue;
-      if(proc === 'Injonction' && notificationNoValue) dossier.procedureDetails[proc].notificationNo = notificationNoValue;
+      if(notificationSortValue) targetDossier.procedureDetails[proc].notificationSort = notificationSortValue;
+      if(notificationNoValue) targetDossier.procedureDetails[proc].notificationNo = notificationNoValue;
     };
+    assignProcedureMeta('ASS', assReference);
+    assignProcedureMeta('Restitution', restitutionReference);
     assignProcedureMeta('SFDC', sfdcReference);
     assignProcedureMeta('Injonction', injonctionReference);
     const normalizedImportedProcs = [...procedureSet];
@@ -13744,9 +13808,9 @@ async function applyExcelImport(payload, options = {}){
     const hasDualMontants = hasDualDates && orderedImportedProcs.length > 1 && !!primaryMontant && !!secondaryMontantCandidate;
 
     orderedImportedProcs.forEach((proc, idx)=>{
-      if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
-      if(importedDateDepotValue && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
-        dossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
+      if(!targetDossier.procedureDetails[proc]) targetDossier.procedureDetails[proc] = {};
+      if(importedDateDepotValue && !String(targetDossier.procedureDetails[proc].dateDepot || '').trim()){
+        targetDossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       }
       let procDate = normalizedPrimaryDate || normalizedSecondaryDate;
       if(hasDualDates){
@@ -13754,8 +13818,8 @@ async function applyExcelImport(payload, options = {}){
           ? normalizedPrimaryDate
           : normalizedSecondaryDate;
       }
-      if(procDate && !String(dossier.procedureDetails[proc].dateDepot || '').trim()){
-        dossier.procedureDetails[proc].dateDepot = procDate;
+      if(procDate && !String(targetDossier.procedureDetails[proc].dateDepot || '').trim()){
+        targetDossier.procedureDetails[proc].dateDepot = procDate;
       }
     });
 
@@ -13781,24 +13845,35 @@ async function applyExcelImport(payload, options = {}){
         });
       }
     }
-    dossier.montant = resolvedPrincipalMontant;
-    dossier.montantByProcedure = normalizeProcedureMontantGroups(
+    targetDossier.montant = resolvedPrincipalMontant;
+    targetDossier.montantByProcedure = normalizeProcedureMontantGroups(
       montantGroupSeed,
       orderedImportedProcs,
       resolvedPrincipalMontant || ''
     );
-    dossier.dateAffectation = hasDualDates
+    targetDossier.dateAffectation = hasDualDates
       ? normalizedPrimaryDate
       : (normalizedPrimaryDate || normalizedSecondaryDate || '');
-    dossier.procedureList = orderedImportedProcs;
-    dossier.procedure = orderedImportedProcs.join(', ');
+    targetDossier.procedureList = orderedImportedProcs;
+    targetDossier.procedure = orderedImportedProcs.join(', ');
 
-    client.dossiers.push(dossier);
-    if(globalImportEntry){
-      globalImportEntry.createdDossierUids.push(dossier.importUid);
+    if(!existingDossierToUpdate){
+      client.dossiers.push(dossier);
+      if(globalImportEntry){
+        globalImportEntry.createdDossierUids.push(dossier.importUid);
+      }
+      importedDossiersCount += 1;
+    } else {
+      // For existing dossiers, ensure new procedures are added to procedureList
+      procedures.forEach(p => {
+        if(!targetDossier.procedureList.includes(p)){
+          targetDossier.procedureList.push(p);
+        }
+      });
+      targetDossier.procedure = targetDossier.procedureList.join(', ');
+      importedDossiersCount += 1; // Mark as "imported" (updated)
     }
-    registerFallbackFromDossier(client, dossier);
-    importedDossiersCount += 1;
+    registerFallbackFromDossier(client, targetDossier);
     }, { chunkSize: IMPORT_EXCEL_CHUNK_SIZE, onProgress: reportDossiersProgress });
   }
 
@@ -14162,6 +14237,25 @@ async function handleAudienceImportFile(file){
   resetAudienceFiltersUi();
   showView('audience');
   renderAudience();
+}
+
+function handleDiligenceExcelImport(){
+  $('diligenceImportInput')?.click();
+}
+
+async function handleDiligenceImportFile(file){
+  if(!canImportData()){
+    alert('Accès refusé');
+    return;
+  }
+  await handleExcelImportFile(file, {
+    importDossiers: true,
+    importAudiences: false,
+    diligenceMode: true
+  });
+  resetDiligenceFiltersUi();
+  showView('diligence');
+  renderDiligence();
 }
 
 async function exportBackupExcelImportable(){
@@ -14860,6 +14954,13 @@ function setupEvents(){
   });
   $('diligenceSearchInput')?.addEventListener('input', renderDiligenceDebounced);
   $('exportDiligenceBtn')?.addEventListener('click', exportDiligenceXLS);
+  $('importDiligenceBtn')?.addEventListener('click', handleDiligenceExcelImport);
+  $('diligenceImportInput')?.addEventListener('change', (e)=> {
+    if(e.target.files?.[0]){
+      handleDiligenceImportFile(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
   $('previewDiligenceBtn')?.addEventListener('click', previewDiligenceSelectedRows);
   $('selectAllDiligenceBtn')?.addEventListener('click', ()=>setAllVisibleDiligenceRowsForPrint(true));
   $('clearAllDiligenceBtn')?.addEventListener('click', ()=>setAllVisibleDiligenceRowsForPrint(false));
@@ -17818,8 +17919,9 @@ function normalizeDiligenceNotificationSort(value){
 
 function getDiligenceNotificationSortValue(value, procedure = ''){
   const normalized = normalizeDiligenceNotificationSort(value);
+  if(normalized === '-') return '-';
   if(normalized) return normalized;
-  if(isDiligenceAssProcedure(procedure)) return 'notifier';
+  if(isDiligenceAssProcedure(procedure)) return '-';
   return '';
 }
 
@@ -18136,6 +18238,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="-" ${status === '-' ? 'selected' : ''}>-</option>
         <option value="notifier" ${status === 'notifier' ? 'selected' : ''}>notifier</option>
         <option value="NB" ${status === 'NB' ? 'selected' : ''}>NB</option>
       </select>
@@ -18287,7 +18390,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   if(!dossier.procedureDetails) dossier.procedureDetails = {};
   if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
   const details = dossier.procedureDetails[proc];
-  const previousValue = field === 'ville' ? dossier.ville : details[field];
+  const previousValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
   const previousOrdonnanceValue = details.attOrdOrOrdOk;
   let nextValue = value;
   if(field === 'attOrdOrOrdOk' || field === 'attDelegationOuDelegat'){
@@ -18305,10 +18408,13 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   }else if(field === 'pvPlice'){
     nextValue = getDiligencePvPliceValue(value);
   }
-  if(field === 'ville'){
-    dossier.ville = nextValue;
+  if(field === 'ville' || field === 'boiteNo'){
+    dossier[field] = nextValue;
   }else{
     details[field] = nextValue;
+    if(field === 'notificationNo' && !String(nextValue || '').trim()){
+      details.notificationSort = '-';
+    }
   }
   if(
     field === 'notificationNo'
@@ -18317,11 +18423,11 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   ){
     details.attOrdOrOrdOk = 'ok';
   }
-  const finalValue = field === 'ville' ? dossier.ville : details[field];
+  const finalValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
   queueDossierHistoryEntry(dossier, {
     source: 'diligence',
-    field: field === 'ville' ? 'ville' : `procedureDetails.${field}`,
-    procedure: field === 'ville' ? '' : proc,
+    field: (field === 'ville' || field === 'boiteNo') ? field : `procedureDetails.${field}`,
+    procedure: (field === 'ville' || field === 'boiteNo') ? '' : proc,
     before: previousValue,
     after: finalValue
   });

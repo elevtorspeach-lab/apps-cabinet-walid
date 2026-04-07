@@ -17712,6 +17712,7 @@ function normalizeDiligenceNotificationSort(value){
 
 function getDiligenceNotificationSortValue(value, procedure = ''){
   const normalized = normalizeDiligenceNotificationSort(value);
+  if(normalized === '-') return '-';
   if(normalized) return normalized;
   if(isDiligenceAssProcedure(procedure)) return 'notifier';
   return '';
@@ -18030,6 +18031,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="-" ${status === '-' ? 'selected' : ''}>-</option>
         <option value="notifier" ${status === 'notifier' ? 'selected' : ''}>notifier</option>
         <option value="NB" ${status === 'NB' ? 'selected' : ''}>NB</option>
       </select>
@@ -18181,7 +18183,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   if(!dossier.procedureDetails) dossier.procedureDetails = {};
   if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
   const details = dossier.procedureDetails[proc];
-  const previousValue = field === 'ville' ? dossier.ville : details[field];
+  const previousValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
   const previousOrdonnanceValue = details.attOrdOrOrdOk;
   let nextValue = value;
   if(field === 'attOrdOrOrdOk' || field === 'attDelegationOuDelegat'){
@@ -18199,10 +18201,13 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   }else if(field === 'pvPlice'){
     nextValue = getDiligencePvPliceValue(value);
   }
-  if(field === 'ville'){
-    dossier.ville = nextValue;
+  if(field === 'ville' || field === 'boiteNo'){
+    dossier[field] = nextValue;
   }else{
     details[field] = nextValue;
+    if(field === 'notificationNo' && !String(nextValue || '').trim()){
+      details.notificationSort = '-';
+    }
   }
   if(
     field === 'notificationNo'
@@ -18211,11 +18216,11 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   ){
     details.attOrdOrOrdOk = 'ok';
   }
-  const finalValue = field === 'ville' ? dossier.ville : details[field];
+  const finalValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
   queueDossierHistoryEntry(dossier, {
     source: 'diligence',
-    field: field === 'ville' ? 'ville' : `procedureDetails.${field}`,
-    procedure: field === 'ville' ? '' : proc,
+    field: (field === 'ville' || field === 'boiteNo') ? field : `procedureDetails.${field}`,
+    procedure: (field === 'ville' || field === 'boiteNo') ? '' : proc,
     before: previousValue,
     after: finalValue
   });

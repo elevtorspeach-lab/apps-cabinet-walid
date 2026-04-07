@@ -61,12 +61,12 @@ function shouldShowDiligenceCommandementColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualShowCommandementColumns) return 12;
-  if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 12;
+  if(diligenceVirtualShowCommandementColumns) return 13;
+  if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 13;
   if(diligenceVirtualShowAssColumns){
-    return getDiligenceAssHeaderMode(diligenceVirtualRows) === 'default' ? 16 : 22;
+    return getDiligenceAssHeaderMode(diligenceVirtualRows) === 'default' ? 17 : 23;
   }
-  return 15;
+  return 16;
 }
 
 function getDiligenceCompactProcedureMode(rows = []){
@@ -130,6 +130,7 @@ function buildDiligenceHeadHtml(){
     <th>Huissier</th>
     ${avisHeader ? `<th>${avisHeader}</th>` : ''}
     <th>Tribunal</th>
+    <th>Boîte N°</th>
   `;
 }
 
@@ -181,6 +182,8 @@ function renderDiligenceRowHtml(row){
     ? getDiligenceAssHeaderMode(diligenceVirtualRows)
     : 'default';
   const showAssFollowupColumns = isAssProcedure && assHeaderMode !== 'default';
+  const shouldHideTail = !String(row.details?.notificationNo || '').trim() || String(row.details?.notificationSort || '').trim() === '-';
+  const hideWrap = (html)=> shouldHideTail ? `<div style="display:none">${html}</div>` : html;
   if(diligenceVirtualShowCommandementColumns && isCommandementProcedure){
     return `
       <tr>
@@ -205,6 +208,7 @@ function renderDiligenceRowHtml(row){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'expert', row.details?.expert || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', row.details?.sort || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'dateVente', row.details?.dateVente || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
       </tr>
     `;
   }
@@ -217,26 +221,27 @@ function renderDiligenceRowHtml(row){
     : '';
   const nbFollowupCells = isAssNbLayout
     ? `
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'lettreRec', row.details?.lettreRec || '')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'curateurNo', row.details?.curateurNo || '')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'notifCurateur', row.details?.notifCurateur || '')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'sortNotif', row.details?.sortNotif || '')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue)}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'lettreRec', row.details?.lettreRec || ''))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'curateurNo', row.details?.curateurNo || ''))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'notifCurateur', row.details?.notifCurateur || ''))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'sortNotif', row.details?.sortNotif || ''))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || ''))}</td>
+      <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue))}</td>
     `
     : (showAssFollowupColumns ? '<td></td><td></td><td></td><td></td><td></td><td></td><td></td>' : '');
   const standardCells = `
-    ${showSharedNotificationColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>` : ''}
-    <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-    <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
-    <td>${renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue)}</td>
-    <td>${renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue)}</td>
+    ${showSharedNotificationColumns ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue))}</td>` : ''}
+    <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue))}</td>
+    <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>
+    <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue))}</td>
+    <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>
     ${!isAssProcedure
-      ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue)}</td>`
+      ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue))}</td>`
       : ''
     }
-    <td>${isCommandementProcedure ? '' : renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+    <td>${isCommandementProcedure ? '' : hideWrap(renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue))}</td>
+    <td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || ''))}</td>
   `;
   return `
     <tr>

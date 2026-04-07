@@ -63,6 +63,10 @@ function DiligenceSection() {
             <button id="exportDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-file-export"></i> Exporter
             </button>
+            <button id="importDiligenceBtn" className="btn-primary" type="button">
+              <i className="fa-solid fa-file-import"></i> Importer
+            </button>
+            <input type="file" id="diligenceImportInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
             <button id="previewDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-regular fa-eye"></i> Voir le fichier
             </button>
@@ -94,6 +98,7 @@ function DiligenceSection() {
                   <th>Délégation</th>
                   <th>Huissier</th>
                   <th>Tribunal</th>
+                  <th>Boîte N°</th>
                 </tr>
               </thead>
               <tbody id="diligenceBody"></tbody>
