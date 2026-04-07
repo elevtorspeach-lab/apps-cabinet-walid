@@ -18417,9 +18417,10 @@ function updateDiligenceFieldEncoded(clientId, dossierIndex, procKeyEncoded, fie
 function extractYearFromReferenceDiligence(ref) {
   if (!ref) return 9999;
   const str = String(ref).trim();
-  const match = str.match(/\/(20\d{2})$|\/(19\d{2})$/);
+  // On enlève l'ancre $ pour accepter des caractères comme l'étoile * après l'année
+  const match = str.match(/\/((20\d{2})|(19\d{2}))($|[\s\*])/);
   if (match) {
-    return parseInt(match[1] || match[2], 10);
+    return parseInt(match[2] || match[3], 10);
   }
   const parts = str.split('/');
   for (let i = parts.length - 1; i >= 0; i--) {
