@@ -18466,8 +18466,11 @@ function getFilteredDiligenceRows(allRows){
   });
   
   filteredRows.sort((a, b) => {
-    // Dans la page Diligence, les Références dossier doivent toujours s’afficher du plus ancien au plus récent (ASC).
-    return compareAudienceRowsByReferenceProximity(a, b, { direction: 1 });
+    const refA = getDiligenceReferenceDossierValue(a);
+    const refB = getDiligenceReferenceDossierValue(b);
+    const yearA = extractYearFromReferenceDiligence(refA);
+    const yearB = extractYearFromReferenceDiligence(refB);
+    return yearA - yearB;
   });
 
   diligenceFilteredRowsCacheInput = allRows;
