@@ -136,10 +136,11 @@ let dashboardCalendarCursor = new Date(new Date().getFullYear(), new Date().getM
 let procedureMontantGroups = [];
 const STORAGE_KEY = 'cabinet-avocat-state-v1';
 const INDEXED_DB_NAME = 'cabinet-avocat-db-v1';
-const INDEXED_DB_VERSION = 3;
+const INDEXED_DB_VERSION = 4;
 const INDEXED_DB_STORE = 'state_store';
 const INDEXED_DB_BACKUP_STORE = 'backup_store';
 const INDEXED_DB_EXPORT_STORE = 'export_store';
+const INDEXED_DB_SYNC_STORE = 'sync_queue';
 const INDEXED_DB_STATE_KEY = 'app_state';
 const INDEXED_DB_EXPORT_DIRECTORY_KEY = 'preferred_export_directory';
 const API_BASE_STORAGE_KEY = 'applicationversion1-api-base-v1';
@@ -2595,16 +2596,29 @@ function setSyncStatus(status, message){
   const text = $('syncStatusText');
   if(!badge || !text) return;
   badge.classList.remove('is-ok', 'is-error', 'is-syncing', 'is-pending', 'is-conflict');
-  const next = ['ok', 'error', 'syncing', 'pending', 'conflict'].includes(status) ? status : 'pending';
+  
+  let next = ['ok', 'error', 'syncing', 'pending', 'conflict'].includes(status) ? status : 'pending';
+  
+  // Si on est en mode local seulement, on ne veut pas effrayer l'utilisateur avec
+  // des messages de "Synchronisation serveur" qui n'auront pas lieu immédiatement.
+  const isLocal = LOCAL_ONLY_MODE || !remoteServerReachable;
+
+  if(isLocal && next === 'syncing'){
+    next = 'ok';
+  }
+
   badge.classList.add(`is-${next}`);
+  
   const fallbackText = {
-    pending: 'Modification detectee...',
+    pending: 'Modification détectée...',
     syncing: 'Synchronisation serveur...',
-    ok: 'Connecte au serveur (actif)',
+    ok: isLocal ? 'Mode local (actif)' : 'Connecté au serveur (actif)',
     error: 'Serveur indisponible (local)',
-    conflict: 'Conflit detecte, rechargement...'
+    conflict: 'Conflit détecté, rechargement...'
   };
-  text.innerText = String(message || fallbackText[next]);
+  
+  const displayMessage = message || fallbackText[next];
+  text.innerText = String(displayMessage);
 }
 
 function formatSyncMetricMs(value){
@@ -10288,6 +10302,9 @@ function getIndexedDbConnection(){
         if(!db.objectStoreNames.contains(INDEXED_DB_EXPORT_STORE)){
           db.createObjectStore(INDEXED_DB_EXPORT_STORE);
         }
+        if(!db.objectStoreNames.contains(INDEXED_DB_SYNC_STORE)){
+          db.createObjectStore(INDEXED_DB_SYNC_STORE, { autoIncrement: true });
+        }
       };
       req.onsuccess = ()=>resolve(req.result || null);
       req.onerror = ()=>{
@@ -10321,6 +10338,44 @@ async function readIndexedDbValue(storeName, key){
     }
   });
 }
+
+function getSyncQueueItems(){
+  return new Promise((resolve)=>{
+    getIndexedDbConnection().then(db=>{
+      if(!db) return resolve([]);
+      try{
+        const tx = db.transaction(INDEXED_DB_SYNC_STORE, 'readonly');
+        const store = tx.objectStore(INDEXED_DB_SYNC_STORE);
+        const req = store.getAll();
+        req.onsuccess = ()=>resolve(req.result || []);
+        req.onerror = ()=>resolve([]);
+      }catch(err){
+        resolve([]);
+      }
+    });
+  });
+}
+
+async function enqueueSyncAction(pathname, body){
+  const db = await getIndexedDbConnection();
+  if(!db) return false;
+  return new Promise((resolve)=>{
+    try{
+      const tx = db.transaction(INDEXED_DB_SYNC_STORE, 'readwrite');
+      const store = tx.objectStore(INDEXED_DB_SYNC_STORE);
+      store.add({ pathname, body, timestamp: Date.now() });
+      tx.oncomplete = ()=>{
+        resolve(true);
+        triggerSyncQueueFlush();
+      };
+      tx.onerror = ()=>resolve(false);
+    }catch(err){
+      resolve(false);
+    }
+  });
+}
+
+let isSyncingQueue = false;
 
 async function writeIndexedDbValue(storeName, key, value){
   const db = await getIndexedDbConnection();
@@ -10763,12 +10818,11 @@ async function persistLocalStateSnapshot(payload = null, options = {}){
     || importInProgress
     || shouldSkipFullLocalStorageCache(safePayload)
     || isLargeDatasetMode()
+    || source === 'diligence'
+    || source === 'audience'
   );
   if(preferDeferredCacheWrite){
-    queueDeferredStateCacheWrite(safePayload, {
-      indexedDb: true,
-      localStorage: true
-    });
+    queueDeferredLocalStateSnapshot(safePayload, { source, signature: nextSignature });
   }else{
     await writeStateToIndexedDb(safePayload);
     writeStateToLocalStorage(safePayload);
@@ -11000,7 +11054,77 @@ function requeueQueuedDossierPatchEntries(entries){
     });
   });
   setSyncStatus('syncing');
-  scheduleDossierPatchRetry();
+  // scheduleDossierPatchRetry(); // No longer needed, handled by SyncQueue heartbeat
+}
+
+function triggerSyncQueueFlush(){
+  if(persistSyncQueueTimer) clearTimeout(persistSyncQueueTimer);
+  persistSyncQueueTimer = setTimeout(()=>{
+    persistSyncQueueTimer = null;
+    flushSyncQueueNow();
+  }, 100);
+}
+
+async function flushSyncQueueNow(){
+  if(isSyncingQueue) return;
+  if(!remoteServerReachable || !hasRemoteAuthSession()) return;
+  if(LOCAL_ONLY_MODE) return;
+
+  const db = await getIndexedDbConnection();
+  if(!db) return;
+
+  isSyncingQueue = true;
+  let hasFailures = false;
+  
+  try {
+    const tx = db.transaction(INDEXED_DB_SYNC_STORE, 'readwrite');
+    const store = tx.objectStore(INDEXED_DB_SYNC_STORE);
+    const req = store.openCursor();
+    
+    return new Promise((resolve)=>{
+      req.onsuccess = async (event) => {
+        const cursor = event.target.result;
+        if(!cursor || hasFailures){
+          tx.oncomplete = ()=>resolve(true);
+          return;
+        }
+        
+        const item = cursor.value;
+        try {
+          const success = await persistRemoteRequestNow(item.pathname, item.body);
+          if(success){
+            cursor.delete();
+            cursor.continue();
+          } else {
+            hasFailures = true;
+            resolve(false);
+          }
+        } catch(err){
+          hasFailures = true;
+          resolve(false);
+        }
+      };
+      req.onerror = ()=>resolve(false);
+    });
+  } finally {
+    isSyncingQueue = false;
+    updateSyncStatusLabel();
+  }
+}
+
+function updateSyncStatusLabel(){
+  getSyncQueueItems().then(items=>{
+    if(!items.length){
+      setSyncStatus('ok');
+    } else {
+      const isLocal = LOCAL_ONLY_MODE || !remoteServerReachable;
+      if (isLocal) {
+        setSyncStatus('ok', 'Mode local (données sauvegardées)');
+      } else {
+        setSyncStatus('syncing', `Synchronisation: ${items.length} modification(s) en attente`);
+      }
+    }
+  });
 }
 
 async function flushQueuedDossierPatchesNow(){
@@ -11015,39 +11139,21 @@ async function flushQueuedDossierPatchesNow(){
   queuedDossierPatchEntries = new Map();
   const results = [];
   try{
+    const [entry] = entries;
     if(entries.length === 1){
-      const [entry] = entries;
-      const result = await persistRemoteRequestNow('/state/dossiers', entry.patch);
-      if(result){
-        resetDossierPatchRetryState();
-      }else{
-        requeueQueuedDossierPatchEntries(entries);
-      }
+      const result = await enqueueSyncAction('/state/dossiers', entry.patch);
       entry.resolvers.forEach(resolve=>resolve(result));
       results.push(result);
       return results;
     }
-    const result = await persistRemoteRequestNow('/state/dossiers/batch', {
-      patches: entries.map(entry=>entry.patch)
+    const result = await enqueueSyncAction('/state/dossiers/batch', {
+      patches: entries.map(e=>e.patch)
     });
-    if(result){
-      resetDossierPatchRetryState();
-    }else{
-      requeueQueuedDossierPatchEntries(entries);
-    }
-    entries.forEach((entry)=>{
-      entry.resolvers.forEach(resolve=>resolve(result));
+    entries.forEach((e)=>{
+      e.resolvers.forEach(resolve=>resolve(result));
     });
     results.push(result);
   }catch(err){
-    if(isRecoverableDossierPersistFailure(err)){
-      console.warn('Persistance dossier saturée, replanification en arrière-plan', err);
-      requeueQueuedDossierPatchEntries(entries);
-      entries.forEach((entry)=>{
-        entry.resolvers.forEach(resolve=>resolve(false));
-      });
-      return [false];
-    }
     entries.forEach((entry)=>{
       entry.rejecters.forEach(reject=>reject(err));
     });
@@ -11061,7 +11167,7 @@ async function persistDossierPatchNow(patch, options = {}){
   const queueKey = getDossierPatchQueueKey(patch);
   if(!queueKey){
     await flushQueuedDossierPatchesNow();
-    return persistRemoteRequestNow('/state/dossiers', patch);
+    return enqueueSyncAction('/state/dossiers', patch);
   }
   return new Promise((resolve, reject)=>{
     const existing = queuedDossierPatchEntries.get(queueKey);
@@ -11098,22 +11204,19 @@ async function persistAppStateNow(payload = null){
     : buildAppStatePayload();
   queuedPersistPayload = null;
   await persistLocalStateSnapshot(nextPayload, { source: 'persist', signature: '' });
-  return persistRemoteRequestNow('/state', nextPayload);
+  return enqueueSyncAction('/state', nextPayload);
 }
 
 function queuePersistAppState(){
   markAudienceRowsCacheDirty();
   queuedPersistPayload = buildAppStatePayload();
-  // Only show 'syncing' indicator if the server is actually reachable;
-  // otherwise keep the local-mode status so the UI never freezes.
-  if(remoteServerReachable && !LOCAL_ONLY_MODE && hasRemoteAuthSession()){
-    setSyncStatus('syncing');
-  }
+  setSyncStatus('syncing');
+
   if(persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(()=>{
     persistTimer = null;
     persistLocalStateSnapshot(queuedPersistPayload, { source: 'persist', signature: '' })
-      .then(()=>persistRemoteRequestNow('/state', queuedPersistPayload))
+      .then(()=>enqueueSyncAction('/state', queuedPersistPayload))
       .catch((err)=>{
       console.warn('Impossible de sauvegarder l’état applicatif', err);
     });
@@ -14453,6 +14556,8 @@ async function bootstrapApplication(){
     console.error('Initialisation application impossible', err);
     setSyncStatus('error', LOCAL_ONLY_MODE ? 'Mode local (offline)' : 'Mode local (serveur indisponible)');
   }
+  updateSyncStatusLabel();
+  setInterval(flushSyncQueueNow, 30000);
 }
 
 // ================== EVENTS ==================
@@ -18361,19 +18466,8 @@ function getFilteredDiligenceRows(allRows){
   });
   
   filteredRows.sort((a, b) => {
-    const tribA = String(a.tribunal || '').trim();
-    const tribB = String(b.tribunal || '').trim();
-    if (tribA !== tribB) {
-      if (!tribA) return 1;
-      if (!tribB) return -1;
-      return tribA.localeCompare(tribB, 'fr');
-    }
-
-    const refA = getDiligenceReferenceDossierValue(a);
-    const refB = getDiligenceReferenceDossierValue(b);
-    const yearA = extractYearFromReferenceDiligence(refA);
-    const yearB = extractYearFromReferenceDiligence(refB);
-    return yearA - yearB;
+    // Dans la page Diligence, les Références dossier doivent toujours s’afficher du plus ancien au plus récent (ASC).
+    return compareAudienceRowsByReferenceProximity(a, b, { direction: 1 });
   });
 
   diligenceFilteredRowsCacheInput = allRows;
@@ -20251,32 +20345,9 @@ function getAudienceDateDepotDisplayValue(row){
 }
 
 function compareAudienceRowsForExport(a, b) {
-  const getTrib = (row) => String(row?.draft?.tribunal || row?.p?.tribunal || row?.d?.tribunal || '').trim();
-  const tribA = getTrib(a);
-  const tribB = getTrib(b);
-  if (tribA !== tribB) {
-    if (!tribA) return 1;
-    if (!tribB) return -1;
-    return tribA.localeCompare(tribB, 'fr');
-  }
-
-  const getYear = (row) => {
-    const ref = String(row?.draft?.refDossier || row?.p?.referenceClient || row?.d?.referenceClient || '').trim();
-    const match = ref.match(/\/(20\d{2})$|\/(19\d{2})$/);
-    if (match) return parseInt(match[1] || match[2], 10);
-    const parts = ref.split('/');
-    for (let i = parts.length - 1; i >= 0; i--) {
-      const p = parts[i].trim();
-      if (p.length === 4 && !isNaN(p)) return parseInt(p, 10);
-    }
-    return 9999;
-  };
-  
-  const yearA = getYear(a);
-  const yearB = getYear(b);
-  if (yearA !== yearB) return yearA - yearB;
-
-  return compareAudienceRowsByReferenceProximity(a, b);
+  // Use the reference-based sorting logic which handles the YYYY/8104/XXXX format.
+  // Requirement: YYYY Descending, XXXX Descending.
+  return compareAudienceRowsByReferenceProximity(a, b, { direction: -1 });
 }
 
 function getSelectedAudienceRowsForExport(){
@@ -20580,7 +20651,8 @@ function parseAudienceReferenceParts(value){
   return { first, middle, year };
 }
 
-function compareAudienceRowsByReferenceProximity(a, b){
+function compareAudienceRowsByReferenceProximity(a, b, options = {}){
+  const direction = options.direction === 1 ? 1 : -1; // Default to DESC (-1) as requested first
   const metaA = buildAudienceSortMeta(a);
   const metaB = buildAudienceSortMeta(b);
   const refA = metaA.ref;
@@ -20589,9 +20661,10 @@ function compareAudienceRowsByReferenceProximity(a, b){
   const pb = metaB.parts;
 
   if(pa && pb){
-    if(pa.year !== pb.year) return pb.year - pa.year;
-    if(pa.middle !== pb.middle) return pa.middle - pb.middle;
-    if(pa.first !== pb.first) return pa.first - pb.first;
+    // Priority 1: YYYY
+    if(pa.year !== pb.year) return (pa.year - pb.year) * direction;
+    // Priority 2: XXXX (First part)
+    if(pa.first !== pb.first) return (pa.first - pb.first) * direction;
   }else if(pa){
     return -1;
   }else if(pb){
@@ -20685,7 +20758,8 @@ function compareAudienceSortMeta(aMeta, bMeta){
   const pa = aMeta?.parts;
   const pb = bMeta?.parts;
   if(pa && pb){
-    if(pa.year !== pb.year) return pb.year - pa.year;
+    // Board view sorting: Always ASC (Oldest first) as per user request for consistency
+    if(pa.year !== pb.year) return pa.year - pb.year;
     if(pa.middle !== pb.middle) return pa.middle - pb.middle;
     if(pa.first !== pb.first) return pa.first - pb.first;
   }else if(pa){
