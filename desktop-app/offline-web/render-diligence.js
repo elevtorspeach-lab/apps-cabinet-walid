@@ -67,7 +67,7 @@ function shouldShowDiligenceCommandementColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualShowCommandementColumns) return 15;
+  if(diligenceVirtualShowCommandementColumns) return 16;
   if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 13;
   if(diligenceVirtualShowAssColumns){
     const assMode = getDiligenceAssHeaderMode(diligenceVirtualRows);
@@ -106,6 +106,7 @@ function buildDiligenceHeadHtml(){
       <th>Nom</th>
       <th>Date dépôt</th>
       <th>Execution N°</th>
+      <th>Pub au journal</th>
       <th>Notif Conservateur</th>
       <th>Notif débiteur</th>
       <th>Ref expertise</th>
@@ -220,6 +221,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
         <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', row.details?.executionNo || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'pubAuJournal', row.details?.pubAuJournal || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifConservateur', row.details?.notifConservateur || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifDebiteur', row.details?.notifDebiteur || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, refField, refValue)}</td>
