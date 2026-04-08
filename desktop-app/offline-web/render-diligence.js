@@ -71,9 +71,9 @@ function getDiligenceColCount(){
   if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 13;
   if(diligenceVirtualShowAssColumns){
     const assMode = getDiligenceAssHeaderMode(diligenceVirtualRows);
-    if(assMode !== 'default') return 23;
+    if(assMode !== 'default') return 24;
     const hasNotifier = Array.isArray(diligenceVirtualRows) && diligenceVirtualRows.some(row => isDiligenceAssNotifierLayout(row));
-    return hasNotifier ? 23 : 17;
+    return hasNotifier ? 24 : 17;
   }
   return 16;
 }
@@ -120,7 +120,7 @@ function buildDiligenceHeadHtml(){
   const showAssFollowupColumns = diligenceVirtualShowAssColumns && assHeaderMode !== 'default';
   const hasNotifierRows = diligenceVirtualShowAssColumns && Array.isArray(diligenceVirtualRows) && diligenceVirtualRows.some(row => isDiligenceAssNotifierLayout(row));
   const showStandardContinuation = showAssFollowupColumns || hasNotifierRows;
-  const avisHeader = (diligenceVirtualShowAssColumns && !hasNotifierRows) ? '' : 'Sort exécution';
+  const avisHeader = (diligenceVirtualShowAssColumns && !showStandardContinuation) ? '' : 'Sort exécution';
   const compactMode = diligenceVirtualCompactProcedureMode;
   const showCompactInjonctionColumns = !diligenceVirtualShowAssColumns && compactMode !== 'sfdc' && compactMode !== 'sbien';
   const showSharedNotificationColumns = diligenceVirtualShowAssColumns || showCompactInjonctionColumns;
@@ -195,7 +195,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const showAssFollowupColumns = isAssProcedure && assHeaderMode !== 'default';
   const isAssNbLayoutValue = isDiligenceAssNbLayout(row);
   const isAssNotifierLayoutValue = isDiligenceAssNotifierLayout(row);
-  const avisHeader = (diligenceVirtualShowAssColumns && !isAssNotifierLayoutValue) ? '' : 'Sort exécution';
+  const avisHeader = (diligenceVirtualShowAssColumns && !(isAssNbLayoutValue || isAssNotifierLayoutValue)) ? '' : 'Sort exécution';
   const shouldHideTail = isAssProcedure && !(isAssNbLayoutValue || isAssNotifierLayoutValue);
   const hideWrap = (html)=> shouldHideTail ? `<div style="display:none">${html}</div>` : html;
   if(diligenceVirtualShowCommandementColumns && isCommandementProcedure){
