@@ -392,10 +392,15 @@ function renderDiligence(options = {}){
         const headVariant = diligenceVirtualShowCommandementColumns
           ? 'commandement'
           : (diligenceVirtualShowAssColumns ? getDiligenceAssHeaderMode(pageData.rows) : diligenceVirtualCompactProcedureMode);
+        
+        const hasNotifier = diligenceVirtualShowAssColumns && pageData.rows.some(row => isDiligenceAssNotifierLayout(row));
+        const hasPlie = diligenceVirtualShowAssColumns && hasDiligenceCasablancaTpiAssRow(pageData.rows);
+        const layoutVersion = `${hasNotifier ? 'notif' : 'std'}-${hasPlie ? 'plie' : 'noplie'}`;
+
         setElementHtmlWithRenderKey(
           headRow,
           buildDiligenceHeadHtml(),
-          `diligence-head::${headMode}::${headVariant}`,
+          `diligence-head::${headMode}::${headVariant}::${layoutVersion}`,
           { trustRenderKey: true }
         );
       }
