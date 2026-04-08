@@ -4498,6 +4498,12 @@ function isAdmin(){
 function isViewer(){
   return normalizeUserRole(currentUser?.role) === 'client';
 }
+window.isViewer = isViewer;
+window.isManager = isManager;
+window.isAdmin = isAdmin;
+window.canEditData = canEditData;
+window.canImportData = canImportData;
+window.canExportData = canExportData;
 
 function isDefaultManagerUser(user){
   return String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME;
@@ -15619,12 +15625,9 @@ function applyRoleUI(options = {}){
   const canImport = canImportData();
   const canExport = canExportData();
 
-  if($('creationLink')) $('creationLink').style.display = viewer ? 'none' : '';
-  if($('clientsLink')) $('clientsLink').style.display = viewer ? 'none' : '';
-  if($('suiviLink')) $('suiviLink').style.display = '';
-  if($('audienceLink')) $('audienceLink').style.display = viewer ? 'none' : '';
-  if($('diligenceLink')) $('diligenceLink').style.display = viewer ? 'none' : '';
-  if($('salleLink')) $('salleLink').style.display = viewer ? 'none' : '';
+  // Sidebar visibility handled by Sidebar.jsx
+  if($('equipeLink')) $('equipeLink').style.display = manager ? '' : 'none';
+  if($('recycleLink')) $('recycleLink').style.display = manager ? '' : 'none';
   if($('equipeLink')) $('equipeLink').style.display = manager ? '' : 'none';
   if($('recycleLink')) $('recycleLink').style.display = manager ? '' : 'none';
   if($('openDesktopStateFileBtn')) $('openDesktopStateFileBtn').style.display = canImport ? '' : 'none';
@@ -18337,18 +18340,19 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         oninput="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
     `;
   }
-  if(field === 'plie'){
+  if(field === 'plie' || field === 'pubAuJournal'){
     const val = String(value || '').trim();
     if(!row?.canEdit){
       return escapeHtml(val || '-');
     }
+    const isPub = field === 'pubAuJournal';
     return `
       <select
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         <option value="" ${val === '' ? 'selected' : ''}>-</option>
-        <option value="att plie" ${val === 'att plie' ? 'selected' : ''}>att plie</option>
-        <option value="plie ok" ${val === 'plie ok' ? 'selected' : ''}>plie ok</option>
+        <option value="${isPub ? 'att pub' : 'att plie'}" ${val === (isPub ? 'att pub' : 'att plie') ? 'selected' : ''}>${isPub ? 'att pub' : 'att plie'}</option>
+        <option value="${isPub ? 'pub ok' : 'plie ok'}" ${val === (isPub ? 'pub ok' : 'plie ok') ? 'selected' : ''}>${isPub ? 'pub ok' : 'plie ok'}</option>
       </select>
     `;
   }
