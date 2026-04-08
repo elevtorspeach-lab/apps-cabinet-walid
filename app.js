@@ -18345,13 +18345,14 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     if(!row?.canEdit){
       return escapeHtml(val || '-');
     }
+    const isPub = field === 'pubAuJournal';
     return `
       <select
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         <option value="" ${val === '' ? 'selected' : ''}>-</option>
-        <option value="att plie" ${val === 'att plie' ? 'selected' : ''}>att plie</option>
-        <option value="plie ok" ${val === 'plie ok' ? 'selected' : ''}>plie ok</option>
+        <option value="${isPub ? 'att pub' : 'att plie'}" ${val === (isPub ? 'att pub' : 'att plie') ? 'selected' : ''}>${isPub ? 'att pub' : 'att plie'}</option>
+        <option value="${isPub ? 'pub ok' : 'plie ok'}" ${val === (isPub ? 'pub ok' : 'plie ok') ? 'selected' : ''}>${isPub ? 'pub ok' : 'plie ok'}</option>
       </select>
     `;
   }
