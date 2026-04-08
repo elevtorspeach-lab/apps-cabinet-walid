@@ -67,7 +67,7 @@ function shouldShowDiligenceCommandementColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualShowCommandementColumns) return 13;
+  if(diligenceVirtualShowCommandementColumns) return 15;
   if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 13;
   if(diligenceVirtualShowAssColumns){
     const assMode = getDiligenceAssHeaderMode(diligenceVirtualRows);
@@ -101,6 +101,7 @@ function buildDiligenceHeadHtml(){
   if(diligenceVirtualShowCommandementColumns){
     return `
       <th>Client</th>
+      <th>Type</th>
       <th>Référence client</th>
       <th>Nom</th>
       <th>Date dépôt</th>
@@ -112,6 +113,8 @@ function buildDiligenceHeadHtml(){
       <th>Expert</th>
       <th>Sort</th>
       <th>Date vente</th>
+      <th>Tribunal</th>
+      <th>Boîte N°</th>
     `;
   }
   const assHeaderMode = diligenceVirtualShowAssColumns
@@ -224,6 +227,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'expert', row.details?.expert || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', row.details?.sort || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'dateVente', row.details?.dateVente || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
       </tr>
     `;
