@@ -49,13 +49,13 @@ function Sidebar() {
           <i className="fa-solid fa-door-open"></i> Salle
         </div>
         
-        {isAdminOrManager && (
+        {!isClient && (
           <div id="equipeLink" className="nav-link">
             <i className="fa-solid fa-user-group"></i> Equipe
           </div>
         )}
         
-        {isAdminOrManager && (
+        {!isClient && (
           <div id="recycleLink" className="nav-link">
             <i className="fa-solid fa-trash-arrow-up"></i> Corbeille
           </div>

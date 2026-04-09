@@ -15626,10 +15626,6 @@ function applyRoleUI(options = {}){
   const canExport = canExportData();
 
   // Sidebar visibility handled by Sidebar.jsx
-  if($('equipeLink')) $('equipeLink').style.display = manager ? '' : 'none';
-  if($('recycleLink')) $('recycleLink').style.display = manager ? '' : 'none';
-  if($('equipeLink')) $('equipeLink').style.display = manager ? '' : 'none';
-  if($('recycleLink')) $('recycleLink').style.display = manager ? '' : 'none';
   if($('openDesktopStateFileBtn')) $('openDesktopStateFileBtn').style.display = canImport ? '' : 'none';
   if($('importAppsavocatBtn')) $('importAppsavocatBtn').style.display = canImport ? '' : 'none';
   if($('addClientBtn')) $('addClientBtn').style.display = canCreateClient ? '' : 'none';
