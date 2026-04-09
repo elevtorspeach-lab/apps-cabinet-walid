@@ -18334,7 +18334,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     }
     return `
       <input
-        type="date"
+        type="text"
         class="diligence-inline-input"
         value="${escapeAttr(normalized)}"
         oninput="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
