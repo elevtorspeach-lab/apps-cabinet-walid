@@ -718,7 +718,7 @@ body{
 }
 .form-group{display:flex;flex-direction:column;gap:6px}
 .creation-procedure-only-hidden{display:none !important}
-.caution-cin-rc-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.caution-cin-rc-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .restitution-extra-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
 .full{grid-column:1 / -1}
 input,select,textarea{padding:10px 12px;border-radius:8px;border:2px solid #e5e7eb}
@@ -1468,6 +1468,7 @@ tr:hover{background:#f1f5f9}
 .checkbox-group label[data-proc="SFDC"].active{background:#f59e0b;border-color:#f59e0b}
 .checkbox-group label[data-proc="S/bien"].active{background:#e11d48;border-color:#e11d48}
 .checkbox-group label[data-proc="Injonction"].active{background:#0ea5a4;border-color:#0ea5a4}
+.checkbox-group label[data-proc="Sanlam"].active{background:#1e293b;border-color:#1e293b}
 .checkbox-group label[data-proc="Autre"].active{background:#ef4444;border-color:#ef4444}
 
 .proc-card::after{content:'';position:absolute;bottom:0;left:0;width:100%;height:5px;background:#cbd5e1}
@@ -3164,6 +3165,12 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   background:#ccfbf1;
   color:#0f766e;
   border-color:#5eead4;
+}
+
+.proc-pill.proc-sanlam{
+  background:#1e293b;
+  color:#ffffff;
+  border-color:#0f172a;
 }
 
 .proc-pill.proc-autre{

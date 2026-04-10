@@ -143,22 +143,31 @@ function CreationSection() {
                 <input type="text" id="metrageInput" placeholder="Métrage" />
               </div>
             </div>
-            <div id="sanlamFieldsContainer" className="creation-form-row creation-form-row-three" style={{ display: 'none' }}>
+
+            <div className="creation-form-row creation-form-row-three" data-procedure-visibility="Sanlam">
+              <div className="form-group creation-layout-card">
+                <label>N / Réf</label>
+                <input type="text" id="sanlamNRefInput" placeholder="N / Réf" />
+              </div>
               <div className="form-group creation-layout-card">
                 <label>Police n°</label>
                 <input type="text" id="sanlamPoliceInput" placeholder="Police n°" />
               </div>
               <div className="form-group creation-layout-card">
-                <label>Sinistre N°</label>
-                <input type="text" id="sanlamSinistreInput" placeholder="Sinistre N°" />
+                <label>Sinistre n°</label>
+                <input type="text" id="sanlamSinistreInput" placeholder="Sinistre n°" />
               </div>
               <div className="form-group creation-layout-card">
                 <label>Date accident</label>
                 <input type="text" id="sanlamDateAccidentInput" placeholder="jj/mm/aaaa" />
               </div>
               <div className="form-group creation-layout-card">
-                <label>CIN conducteur ou souscripteur</label>
-                <input type="text" id="sanlamCinInput" placeholder="CIN..." />
+                <label>CIN conducteur</label>
+                <input type="text" id="sanlamCinConducteurInput" placeholder="CIN conducteur" />
+              </div>
+              <div className="form-group creation-layout-card">
+                <label>Souscripteur</label>
+                <input type="text" id="sanlamSouscripteurInput" placeholder="Souscripteur" />
               </div>
             </div>
           </div>
@@ -183,6 +192,7 @@ function CreationSection() {
               <label data-proc="Vérification de créance"><input type="checkbox" defaultValue="Vérification de créance" className="proc-check" /> Vérification de créance</label>
               <label data-proc="Redressement"><input type="checkbox" defaultValue="Redressement" className="proc-check" /> Redressement</label>
               <label data-proc="Liquidation judiciaire"><input type="checkbox" defaultValue="Liquidation judiciaire" className="proc-check" /> Liquidation judiciaire</label>
+              <label data-proc="Sanlam"><input type="checkbox" defaultValue="Sanlam" className="proc-check" /> Sanlam</label>
             </div>
             <div className="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure" />

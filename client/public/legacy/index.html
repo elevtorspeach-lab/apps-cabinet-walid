@@ -676,19 +676,47 @@
             <div class="creation-form-row creation-form-row-three" data-procedure-visibility="Commandement">
               <div class="form-group creation-layout-card">
                 <label>TF N°</label>
-                <input type="text" id="efNumberInput" placeholder="TF N°"/>
+                <input type="text" id="efNumberInput" placeholder="TF N°" />
               </div>
 
               <div class="form-group creation-layout-card">
                 <label>Conservation</label>
-                <input type="text" id="conservationInput" placeholder="Conservation"/>
+                <input type="text" id="conservationInput" placeholder="Conservation" />
               </div>
 
               <div class="form-group creation-layout-card">
                 <label>Métrage</label>
-                <input type="text" id="metrageInput" placeholder="Métrage"/>
+                <input type="text" id="metrageInput" placeholder="Métrage" />
               </div>
             </div>
+
+            <div class="creation-form-row creation-form-row-three" data-procedure-visibility="Sanlam">
+              <div class="form-group creation-layout-card">
+                <label>N / Réf</label>
+                <input type="text" id="sanlamNRefInput" placeholder="N / Réf" />
+              </div>
+              <div class="form-group creation-layout-card">
+                <label>Police n°</label>
+                <input type="text" id="sanlamPoliceInput" placeholder="Police n°" />
+              </div>
+              <div class="form-group creation-layout-card">
+                <label>Sinistre n°</label>
+                <input type="text" id="sanlamSinistreInput" placeholder="Sinistre n°" />
+              </div>
+              <div class="form-group creation-layout-card">
+                <label>Date accident</label>
+                <input type="text" id="sanlamDateAccidentInput" placeholder="jj/mm/aaaa" />
+              </div>
+              <div class="form-group creation-layout-card">
+                <label>CIN conducteur</label>
+                <input type="text" id="sanlamCinConducteurInput" placeholder="CIN conducteur" />
+              </div>
+              <div class="form-group creation-layout-card">
+                <label>Souscripteur</label>
+                <input type="text" id="sanlamSouscripteurInput" placeholder="Souscripteur" />
+              </div>
+            </div>
+
           </div>
 
           <div class="form-group full">
@@ -710,6 +738,7 @@
               <label data-proc="Vérification de créance"><input type="checkbox" value="Vérification de créance" class="proc-check"> Vérification de créance</label>
               <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
               <label data-proc="Liquidation judiciaire"><input type="checkbox" value="Liquidation judiciaire" class="proc-check"> Liquidation judiciaire</label>
+              <label data-proc="Sanlam"><input type="checkbox" value="Sanlam" class="proc-check"> Sanlam</label>
             </div>
             <div class="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">

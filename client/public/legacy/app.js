@@ -492,7 +492,13 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.notifCurateur': 'Notif curateur',
   'procedureDetails.sortNotif': 'Sort notif',
   'procedureDetails.avisCurateur': 'Avis curateur',
-  'procedureDetails.pvPlice': 'PV Police'
+  'procedureDetails.pvPlice': 'PV Police',
+  sanlamNRef: 'N / Réf (Sanlam)',
+  sanlamPolice: 'Police n°',
+  sanlamSinistre: 'Sinistre n°',
+  sanlamDateAccident: 'Date accident',
+  sanlamCinConducteur: 'CIN conducteur',
+  sanlamSouscripteur: 'Souscripteur'
 };
 const DOSSIER_HISTORY_SOURCE_LABELS = {
   form: 'Modifier dossier',
@@ -15706,10 +15712,10 @@ function updateCreationPinnedClientUi(){
   if(!pinnedClient){
     hint.style.display = 'none';
     hint.innerHTML = '';
-    return;
+  } else {
+    hint.style.display = 'flex';
+    hint.innerHTML = `Client sélectionné automatiquement: <strong>${escapeHtml(pinnedClient.name || '-')}</strong>. Vous pouvez le changer si besoin.`;
   }
-  hint.style.display = 'flex';
-  hint.innerHTML = `Client sélectionné automatiquement: <strong>${escapeHtml(pinnedClient.name || '-')}</strong>. Vous pouvez le changer si besoin.`;
 }
 
 function updateClientDropdown(options = {}){
@@ -16014,6 +16020,12 @@ async function addDossier(){
       note: $('noteInput')?.value.trim() || '',
       avancement: $('avancementInput')?.value.trim() || '',
       statut: $('statutInput')?.value || 'En cours',
+      sanlamNRef: $('sanlamNRefInput')?.value.trim() || '',
+      sanlamPolice: $('sanlamPoliceInput')?.value.trim() || '',
+      sanlamSinistre: $('sanlamSinistreInput')?.value.trim() || '',
+      sanlamDateAccident: $('sanlamDateAccidentInput')?.value.trim() || '',
+      sanlamCinConducteur: $('sanlamCinConducteurInput')?.value.trim() || '',
+      sanlamSouscripteur: $('sanlamSouscripteurInput')?.value.trim() || '',
       files: await serializeUploadedFiles(uploadedFiles)
     };
     dossier.history = [];
@@ -16346,6 +16358,7 @@ function renderProcedureBadges(procedureText){
     if(name === 'SFDC') cls = 'proc-sfdc';
     if(name === 'S/bien') cls = 'proc-sbien';
     if(name === 'Injonction') cls = 'proc-injonction';
+    if(name === 'Sanlam') cls = 'proc-sanlam';
     return `<span class="proc-pill ${cls}">${escapeHtml(name)}</span>`;
   }).join('');
   return `<div class="proc-pill-list">${pills}</div>`;
@@ -16397,6 +16410,12 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
     dossier?.note || '',
     dossier?.avancement || '',
     dossier?.statut || '',
+    dossier?.sanlamNRef || '',
+    dossier?.sanlamPolice || '',
+    dossier?.sanlamSinistre || '',
+    dossier?.sanlamDateAccident || '',
+    dossier?.sanlamCinConducteur || '',
+    dossier?.sanlamSouscripteur || '',
     ...(Array.isArray(procedures) ? procedures : []),
     ...(Array.isArray(tribunaux) ? tribunaux : []),
     ...fileNames
@@ -16659,6 +16678,12 @@ function editDossier(clientId, index){
   if($('noteInput')) $('noteInput').value = d.note || '';
   if($('avancementInput')) $('avancementInput').value = d.avancement || '';
   if($('statutInput')) $('statutInput').value = d.statut || 'En cours';
+  if($('sanlamNRefInput')) $('sanlamNRefInput').value = d.sanlamNRef || '';
+  if($('sanlamPoliceInput')) $('sanlamPoliceInput').value = d.sanlamPolice || '';
+  if($('sanlamSinistreInput')) $('sanlamSinistreInput').value = d.sanlamSinistre || '';
+  if($('sanlamDateAccidentInput')) $('sanlamDateAccidentInput').value = d.sanlamDateAccident || '';
+  if($('sanlamCinConducteurInput')) $('sanlamCinConducteurInput').value = d.sanlamCinConducteur || '';
+  if($('sanlamSouscripteurInput')) $('sanlamSouscripteurInput').value = d.sanlamSouscripteur || '';
   uploadedFiles = Array.isArray(d.files) ? d.files.map(f=>({ ...f })) : [];
   renderFileList();
 
@@ -16810,8 +16835,15 @@ function openDossierDetails(clientId, index){
     ['Métrage', dossier.metrage || '-'],
     ['Statut', getDossierDisplayStatusSnapshot(dossier).statut || 'En cours'],
     ['Avancement', dossier.avancement || '-'],
-    ['Note', dossier.note || '-']
+    ['Note', dossier.note || '-'],
+    ['N / Réf (Sanlam)', dossier.sanlamNRef || '-'],
+    ['Police n°', dossier.sanlamPolice || '-'],
+    ['Sinistre n°', dossier.sanlamSinistre || '-'],
+    ['Date accident', dossier.sanlamDateAccident || '-'],
+    ['CIN conducteur', dossier.sanlamCinConducteur || '-'],
+    ['Souscripteur', dossier.sanlamSouscripteur || '-']
   ];
+
 
   const detailsHtml = detailsRows.map(([label, value])=>`
     <div class="details-row">
@@ -22613,6 +22645,7 @@ function syncConditionalCreationFieldsVisibility(forceList){
     fieldContainer.classList.toggle('creation-procedure-only-hidden', !shouldShow);
   });
 }
+
 
 function renderProcedureDetails(forceList, forceDraft){
   const container = $('procedureDetails');
