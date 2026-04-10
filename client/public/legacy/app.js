@@ -16684,7 +16684,8 @@ function editDossier(clientId, index){
 
   d.procedureList = procs.slice();
   d.procedure = procs.join(', ');
-  customProcedures = procs.filter(p=>!standard.has(p));
+  const standardLower = new Set(['ass','restitution','commandement','nantissement','redressement','vérification de créance','liquidation judiciaire','sfdc','s/bien','injonction']);
+  customProcedures = procs.filter(p=>!standardLower.has(String(p).trim().toLowerCase()));
   $('procedureCustom').value = '';
   renderCustomProcedures();
 
@@ -22293,11 +22294,11 @@ function applyProcedureDraftToCards(details, root = document){
 }
 
 function activateProcedureCheckboxes(procList){
-  const values = new Set((procList || []).map(v=>String(v || '').trim()).filter(Boolean));
-  if(!values.size) return;
+  const normalizedValues = new Set((procList || []).map(v=>String(v || '').trim().toLowerCase()).filter(Boolean));
+  if(!normalizedValues.size) return;
   document.querySelectorAll('.proc-check').forEach(cb=>{
-    const rawValue = String(cb.value || '').trim();
-    if(!values.has(rawValue)) return;
+    const checkValue = String(cb.value || '').trim().toLowerCase();
+    if(!normalizedValues.has(checkValue)) return;
     cb.checked = true;
     const label = cb.closest('label');
     if(label) label.classList.add('active');
@@ -22305,7 +22306,8 @@ function activateProcedureCheckboxes(procList){
 }
 
 function buildProcedureCardFieldsHtml(baseProc, tribunalFieldHtml, addOnlyButtonHtml){
-  if(baseProc === 'Commandement'){
+  const b = String(baseProc || '').trim().toLowerCase();
+  if(b === 'commandement'){
     return `
       <input type="text" data-field="dateDepot" placeholder="Date dépôt">
       <input type="text" data-field="executionNo" placeholder="Execution N°">
@@ -22337,7 +22339,7 @@ function buildProcedureCardFieldsHtml(baseProc, tribunalFieldHtml, addOnlyButton
       ${addOnlyButtonHtml}
     `;
   }
-  if(baseProc === 'SFDC' || baseProc === 'S/bien'){
+  if(b === 'sfdc' || b === 's/bien'){
     return `
       <input type="text" data-field="dateDepot" placeholder="Date dépôt">
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
@@ -22457,18 +22459,18 @@ function getProcedureInsertIndexForVariant(existingNames, sourceProc){
 }
 
 function getProcedureColorClass(procName){
-  const base = getProcedureBaseName(procName);
-  if(base === 'ASS') return 'proc-ass';
-  if(base === 'Restitution') return 'proc-restitution';
-  if(base === 'Commandement') return 'proc-commandement';
-  if(base === 'Nantissement') return 'proc-nantissement';
-  if(base === 'Redressement') return 'proc-redressement';
-  if(base === 'Vérification de créance') return 'proc-verification-creance';
-  if(base === 'Liquidation judiciaire') return 'proc-declaration-creance';
-  if(base === 'SFDC') return 'proc-sfdc';
-  if(base === 'S/bien') return 'proc-sbien';
-  if(base === 'Injonction') return 'proc-injonction';
-  if(customProcedures.includes(base)) return 'proc-autre';
+  const b = getProcedureBaseName(procName).toLowerCase();
+  if(b === 'ass') return 'proc-ass';
+  if(b === 'restitution') return 'proc-restitution';
+  if(b === 'commandement') return 'proc-commandement';
+  if(b === 'nantissement') return 'proc-nantissement';
+  if(b === 'redressement') return 'proc-redressement';
+  if(b === 'vérification de créance') return 'proc-verification-creance';
+  if(b === 'liquidation judiciaire') return 'proc-declaration-creance';
+  if(b === 'sfdc') return 'proc-sfdc';
+  if(b === 's/bien') return 'proc-sbien';
+  if(b === 'injonction') return 'proc-injonction';
+  if(customProcedures.some(p => p.toLowerCase() === b)) return 'proc-autre';
   return '';
 }
 
@@ -22629,11 +22631,31 @@ function renderProcedureDetails(forceList, forceDraft){
   activeLabels.forEach(p=>{
     if(!selected.includes(p)) selected.push(p);
   });
-  for(let i=selected.length-1;i>=0;i--){
-    if(selected[i] === 'Autre') selected.splice(i,1);
-  }
-
-  const finalList = [...new Set(selected.map(v=>String(v).trim()).filter(Boolean))];
+  const finalList = [];
+  const standardMap = {
+    'ass': 'ASS',
+    'restitution': 'Restitution',
+    'commandement': 'Commandement',
+    'nantissement': 'Nantissement',
+    'redressement': 'Redressement',
+    'vérification de créance': 'Vérification de créance',
+    'liquidation judiciaire': 'Liquidation judiciaire',
+    'sfdc': 'SFDC',
+    's/bien': 'S/bien',
+    'injonction': 'Injonction'
+  };
+  const seen = new Set();
+  selected.forEach(v => {
+    const raw = String(v || '').trim();
+    if(!raw) return;
+    const key = raw.toLowerCase();
+    const canonical = standardMap[key] || raw;
+    const canonicalKey = canonical.toLowerCase();
+    if(!seen.has(canonicalKey)){
+      seen.add(canonicalKey);
+      finalList.push(canonical);
+    }
+  });
   syncConditionalCreationFieldsVisibility(finalList);
 
   finalList.forEach(proc=>{
