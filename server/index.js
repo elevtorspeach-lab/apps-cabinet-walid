@@ -7,6 +7,7 @@ const https = require('https');
 const path = require('path');
 const { promisify } = require('util');
 const zlib = require('zlib');
+const db = require('./db');
 
 const app = express();
 const gzipAsync = promisify(zlib.gzip);
@@ -298,18 +299,7 @@ app.use((req, res, next) => {
 });
 
 async function ensureDataFile() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  await fsp.mkdir(BACKUP_DIR, { recursive: true });
-  try {
-    await fsp.access(STATE_FILE, fs.constants.F_OK);
-  } catch {
-    await writeState(DEFAULT_STATE);
-  }
-  try {
-    await fsp.access(STATE_JOURNAL_FILE, fs.constants.F_OK);
-  } catch {
-    await fsp.writeFile(STATE_JOURNAL_FILE, '', 'utf8');
-  }
+  await db.initializeDatabase();
 }
 
 function normalizeStoredState(rawState, previousState = null) {
@@ -338,21 +328,11 @@ function hydrateStoredState(rawState) {
 async function readState() {
   if (cachedState) return cachedState;
   try {
-    const raw = await fsp.readFile(STATE_FILE, 'utf8');
-    const parsed = hydrateStoredState(JSON.parse(raw));
-    setCachedState(parsed);
-    try {
-      const journalEntries = await readJournalEntries();
-      if (journalEntries.length) {
-        let replayedState = cachedState;
-        journalEntries.forEach((entry) => {
-          replayedState = applyMutationToState(replayedState, extractJournalMutation(entry));
-        });
-        setCachedState(replayedState);
-      }
-    } catch {}
-    return cachedState;
-  } catch {
+    const state = await db.loadFullState();
+    setCachedState(state);
+    return state;
+  } catch (err) {
+    console.warn('Failed to read state from MySQL, falling back to default:', err);
     setCachedState({ ...DEFAULT_STATE });
     return cachedState;
   }
@@ -772,20 +752,16 @@ async function maybeWriteBackupSnapshot(state) {
 }
 
 async function writeStateSnapshot(safeState, options = {}) {
-  const tmpFile = `${STATE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  await fsp.writeFile(tmpFile, getSerializedState(safeState), 'utf8');
-  await fsp.rename(tmpFile, STATE_FILE);
+  await db.saveFullState(safeState);
   if (options.clearJournal !== false) {
     if (pendingSnapshotFlushTimer) {
       clearTimeout(pendingSnapshotFlushTimer);
       pendingSnapshotFlushTimer = null;
     }
-    await fsp.writeFile(STATE_JOURNAL_FILE, '', 'utf8');
     pendingJournalMutationCount = 0;
     cachedJournalEntries = [];
   }
   setCachedState(safeState);
-  await maybeWriteBackupSnapshot(safeState);
   return safeState;
 }
 
@@ -1320,7 +1296,7 @@ function applyMutationToState(currentState, mutation) {
 }
 
 async function appendMutationJournalEntry(entry) {
-  await fsp.appendFile(STATE_JOURNAL_FILE, `${JSON.stringify(entry)}\n`, 'utf8');
+  // Persistence is now handled by saveFullState in writeStateSnapshot
   if (!Array.isArray(cachedJournalEntries)) {
     cachedJournalEntries = [];
   }
@@ -1377,24 +1353,17 @@ async function persistJournalMutations(mutations, options = {}) {
     }));
   }
   setCachedState(saved);
-  const journalPayload = `${journalEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
-  try {
-    await fsp.appendFile(STATE_JOURNAL_FILE, journalPayload, 'utf8');
-    if (!Array.isArray(cachedJournalEntries)) {
-      cachedJournalEntries = [];
-    }
-    cachedJournalEntries.push(...journalEntries);
-    pendingJournalMutationCount += safeMutations.length;
-    if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
-      await writeStateSnapshot(saved, { clearJournal: true });
-    } else {
-      scheduleSnapshotFlush();
-    }
-    return saved;
-  } catch (err) {
-    await writeStateSnapshot(saved, { clearJournal: true });
-    return saved;
+  if (!Array.isArray(cachedJournalEntries)) {
+    cachedJournalEntries = [];
   }
+  cachedJournalEntries.push(...journalEntries);
+  pendingJournalMutationCount += safeMutations.length;
+  if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
+    await writeStateSnapshot(saved, { clearJournal: true });
+  } else {
+    scheduleSnapshotFlush();
+  }
+  return saved;
 }
 
 function applyDossierPatch(currentState, body) {

@@ -17,7 +17,22 @@ If you want to test the plain HTML/JS version in the root directory:
 2. Run: `npx serve .`
 3. Open: `http://localhost:3000`
 
-### 3. Verification of the Sorting Fix
+### 3. MySQL Configuration (New)
+The application now uses MySQL for data storage.
+1. Ensure you have **MySQL 5.7+** installed and running.
+2. Open `server/.env` and enter your database credentials.
+3. Run the migration script to move your data from JSON to MySQL:
+   ```bash
+   cd server
+   node migrate-to-mysql.js
+   ```
+4. Start the server:
+   ```bash
+   cd server
+   node index.js
+   ```
+
+### 4. Verification of the Sorting Fix
 - Go to the **Audience** page.
 - Check the **Excel Export (Audience Print/Export)**.
 - The dossiers should now be sorted by **Year (Ascending)**, from oldest to newest (e.g., 2022 comes before 2027).
