@@ -14,10 +14,6 @@ jobs:
   build-mac:
     runs-on: macos-latest
 
-    defaults:
-      run:
-        working-directory: desktop-app
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,21 +24,19 @@ jobs:
           node-version: 20
 
       - name: Install client dependencies
-        working-directory: client
+        working-directory: ./client
         run: npm install
 
       - name: Build client
-        working-directory: client
+        working-directory: ./client
         run: npm run build
 
-      - name: Verify client build
-        run: ls -R client/dist
-
       - name: Install desktop dependencies
-        working-directory: desktop-app
+        working-directory: ./desktop-app
         run: npm install
 
       - name: Build Mac installer
+        working-directory: ./desktop-app
         run: npm run build:mac
 
       - name: Upload build artifacts

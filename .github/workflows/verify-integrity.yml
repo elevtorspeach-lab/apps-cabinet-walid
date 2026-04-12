@@ -38,6 +38,10 @@ jobs:
         working-directory: server
         run: npm install
 
+      - name: Sync offline assets
+        working-directory: desktop-app
+        run: npm run sync:web-assets
+
       - name: Verify offline asset sync
         working-directory: desktop-app
         run: npm run verify:web-assets
