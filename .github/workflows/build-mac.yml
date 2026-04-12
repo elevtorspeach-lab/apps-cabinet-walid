@@ -29,7 +29,16 @@ jobs:
           cache: npm
           cache-dependency-path: desktop-app/package-lock.json
 
-      - name: Install dependencies
+      - name: Install client dependencies
+        working-directory: client
+        run: npm install
+
+      - name: Build client
+        working-directory: client
+        run: npm run build
+
+      - name: Install desktop dependencies
+        working-directory: desktop-app
         run: npm ci
 
       - name: Build Mac installer
