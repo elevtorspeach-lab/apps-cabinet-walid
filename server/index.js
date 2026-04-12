@@ -47,6 +47,19 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'null'
 ];
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  // Dynamic CORS to allow any IP for multi-user access
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 const DEFAULT_STATE = {
   clients: [],
   salleAssignments: [],

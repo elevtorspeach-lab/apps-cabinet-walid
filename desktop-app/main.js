@@ -1,10 +1,23 @@
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
-const fs = require('fs/promises');
+const fs = require('fs');
+const fsp = require('fs/promises');
 
 const STATE_FILE_NAME = 'Cabinet Walid Araqi.json';
 const EXPORTS_DIR_NAME = 'Cabinet Walid Araqi Exports';
-const DESKTOP_REMOTE_API_BASE = String(process.env.CABINET_DESKTOP_API_BASE || 'http://localhost:3000/api').trim();
+
+// Dynamic Server IP Resolution
+let SERVER_IP = 'localhost';
+try {
+  const configPath = path.join(__dirname, 'server_ip.txt');
+  if (fs.existsSync(configPath)) {
+    SERVER_IP = fs.readFileSync(configPath, 'utf8').trim();
+  }
+} catch (e) {
+  console.log('Using default server IP');
+}
+
+const DESKTOP_REMOTE_API_BASE = String(process.env.CABINET_DESKTOP_API_BASE || `http://${SERVER_IP}:3000/api`).trim();
 const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '1').trim();
 
 function getDesktopStateFilePath() {
@@ -40,14 +53,14 @@ async function writeDesktopExportFile(payload) {
     throw new Error('Missing export bytes');
   }
   const exportDir = getDesktopExportDirectoryPath();
-  await fs.mkdir(exportDir, { recursive: true });
+  await fsp.mkdir(exportDir, { recursive: true });
   const filePath = path.join(exportDir, fileName);
   const tempPath = `${filePath}.tmp`;
   const buffer = Buffer.isBuffer(bytes)
     ? bytes
     : Buffer.from(ArrayBuffer.isView(bytes) ? bytes : new Uint8Array(bytes));
-  await fs.writeFile(tempPath, buffer);
-  await fs.rename(tempPath, filePath);
+  await fsp.writeFile(tempPath, buffer);
+  await fsp.rename(tempPath, filePath);
   return filePath;
 }
 
@@ -62,15 +75,15 @@ async function writeDesktopState(payload) {
     null,
     2
   );
-  await fs.writeFile(tempPath, body, 'utf8');
-  await fs.rename(tempPath, filePath);
+  await fsp.writeFile(tempPath, body, 'utf8');
+  await fsp.rename(tempPath, filePath);
   return filePath;
 }
 
 async function readDesktopState() {
   const filePath = getDesktopStateFilePath();
   try {
-    const raw = await fs.readFile(filePath, 'utf8');
+    const raw = await fsp.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     return { filePath, data: parsed };
   } catch (err) {
@@ -91,7 +104,7 @@ async function ensureDesktopStateFileExists() {
 async function ensureDesktopStateFileForOpen() {
   const filePath = getDesktopStateFilePath();
   try {
-    await fs.access(filePath);
+    await fsp.access(filePath);
   } catch (err) {
     if (err && err.code === 'ENOENT') {
       await writeDesktopState(buildDefaultDesktopStatePayload());
@@ -110,7 +123,7 @@ async function resolveAppIndexPath() {
 
   const projectRootIndexPath = path.resolve(__dirname, '..', 'index.html');
   try {
-    await fs.access(projectRootIndexPath);
+    await fsp.access(projectRootIndexPath);
     return projectRootIndexPath;
   } catch (_err) {
     return packagedIndexPath;
