@@ -1448,6 +1448,7 @@ tr:hover{background:#f1f5f9}
 .proc-sfdc::after{background:#f59e0b}
 .proc-sbien::after{background:#e11d48}
 .proc-injonction::after{background:#0ea5a4}
+.proc-sanlam::after{background:#0f172a}
 .proc-autre::after{background:#ef4444}
 
 .proc-ass{border-left:4px solid #2563eb}
@@ -1460,6 +1461,7 @@ tr:hover{background:#f1f5f9}
 .proc-sfdc{border-left:4px solid #f59e0b}
 .proc-sbien{border-left:4px solid #e11d48}
 .proc-injonction{border-left:4px solid #0ea5a4}
+.proc-sanlam{border-left:4px solid #0f172a}
 .proc-autre{border-left:4px solid #ef4444}
 
 .procedure-montant-groups{

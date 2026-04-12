@@ -14833,12 +14833,6 @@ function setupEvents(){
       if(suppressProcedureChange) return;
       const label = e.target.closest('label');
       if(label) label.classList.toggle('active', e.target.checked);
-      if(!e.target.checked){
-        const value = String(e.target.value || '').trim();
-        if(value){
-          editingOriginalProcedures = editingOriginalProcedures.filter(p=>p !== value);
-        }
-      }
       syncConditionalCreationFieldsVisibility();
       renderProcedureDetails();
     });
@@ -22270,6 +22264,21 @@ function collectProcedureDraftFromCards({ root = document, trimValues = false } 
   return draft;
 }
 
+function isProcedureDraftEmpty(values){
+  if(!values || typeof values !== 'object') return true;
+  const entries = Object.values(values);
+  if(!entries.length) return true;
+  return entries.every(value=>!String(value || '').trim());
+}
+
+function getFilledProcedureDraftNames(draft){
+  if(!draft || typeof draft !== 'object') return [];
+  return Object.entries(draft)
+    .filter(([name, values])=>String(name || '').trim() && !isProcedureDraftEmpty(values))
+    .map(([name])=>String(name || '').trim())
+    .filter(Boolean);
+}
+
 function applyProcedureFieldValues(container, values){
   if(!container || !values || typeof values !== 'object') return;
   container.querySelectorAll('input, select').forEach(fieldEl=>{
@@ -22470,6 +22479,7 @@ function getProcedureColorClass(procName){
   if(b === 'sfdc') return 'proc-sfdc';
   if(b === 's/bien') return 'proc-sbien';
   if(b === 'injonction') return 'proc-injonction';
+  if(b === 'sanlam') return 'proc-sanlam';
   if(customProcedures.some(p => p.toLowerCase() === b)) return 'proc-autre';
   return '';
 }
@@ -22621,16 +22631,19 @@ function renderProcedureDetails(forceList, forceDraft){
     : collectProcedureDraft();
   container.innerHTML='';
   syncProcedureTribunalAutocompleteOptions(draft);
-  const selected = Array.isArray(forceList) && forceList.length
+  const selected = Array.isArray(forceList)
     ? forceList.slice()
     : [...document.querySelectorAll('.proc-check:checked')].map(cb=>cb.value);
-  if(!forceList || !forceList.length) selected.push(...customProcedures);
-  const activeLabels = [...document.querySelectorAll('.checkbox-group label.active')]
-    .map(l=>l.dataset.proc)
-    .filter(Boolean);
-  activeLabels.forEach(p=>{
-    if(!selected.includes(p)) selected.push(p);
-  });
+  selected.push(...getFilledProcedureDraftNames(draft));
+  if(!Array.isArray(forceList)){
+    selected.push(...customProcedures);
+    const activeLabels = [...document.querySelectorAll('.checkbox-group label.active')]
+      .map(l=>l.dataset.proc)
+      .filter(Boolean);
+    activeLabels.forEach(p=>{
+      if(!selected.includes(p)) selected.push(p);
+    });
+  }
   const finalList = [];
   const standardMap = {
     'ass': 'ASS',
@@ -22750,7 +22763,7 @@ function renderProcedureDetails(forceList, forceDraft){
 
   syncProcedureMontantGroups(finalList);
 
-  if(!forceList || !forceList.length){
+  if(!Array.isArray(forceList)){
     suppressProcedureChange = true;
     activateProcedureCheckboxes(finalList);
     suppressProcedureChange = false;
