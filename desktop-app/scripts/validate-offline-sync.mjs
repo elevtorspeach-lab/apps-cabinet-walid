@@ -6,8 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const desktopRoot = path.resolve(__dirname, '..');
 const projectRoot = path.resolve(desktopRoot, '..');
-const offlineWebRoot = path.join(desktopRoot, 'offline-web');
-
 const clientDistRoot = path.join(projectRoot, 'client', 'dist');
 const offlineWebRoot = path.join(desktopRoot, 'offline-web');
 
