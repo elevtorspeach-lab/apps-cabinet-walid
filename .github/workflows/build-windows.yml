@@ -37,6 +37,9 @@ jobs:
         working-directory: client
         run: npm run build
 
+      - name: Verify client build
+        run: ls -R client/dist
+
       - name: Install desktop dependencies
         working-directory: desktop-app
         run: npm ci

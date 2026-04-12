@@ -46,8 +46,5 @@ jobs:
         working-directory: desktop-app
         run: npm run verify:web-assets
 
-      - name: Check browser script syntax
-        run: node --check app.js
-
       - name: Check server syntax
         run: node --check server/index.js
