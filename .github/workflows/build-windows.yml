@@ -40,7 +40,7 @@ jobs:
 
       - name: Install desktop dependencies
         working-directory: desktop-app
-        run: npm ci
+        run: npm install
 
       - name: Build Windows installer
         run: npm run build:win

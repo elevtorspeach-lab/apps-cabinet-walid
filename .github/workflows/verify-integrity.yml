@@ -32,7 +32,7 @@ jobs:
 
       - name: Install desktop dependencies
         working-directory: desktop-app
-        run: npm ci
+        run: npm install
 
       - name: Install server dependencies
         working-directory: server
