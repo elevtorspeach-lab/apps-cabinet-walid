@@ -73,18 +73,31 @@ body{
   position:relative;
   z-index:2;
 }
-.login-badge{
-  width:58px;
-  height:58px;
-  border-radius:16px;
+.login-badge-wrap{
+  width:90px;
+  height:90px;
+  border-radius:24px;
   display:flex;
   align-items:center;
   justify-content:center;
-  margin:0 auto 14px;
-  color:#fff;
-  font-size:23px;
-  background:linear-gradient(135deg,#4f8cff,#6b5cff);
-  box-shadow:0 12px 24px rgba(79,140,255,.33);
+  margin:0 auto 18px;
+  background:#fff;
+  border:3px solid #6b5cff;
+  box-shadow:0 15px 35px rgba(107,92,255,.45);
+  overflow:hidden;
+  position:relative;
+}
+.login-badge-logo{
+  width:100%;
+  height:100%;
+  background-image:url('/logo_cabinet.png');
+  background-size:160%;
+  background-position:center;
+  background-repeat:no-repeat;
+  transition:transform .4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.login-badge-wrap:hover .login-badge-logo{
+  transform:scale(1.15);
 }
 .login-box h2{
   margin-bottom:8px;
@@ -1675,11 +1688,11 @@ tr:hover{background:#f1f5f9}
     padding:24px 18px 20px;
     border-radius:18px;
   }
-  .login-badge{
-    width:48px;
-    height:48px;
-    font-size:18px;
-    border-radius:14px;
+  .login-badge-wrap{
+    width:70px;
+    height:70px;
+    border-radius:18px;
+    margin-bottom:12px;
   }
   .login-box h2{
     font-size:26px;

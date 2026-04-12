@@ -1502,6 +1502,53 @@ app.post('/api/auth/bootstrap', async (req, res) => {
   });
 });
 
+app.get('/api/stats', requireApiAuth, async (req, res) => {
+  try {
+    const [[{ total_clients }]] = await db.pool.query('SELECT COUNT(*) as total_clients FROM clients');
+    const [[{ att_sort }]] = await db.pool.query('SELECT COUNT(*) as att_sort FROM dossiers WHERE json_extract(data, "$.procedureDetails.ASS.sort") = "Att sort"');
+    const [[{ total_dossiers }]] = await db.pool.query('SELECT COUNT(*) as total_dossiers FROM dossiers');
+    
+    res.json({
+      ok: true,
+      stats: {
+        totalClients: total_clients,
+        dossiersEnCours: total_dossiers,
+        dossiersTermines: 0,
+        dossiersAttSort: att_sort,
+        dossiersAttDepot: 0,
+        audienceErrorsCount: 0
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+    
+app.get('/api/dossiers/paginated', requireApiAuth, async (req, res) => {
+  try {
+    const offset = parseInt(req.query.offset) || 0;
+    const limit = parseInt(req.query.limit) || 50;
+    const search = req.query.search || '';
+    const procedure = req.query.procedure || 'all';
+
+    const result = await db.getPaginatedDossiers(offset, limit, { search, procedure });
+    res.json({ ok: true, data: result.data, total: result.total });
+  } catch (err) {
+    console.error('Paginated dossiers error:', err);
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+app.get('/api/clients/all', requireApiAuth, async (req, res) => {
+  try {
+    const [rows] = await db.pool.query('SELECT id, name FROM clients ORDER BY name ASC');
+    res.json({ ok: true, data: rows });
+  } catch (err) {
+    console.error('Clients fetch error:', err);
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
 app.post('/api/auth/login', async (req, res) => {
   await ensureDataFile();
   const body = getRequestBodyObject(req);

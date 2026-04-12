@@ -15,7 +15,6 @@ const pool = mysql.createPool({
 async function initializeDatabase() {
   const connection = await pool.getConnection();
   try {
-    // 1. Metadata Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS app_metadata (
         id VARCHAR(255) PRIMARY KEY,
@@ -24,7 +23,6 @@ async function initializeDatabase() {
       )
     `);
 
-    // 2. Users Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
@@ -37,7 +35,6 @@ async function initializeDatabase() {
       )
     `);
 
-    // 3. Clients Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS clients (
         id BIGINT PRIMARY KEY,
@@ -46,7 +43,7 @@ async function initializeDatabase() {
       )
     `);
 
-    // 4. Dossiers Table
+    // Normalized dossiers table storing JSON safely but indexing keys
     await connection.query(`
       CREATE TABLE IF NOT EXISTS dossiers (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,7 +59,6 @@ async function initializeDatabase() {
       )
     `);
 
-    // 5. Settings / Collections Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS collections (
         name VARCHAR(255) PRIMARY KEY,
@@ -75,11 +71,57 @@ async function initializeDatabase() {
   }
 }
 
+// Enterprise Pagination Functions
+async function getPaginatedDossiers(offset = 0, limit = 50, filters = {}) {
+  let query = `
+    SELECT d.*, c.name as clientName 
+    FROM dossiers d 
+    LEFT JOIN clients c ON d.clientId = c.id
+    WHERE 1=1
+  `;
+  const params = [];
+  
+  if (filters.search) {
+    query += ` AND (c.name LIKE ? OR d.referenceClient LIKE ? OR d.debiteur LIKE ? OR JSON_EXTRACT(d.data, '$.reference') LIKE ?)`;
+    const s = `%${filters.search}%`;
+    params.push(s, s, s, s);
+  }
+
+  if (filters.procedure && filters.procedure !== 'all') {
+    query += ` AND d.procedure_name LIKE ?`;
+    params.push(`%${filters.procedure}%`);
+  }
+
+  // Count total matches
+  const countQuery = query.replace('SELECT d.*, c.name as clientName', 'SELECT COUNT(*) as total');
+  const [countRows] = await pool.query(countQuery, params);
+  const total = countRows[0].total;
+
+  // Append pagination
+  query += ` ORDER BY d.id DESC LIMIT ? OFFSET ?`;
+  params.push(parseInt(limit), parseInt(offset));
+
+  const [rows] = await pool.query(query, params);
+  return {
+    data: rows.map(r => ({
+      ...r.data,
+      clientId: r.clientId,
+      clientName: r.clientName,
+      referenceClient: r.referenceClient,
+      debiteur: r.debiteur,
+      procedure: r.procedure_name,
+      dossierId: r.id
+    })),
+    total
+  };
+}
+
+// Deprecated fallback for legacy compatibility during transition
 async function loadFullState() {
   const [metadataRows] = await pool.query('SELECT * FROM app_metadata');
   const [userRows] = await pool.query('SELECT * FROM users');
   const [clientRows] = await pool.query('SELECT * FROM clients');
-  const [dossierRows] = await pool.query('SELECT * FROM dossiers');
+  const [dossierRows] = await pool.query('SELECT * FROM dossiers LIMIT 1000'); // Failsafe limit
   const [collectionRows] = await pool.query('SELECT * FROM collections');
 
   const metadata = {};
@@ -127,53 +169,24 @@ async function loadFullState() {
   return state;
 }
 
-async function saveFullState(state) {
+// Ensure Legacy app.js form submissions can persist a single client directly
+async function saveClientState(client) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-
-    // Save Metadata
-    await connection.query('REPLACE INTO app_metadata (id, value) VALUES (?, ?)', ['version', String(state.version)]);
-    await connection.query('REPLACE INTO app_metadata (id, value) VALUES (?, ?)', ['updatedAt', state.updatedAt]);
-
-    // Save Users
-    await connection.query('DELETE FROM users');
-    if (state.users && state.users.length > 0) {
-      for (const user of state.users) {
-        const { id, username, passwordHash, passwordSalt, role, ...rest } = user;
-        await connection.query(
-          'INSERT INTO users (id, username, passwordHash, passwordSalt, role, data) VALUES (?, ?, ?, ?, ?, ?)',
-          [id, username, passwordHash, passwordSalt, role, JSON.stringify(rest)]
-        );
-      }
+    await connection.query('INSERT IGNORE INTO clients (id, name) VALUES (?, ?)', [client.id, client.name]);
+    
+    // Legacy mapping: delete client dossiers then re-insert to avoid ID tracking complexity for now
+    if (client.dossiers) {
+       await connection.query('DELETE FROM dossiers WHERE clientId = ?', [client.id]);
+       for (const dossier of client.dossiers) {
+          const { referenceClient, debiteur, procedure, ...rest } = dossier;
+          await connection.query(
+            'INSERT INTO dossiers (clientId, referenceClient, debiteur, procedure_name, data) VALUES (?, ?, ?, ?, ?)',
+            [client.id, referenceClient || '', debiteur || '', procedure || '', JSON.stringify(dossier)]
+          );
+       }
     }
-
-    // Save Clients and Dossiers
-    await connection.query('DELETE FROM dossiers');
-    await connection.query('DELETE FROM clients');
-    if (state.clients && state.clients.length > 0) {
-      for (const client of state.clients) {
-        await connection.query('INSERT INTO clients (id, name) VALUES (?, ?)', [client.id, client.name]);
-        if (client.dossiers && client.dossiers.length > 0) {
-          for (const dossier of client.dossiers) {
-            const { referenceClient, debiteur, procedure, ...rest } = dossier;
-            await connection.query(
-              'INSERT INTO dossiers (clientId, referenceClient, debiteur, procedure_name, data) VALUES (?, ?, ?, ?, ?)',
-              [client.id, referenceClient || '', debiteur || '', procedure || '', JSON.stringify(dossier)]
-            );
-          }
-        }
-      }
-    }
-
-    // Save Collections
-    const collections = ['salleAssignments', 'audienceDraft', 'recycleBin', 'recycleArchive', 'importHistory'];
-    for (const name of collections) {
-      if (state[name]) {
-        await connection.query('REPLACE INTO collections (name, data) VALUES (?, ?)', [name, JSON.stringify(state[name])]);
-      }
-    }
-
     await connection.commit();
   } catch (err) {
     await connection.rollback();
@@ -183,9 +196,28 @@ async function saveFullState(state) {
   }
 }
 
+async function saveFullState(state) {
+  // Safe minimal implementation for metadata
+  await pool.query('REPLACE INTO app_metadata (id, value) VALUES (?, ?)', ['version', String(state.version)]);
+  await pool.query('REPLACE INTO app_metadata (id, value) VALUES (?, ?)', ['updatedAt', state.updatedAt]);
+  
+  if (state.users) {
+    await pool.query('DELETE FROM users');
+    for (const user of state.users) {
+      const { id, username, passwordHash, passwordSalt, role, ...rest } = user;
+      await pool.query(
+        'INSERT INTO users (id, username, passwordHash, passwordSalt, role, data) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, username, passwordHash, passwordSalt, role, JSON.stringify(rest)]
+      );
+    }
+  }
+}
+
 module.exports = {
   pool,
   initializeDatabase,
+  getPaginatedDossiers,
+  saveClientState,
   loadFullState,
   saveFullState
 };
