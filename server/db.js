@@ -74,7 +74,11 @@ async function initializeDatabase() {
 // Enterprise Pagination Functions
 async function getPaginatedDossiers(offset = 0, limit = 50, filters = {}) {
   let query = `
-    SELECT d.*, c.name as clientName 
+    SELECT d.*, c.name as clientName,
+      (SELECT COUNT(*) FROM dossiers d2 
+       WHERE REPLACE(d2.referenceClient, ' ', '') = REPLACE(d.referenceClient, ' ', '') 
+       AND d2.referenceClient REGEXP '[0-9]'
+      ) as duplicateCount
     FROM dossiers d 
     LEFT JOIN clients c ON d.clientId = c.id
     WHERE 1=1
@@ -92,9 +96,25 @@ async function getPaginatedDossiers(offset = 0, limit = 50, filters = {}) {
     params.push(`%${filters.procedure}%`);
   }
 
-  // Count total matches
-  const countQuery = query.replace('SELECT d.*, c.name as clientName', 'SELECT COUNT(*) as total');
-  const [countRows] = await pool.query(countQuery, params);
+  // Count total matches (using a simpler count query to avoid subquery overhead for total count)
+  const countQuery = `
+    SELECT COUNT(*) as total 
+    FROM dossiers d 
+    LEFT JOIN clients c ON d.clientId = c.id
+    WHERE 1=1
+    ${filters.search ? "AND (c.name LIKE ? OR d.referenceClient LIKE ? OR d.debiteur LIKE ? OR JSON_EXTRACT(d.data, '$.reference') LIKE ?)" : ""}
+    ${(filters.procedure && filters.procedure !== 'all') ? "AND d.procedure_name LIKE ?" : ""}
+  `;
+  const countParams = [];
+  if (filters.search) {
+    const s = `%${filters.search}%`;
+    countParams.push(s, s, s, s);
+  }
+  if (filters.procedure && filters.procedure !== 'all') {
+    countParams.push(`%${filters.procedure}%`);
+  }
+  
+  const [countRows] = await pool.query(countQuery, countParams);
   const total = countRows[0].total;
 
   // Append pagination
@@ -110,7 +130,8 @@ async function getPaginatedDossiers(offset = 0, limit = 50, filters = {}) {
       referenceClient: r.referenceClient,
       debiteur: r.debiteur,
       procedure: r.procedure_name,
-      dossierId: r.id
+      dossierId: r.id,
+      isDuplicate: (r.duplicateCount || 0) > 1
     })),
     total
   };
@@ -213,11 +234,80 @@ async function saveFullState(state) {
   }
 }
 
+async function batchUpdateDossiers(updates) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const results = { updated: 0, skipped: 0, errors: [] };
+
+    for (const update of updates) {
+      const { referenceClient, debiteur, procedure, data } = update;
+      
+      // Try to find the dossier by referenceClient
+      // If referenceClient is missing, we skip it
+      if (!referenceClient) {
+        results.skipped++;
+        continue;
+      }
+
+      // Find the dossier. If debiteur is provided, use it to disambiguate
+      let findQuery = 'SELECT id, data FROM dossiers WHERE referenceClient = ?';
+      const findParams = [referenceClient];
+      if (debiteur) {
+        findQuery += ' AND (debiteur LIKE ? OR debiteur = ?)';
+        const d = `%${debiteur}%`;
+        findParams.push(d, debiteur);
+      }
+
+      const [existing] = await connection.query(findQuery, findParams);
+
+      if (existing.length > 0) {
+        // Use the first match (most recent or best match)
+        const dossierId = existing[0].id;
+        const currentData = existing[0].data || {};
+        
+        // Merge procedureDetails specifically if present
+        const nextData = { ...currentData, ...data };
+        if (data.procedureDetails && currentData.procedureDetails) {
+          nextData.procedureDetails = {
+            ...currentData.procedureDetails,
+            ...data.procedureDetails
+          };
+          // Deep merge for each procedure name in update
+          Object.keys(data.procedureDetails).forEach(procName => {
+            nextData.procedureDetails[procName] = {
+              ...(currentData.procedureDetails[procName] || {}),
+              ...(data.procedureDetails[procName] || {})
+            };
+          });
+        }
+
+        await connection.query(
+          'UPDATE dossiers SET data = ?, procedure_name = COALESCE(?, procedure_name), debiteur = COALESCE(?, debiteur) WHERE id = ?',
+          [JSON.stringify(nextData), procedure || null, debiteur || null, dossierId]
+        );
+        results.updated++;
+      } else {
+        results.skipped++;
+      }
+    }
+
+    await connection.commit();
+    return results;
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
 module.exports = {
   pool,
   initializeDatabase,
   getPaginatedDossiers,
   saveClientState,
   loadFullState,
-  saveFullState
+  saveFullState,
+  batchUpdateDossiers
 };

@@ -113,7 +113,7 @@ function SuiviSection() {
               <tr><td colSpan="11" style={{textAlign:'center', padding:'2rem'}}>Aucun dossier trouvé</td></tr>
             ) : (
               dossiers.map(d => (
-                <tr key={d.dossierId}>
+                <tr key={d.dossierId} className={d.isDuplicate ? 'row-duplicate' : ''}>
                   <td><input type="checkbox" className="suivi-row-checkbox" /></td>
                   <td>-</td>
                   <td>{d.clientName}</td>

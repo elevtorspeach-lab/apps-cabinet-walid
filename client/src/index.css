@@ -746,6 +746,17 @@ table{width:100%;border-collapse:collapse}
 th,td{padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:left;white-space:nowrap}
 th{background:#f8fafc;color:#1e3a8a}
 tr:hover{background:#f1f5f9}
+.row-duplicate {
+  background-color: #fee2e2 !important;
+  transition: background-color .2s ease;
+}
+.row-duplicate:hover {
+  background-color: #fecaca !important;
+}
+.row-duplicate td {
+  color: #b91c1c;
+  font-weight: 600;
+}
 .virtual-spacer td{
   padding:0;
   border:none;

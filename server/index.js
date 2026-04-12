@@ -1552,6 +1552,23 @@ app.get('/api/dossiers/paginated', requireApiAuth, async (req, res) => {
   }
 });
 
+app.post('/api/dossiers/batch-update', requireApiAuth, async (req, res) => {
+  try {
+    const body = getRequestBodyObject(req);
+    const updates = Array.isArray(body.updates) ? body.updates : [];
+    
+    if (updates.length === 0) {
+      return res.json({ ok: true, updated: 0, skipped: 0 });
+    }
+
+    const result = await db.batchUpdateDossiers(updates);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('Batch update error:', err);
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
 app.get('/api/clients/all', requireApiAuth, async (req, res) => {
   try {
     const [rows] = await db.pool.query('SELECT id, name FROM clients ORDER BY name ASC');
