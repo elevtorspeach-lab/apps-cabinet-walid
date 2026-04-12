@@ -10273,6 +10273,7 @@ async function handleAppsavocatImportFile(file){
     closeImportProgressModal(false);
     importInProgress = false;
     endHeavyUiOperation();
+    updateSyncStatusLabel();
   }
 }
 

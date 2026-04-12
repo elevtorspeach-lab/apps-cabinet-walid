@@ -10273,6 +10273,7 @@ async function handleAppsavocatImportFile(file){
     closeImportProgressModal(false);
     importInProgress = false;
     endHeavyUiOperation();
+    updateSyncStatusLabel();
   }
 }
 
@@ -16357,6 +16358,7 @@ function renderProcedureBadges(procedureText){
     if(name === 'SFDC') cls = 'proc-sfdc';
     if(name === 'S/bien') cls = 'proc-sbien';
     if(name === 'Injonction') cls = 'proc-injonction';
+    if(name === 'Sanlam') cls = 'proc-sanlam';
     return `<span class="proc-pill ${cls}">${escapeHtml(name)}</span>`;
   }).join('');
   return `<div class="proc-pill-list">${pills}</div>`;
