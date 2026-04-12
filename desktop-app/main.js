@@ -145,12 +145,18 @@ async function createWindow() {
     }
   });
 
-  const appIndexPath = await resolveAppIndexPath();
-  await win.loadFile(appIndexPath, {
-    query: {
-      apiBase: DESKTOP_REMOTE_API_BASE,
-      localOnly: DESKTOP_REMOTE_LOCAL_ONLY
-    }
+  const appUrl = `http://${SERVER_IP}:3000`;
+  
+  win.loadURL(appUrl).catch(() => {
+    console.warn('Live server not reachable, falling back to local files.');
+    resolveAppIndexPath().then(appIndexPath => {
+      win.loadFile(appIndexPath, {
+        query: {
+          apiBase: DESKTOP_REMOTE_API_BASE,
+          localOnly: DESKTOP_REMOTE_LOCAL_ONLY
+        }
+      });
+    });
   });
 
   win.once('ready-to-show', () => {
