@@ -1,0 +1,11 @@
+# GitHub Language Detection Overrides
+# Mark legacy/vendor files as vendored to exclude them from language statistics
+node_modules/* linguist-vendored
+vendor/* linguist-vendored
+assets/* linguist-vendored
+app.js linguist-vendored
+workers/* linguist-vendored
+
+# Explicitly mark .jsx files as React
+*.jsx linguist-language=JavaScript
+*.jsx linguist-detectable=true
