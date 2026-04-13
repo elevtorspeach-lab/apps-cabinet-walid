@@ -616,7 +616,7 @@ const IS_REMOTE_WEB_HOST = (() => {
   if(hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   return true;
 })();
-const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 2500;
+const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 3000 : 2500;
 const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 4000;
 const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 25000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 20000;
