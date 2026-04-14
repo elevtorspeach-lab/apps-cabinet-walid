@@ -16,7 +16,7 @@ function ClientSection() {
             <span className="add-client-label-sub">Ajout rapide pour lancer un dossier</span>
           </label>
           <div className="add-client-input-wrap">
-            <input type="text" id="clientName" placeholder="Nom du client" />
+            <input type="text" id="clientName" placeholder="Nom du client"/>
           </div>
           <button id="addClientBtn" className="btn-success">
             <i className="fa-solid fa-plus"></i> Ajouter

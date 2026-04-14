@@ -19,7 +19,7 @@ const SSL_DIR = path.join(__dirname, 'ssl');
 const SSL_KEY_FILE = process.env.SSL_KEY_FILE || path.join(SSL_DIR, 'local.key');
 const SSL_CERT_FILE = process.env.SSL_CERT_FILE || path.join(SSL_DIR, 'local.crt');
 const DEFAULT_MANAGER_USERNAME = 'manager';
-const DEFAULT_MANAGER_PASSWORD = '1234';
+const DEFAULT_MANAGER_PASSWORD = 'Raja-1234';
 const PASSWORD_HASH_ITERATIONS = 120000;
 const PASSWORD_MIN_LENGTH = 1;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -295,21 +295,6 @@ app.use(express.json({ limit: '250mb' }));
 app.use(express.static(WEB_DIR, {
   index: false
 }));
-
-app.use((req, res, next) => {
-  const requestOrigin = String(req.headers.origin || '').trim();
-  const allowOrigin = !requestOrigin || ALLOWED_ORIGINS.has(requestOrigin);
-  if (requestOrigin && allowOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
-    res.setHeader('Vary', 'Origin');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    return allowOrigin ? res.sendStatus(204) : res.sendStatus(403);
-  }
-  next();
-});
 
 async function ensureDataFile() {
   await db.initializeDatabase();

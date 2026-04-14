@@ -606,7 +606,7 @@ const LOCAL_ONLY_MODE = (() => {
     && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1');
   if(typeof window.CABINET_LOCAL_ONLY === 'boolean') return window.CABINET_LOCAL_ONLY;
   if(IS_FILE_PROTOCOL) return true;
-  if(isLocalHttpHost) return true;
+  if(isLocalHttpHost) return false;
   return !!window.cabinetDesktopState;
 })();
 const IS_REMOTE_WEB_HOST = (() => {
@@ -616,8 +616,8 @@ const IS_REMOTE_WEB_HOST = (() => {
   if(hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   return true;
 })();
-const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 3000 : 2500;
-const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 4000;
+const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 2500 : 3500;
+const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 3000 : 5000;
 const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 25000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 20000;
 const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 4000 : 5000;
@@ -1407,9 +1407,12 @@ function appendCandidateVariants(candidates, seen, value){
 function buildApiBaseCandidates(){
   const out = [];
   const seen = new Set();
-  appendCandidateVariants(out, seen, API_BASE);
   const queryApiBase = new URLSearchParams(window.location.search).get('apiBase');
   appendCandidateVariants(out, seen, queryApiBase);
+  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
+    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
+  }
+  appendCandidateVariants(out, seen, API_BASE);
   if(typeof localStorage !== 'undefined'){
     try{
       appendCandidateVariants(out, seen, localStorage.getItem(API_BASE_STORAGE_KEY));
@@ -1420,10 +1423,6 @@ function buildApiBaseCandidates(){
   appendCandidateVariants(out, seen, window.CABINET_API_BASE);
   const metaApiBase = document.querySelector('meta[name="api-base"]')?.getAttribute('content');
   appendCandidateVariants(out, seen, metaApiBase);
-
-  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
-    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
-  }
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   const runningOnDefaultLocalApiPort = Number(window.location.port || 0) === 3000;
@@ -15391,7 +15390,7 @@ async function login(){
       x=>String(x.username || '').trim().toLowerCase() === usernameInput
     );
     let user = userIndex >= 0 ? USERS[userIndex] : null;
-    let isValid = await verifyUserPassword(user, passwordInput);
+    let isValid = remoteLoginState === 'ok' ? true : await verifyUserPassword(user, passwordInput);
     if((!user || !isValid) && remoteLoginState === 'ok'){
       await loadPersistedState();
       USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
@@ -15399,7 +15398,7 @@ async function login(){
         x=>String(x.username || '').trim().toLowerCase() === usernameInput
       );
       user = userIndex >= 0 ? USERS[userIndex] : null;
-      isValid = await verifyUserPassword(user, passwordInput);
+      isValid = true;
     }
     if(!user || !isValid){
       if(remoteLoginState === 'unavailable'){

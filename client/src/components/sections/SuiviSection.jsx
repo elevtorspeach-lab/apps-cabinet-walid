@@ -6,10 +6,10 @@ function SuiviSection() {
       <div className="clients-toolbar suivi-toolbar" style={{ marginBottom: '15px' }}>
         <div className="search-box" style={{ flex: 1 }}>
           <i className="fa-solid fa-filter"></i>
-          <input
-            type="text"
-            id="filterGlobal"
-            placeholder="Filter global (toutes les infos du dossier)..."
+          <input 
+            type="text" 
+            id="filterGlobal" 
+            placeholder="Filter global (toutes les infos du dossier)..." 
           />
         </div>
         <div className="audience-color-filter">
@@ -49,14 +49,14 @@ function SuiviSection() {
         </button>
       </div>
 
-      <div className="table-container">
+      <div id="suiviTableContainer" className="table-container">
         <table>
           <thead>
             <tr>
               <th>Sélection</th>
               <th>Type</th>
               <th>Client</th>
-              <th>Date d&apos;affectation</th>
+              <th>Date d’affectation</th>
               <th>Référence Client</th>
               <th>Procédure</th>
               <th>Débiteur</th>
