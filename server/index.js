@@ -67,6 +67,7 @@ const DEFAULT_STATE = {
   audienceDraft: {},
   recycleBin: [],
   recycleArchive: [],
+  importHistory: [],
   version: 0,
   updatedAt: new Date().toISOString()
 };
@@ -305,9 +306,36 @@ function normalizeStoredState(rawState, previousState = null) {
   const nextVersion = Number.isFinite(previousVersion) && previousVersion >= 0
     ? previousVersion + 1
     : Math.max(0, Number(rawState?.version) || 0);
+
+  const sourceState = rawState && typeof rawState === 'object' ? rawState : {};
+  const previous = previousState && typeof previousState === 'object' ? previousState : DEFAULT_STATE;
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(sourceState, key);
+
   return {
     ...DEFAULT_STATE,
-    ...(rawState && typeof rawState === 'object' ? rawState : {}),
+    ...previous,
+    ...sourceState,
+    clients: hasOwn('clients')
+      ? (Array.isArray(sourceState.clients) ? sourceState.clients : [])
+      : (Array.isArray(previous.clients) ? previous.clients : []),
+    salleAssignments: hasOwn('salleAssignments')
+      ? (Array.isArray(sourceState.salleAssignments) ? sourceState.salleAssignments : [])
+      : (Array.isArray(previous.salleAssignments) ? previous.salleAssignments : []),
+    users: hasOwn('users')
+      ? (Array.isArray(sourceState.users) ? sourceState.users : [])
+      : (Array.isArray(previous.users) ? previous.users : []),
+    audienceDraft: hasOwn('audienceDraft')
+      ? (sourceState.audienceDraft && typeof sourceState.audienceDraft === 'object' && !Array.isArray(sourceState.audienceDraft) ? sourceState.audienceDraft : {})
+      : (previous.audienceDraft && typeof previous.audienceDraft === 'object' && !Array.isArray(previous.audienceDraft) ? previous.audienceDraft : {}),
+    recycleBin: hasOwn('recycleBin')
+      ? (Array.isArray(sourceState.recycleBin) ? sourceState.recycleBin : [])
+      : (Array.isArray(previous.recycleBin) ? previous.recycleBin : []),
+    recycleArchive: hasOwn('recycleArchive')
+      ? (Array.isArray(sourceState.recycleArchive) ? sourceState.recycleArchive : [])
+      : (Array.isArray(previous.recycleArchive) ? previous.recycleArchive : []),
+    importHistory: hasOwn('importHistory')
+      ? (Array.isArray(sourceState.importHistory) ? sourceState.importHistory : [])
+      : (Array.isArray(previous.importHistory) ? previous.importHistory : []),
     version: nextVersion,
     updatedAt: new Date().toISOString()
   };
@@ -324,13 +352,15 @@ function hydrateStoredState(rawState) {
 }
 
 async function readState() {
-  if (cachedState) return cachedState;
+  if (cachedState) {
+    return cachedState;
+  }
   try {
     const state = await db.loadFullState();
     setCachedState(state);
     return state;
   } catch (err) {
-    console.warn('Failed to read state from MySQL, falling back to default:', err);
+    console.error('Failed to read state from MySQL, falling back to default:', err);
     setCachedState({ ...DEFAULT_STATE });
     return cachedState;
   }
@@ -773,7 +803,9 @@ async function writeState(nextState, options = {}) {
 
 function enqueueStateMutation(task) {
   const run = stateMutationQueue.then(task, task);
-  stateMutationQueue = run.catch(() => {});
+  stateMutationQueue = run.catch((err) => {
+    console.error('State mutation queue error:', err);
+  });
   return run;
 }
 
@@ -844,6 +876,9 @@ function getRequestBodyObject(req) {
 }
 
 function sendJsonError(res, statusCode, code, fallbackMessage, err = null) {
+  if (err) {
+    console.error(`[API] ${code}:`, err);
+  }
   return res.status(statusCode).json({
     ok: false,
     code,
@@ -1317,20 +1352,14 @@ function scheduleSnapshotFlush(delayMs = SERVER_SNAPSHOT_FLUSH_DELAY_MS) {
 async function persistJournalMutation(mutation, options = {}) {
   const currentState = await readState();
   const saved = applyMutationToState(currentState, mutation);
-  setCachedState(saved);
-  try {
-    await appendMutationJournalEntry(buildJournalMutationEntry(saved, mutation, options));
-    pendingJournalMutationCount += 1;
-    if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
-      await writeStateSnapshot(saved, { clearJournal: true });
-    } else {
-      scheduleSnapshotFlush();
-    }
-    return saved;
-  } catch (err) {
-    await writeStateSnapshot(saved, { clearJournal: true });
-    return saved;
+  await appendMutationJournalEntry(buildJournalMutationEntry(saved, mutation, options));
+  await writeStateSnapshot(saved, { clearJournal: false });
+  if (pendingSnapshotFlushTimer) {
+    clearTimeout(pendingSnapshotFlushTimer);
+    pendingSnapshotFlushTimer = null;
   }
+  pendingJournalMutationCount = 0;
+  return saved;
 }
 
 async function persistJournalMutations(mutations, options = {}) {
@@ -1350,17 +1379,16 @@ async function persistJournalMutations(mutations, options = {}) {
       patch: safePatches[index]
     }));
   }
-  setCachedState(saved);
   if (!Array.isArray(cachedJournalEntries)) {
     cachedJournalEntries = [];
   }
   cachedJournalEntries.push(...journalEntries);
-  pendingJournalMutationCount += safeMutations.length;
-  if (pendingJournalMutationCount >= SERVER_SNAPSHOT_FLUSH_MAX_PENDING) {
-    await writeStateSnapshot(saved, { clearJournal: true });
-  } else {
-    scheduleSnapshotFlush();
+  await writeStateSnapshot(saved, { clearJournal: false });
+  if (pendingSnapshotFlushTimer) {
+    clearTimeout(pendingSnapshotFlushTimer);
+    pendingSnapshotFlushTimer = null;
   }
+  pendingJournalMutationCount = 0;
   return saved;
 }
 
@@ -1547,6 +1575,9 @@ app.post('/api/dossiers/batch-update', requireApiAuth, async (req, res) => {
     }
 
     const result = await db.batchUpdateDossiers(updates);
+    // CRITICAL: Clear cached state so it reloads with the newly updated dossier data from DB
+    // preventing the next synchronization from overwriting DB with stale memory state.
+    cachedState = null;
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error('Batch update error:', err);
