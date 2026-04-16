@@ -55,8 +55,8 @@ function CreationSection() {
               </div>
             </div>
 
-            <div className="creation-form-row creation-form-row-three">
-              <div className="form-group creation-layout-card">
+            <div className="creation-form-row creation-form-row-four">
+              <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Type</label>
                 <input type="text" id="typeInput" placeholder="Type" />
               </div>
@@ -71,26 +71,30 @@ function CreationSection() {
                 <label>Débiteur <span className="creation-priority-badge">Prioritaire</span></label>
                 <input type="text" id="debiteurInput" placeholder="Nom du débiteur" />
               </div>
+              <div className="form-group creation-layout-card">
+                <label>Adversaire</label>
+                <input type="text" id="adversaireInput" placeholder="Nom de l'adversaire" />
+              </div>
             </div>
 
             <div className="creation-form-row creation-form-row-three">
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Adresse</label>
                 <input type="text" id="adresseInput" placeholder="Adresse" />
               </div>
 
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Ville</label>
                 <input type="text" id="villeInput" placeholder="Ville" />
               </div>
 
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Montant</label>
                 <input type="text" id="montantInput" inputMode="decimal" placeholder="Montant" />
               </div>
             </div>
 
-            <div className="creation-form-row creation-form-row-four">
+            <div className="creation-form-row creation-form-row-four" data-procedure-visibility="ASS">
               <div className="form-group creation-layout-card">
                 <label>Caution</label>
                 <input type="text" id="cautionInput" placeholder="Caution" />
@@ -116,56 +120,52 @@ function CreationSection() {
             </div>
 
             <div className="creation-form-row creation-form-row-two" data-procedure-visibility="Restitution">
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-restitution-highlight-field">
                 <label>WW</label>
                 <input type="text" id="wwInput" placeholder="WW" />
               </div>
 
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-restitution-highlight-field">
                 <label>Marque</label>
                 <input type="text" id="marqueInput" placeholder="Marque" />
               </div>
             </div>
 
             <div className="creation-form-row creation-form-row-three" data-procedure-visibility="Commandement">
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-commandement-highlight-field">
                 <label>TF N°</label>
                 <input type="text" id="efNumberInput" placeholder="TF N°" />
               </div>
 
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-commandement-highlight-field">
                 <label>Conservation</label>
                 <input type="text" id="conservationInput" placeholder="Conservation" />
               </div>
 
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-commandement-highlight-field">
                 <label>Métrage</label>
                 <input type="text" id="metrageInput" placeholder="Métrage" />
               </div>
             </div>
 
             <div className="creation-form-row creation-form-row-three" data-procedure-visibility="Sanlam">
-              <div className="form-group creation-layout-card">
-                <label>N / Réf</label>
-                <input type="text" id="sanlamNRefInput" placeholder="N / Réf" />
-              </div>
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-sanlam-highlight-field">
                 <label>Police n°</label>
                 <input type="text" id="sanlamPoliceInput" placeholder="Police n°" />
               </div>
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-sanlam-highlight-field">
                 <label>Sinistre n°</label>
                 <input type="text" id="sanlamSinistreInput" placeholder="Sinistre n°" />
               </div>
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-sanlam-highlight-field">
                 <label>Date accident</label>
                 <input type="text" id="sanlamDateAccidentInput" placeholder="jj/mm/aaaa" />
               </div>
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-sanlam-highlight-field">
                 <label>CIN conducteur</label>
                 <input type="text" id="sanlamCinConducteurInput" placeholder="CIN conducteur" />
               </div>
-              <div className="form-group creation-layout-card">
+              <div className="form-group creation-layout-card creation-sanlam-highlight-field">
                 <label>Souscripteur</label>
                 <input type="text" id="sanlamSouscripteurInput" placeholder="Souscripteur" />
               </div>

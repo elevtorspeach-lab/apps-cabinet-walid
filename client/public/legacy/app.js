@@ -3,7 +3,7 @@ const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArc
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const REMOTE_MANAGER_USERNAME = 'manager';
-const LEGACY_MANAGER_USERNAMES = ['walid'];
+const LEGACY_MANAGER_USERNAMES = [];
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -19,10 +19,20 @@ const PASSWORD_SETUP_MODE_FORCED = 'forced';
 const PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL = 'bootstrap-local';
 const PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE = 'bootstrap-remote';
 const STANDARD_TEAM_TOTAL_MANAGERS = 2;
-const STANDARD_TEAM_TOTAL_ADMINS = 8;
-const STANDARD_TEAM_TOTAL_CLIENTS = 5;
+const STANDARD_TEAM_TOTAL_ADMINS = 6;
+const STANDARD_TEAM_TOTAL_CLIENTS = 0;
 const STANDARD_TEAM_DEFAULT_PASSWORD = '1234';
-const STANDARD_TEAM_MANAGER_USERNAMES = ['manager', 'amine'];
+const STANDARD_TEAM_MANAGER_USERNAMES = ['manager', 'walid'];
+const FIXED_TEAM_USERS = [
+  { id: 1, username: 'manager', role: 'manager' },
+  { id: 2, username: 'walid', role: 'manager' },
+  { id: 3, username: 'admin1', role: 'admin' },
+  { id: 4, username: 'admin2', role: 'admin' },
+  { id: 5, username: 'admin3', role: 'admin' },
+  { id: 6, username: 'admin4', role: 'admin' },
+  { id: 7, username: 'admin5', role: 'admin' },
+  { id: 8, username: 'admin6', role: 'admin' }
+];
 
 function normalizeLoginUsername(value){
   return String(value || '').trim().toLowerCase();
@@ -51,20 +61,18 @@ function resolveRemoteLoginUsername(value){
 }
 
 function buildSeedUsers(){
-  return [
-    {
-      id: 1,
-      username: DEFAULT_MANAGER_USERNAME,
-      password: DEFAULT_MANAGER_PASSWORD,
-      passwordHash: '',
-      passwordSalt: '',
-      passwordVersion: 0,
-      passwordUpdatedAt: '',
-      requirePasswordChange: false,
-      role: 'manager',
-      clientIds: []
-    }
-  ];
+  return FIXED_TEAM_USERS.map((user)=>({
+    id: user.id,
+    username: user.username,
+    password: STANDARD_TEAM_DEFAULT_PASSWORD,
+    passwordHash: '',
+    passwordSalt: '',
+    passwordVersion: 0,
+    passwordUpdatedAt: '',
+    requirePasswordChange: false,
+    role: user.role,
+    clientIds: []
+  }));
 }
 
 let USERS = buildSeedUsers();
@@ -435,6 +443,7 @@ const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
 const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
+  adversaire: 'Adversaire',
   nRef: 'N / ref',
   boiteNo: 'Boîte N°',
   referenceClient: 'Référence Client',
@@ -6628,6 +6637,7 @@ function parseProcedureToken(token){
   const raw = String(token || '').trim();
   if(!raw) return '';
   const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if(compact === 'sanlam') return 'Sanlam';
   if(compact === 'ass') return 'ASS';
   if(compact === 'rest' || compact === 'restitution' || compact === 'restit' || compact === 'rv' || compact === 'res') return 'Restitution';
   if(compact === 'commandement' || compact === 'cmd' || compact === 'com') return 'Commandement';
@@ -9489,64 +9499,28 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 }
 
 function ensureManagerUser(users){
-  const validUsers = Array.isArray(users) ? users.filter(Boolean).map(u=>({ ...u })) : [];
-  const defaultManagerIdx = validUsers.findIndex(
-    u=>String(u?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  const allowedUsers = new Map(
+    (Array.isArray(users) ? users : [])
+      .filter(Boolean)
+      .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
+      .filter(([username])=>username)
   );
-  if(defaultManagerIdx === -1){
-    const legacyManagerIdx = validUsers.findIndex(
-      u=>LEGACY_MANAGER_USERNAMES.includes(String(u?.username || '').trim().toLowerCase())
-    );
-    if(legacyManagerIdx >= 0){
-      validUsers[legacyManagerIdx].username = DEFAULT_MANAGER_USERNAME;
-      validUsers[legacyManagerIdx].role = 'manager';
-      validUsers[legacyManagerIdx].clientIds = [];
-    }
-  }
-  const existingUsernames = new Set(
-    validUsers.map(u=>String(u?.username || '').trim().toLowerCase()).filter(Boolean)
-  );
-  buildSeedUsers().forEach(seedUser=>{
-    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
-    if(!usernameKey || existingUsernames.has(usernameKey)) return;
-    validUsers.push({ ...seedUser });
-    existingUsernames.add(usernameKey);
+  return buildSeedUsers().map((seedUser)=>{
+    const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
+    return {
+      ...(existingUser && typeof existingUser === 'object' ? existingUser : {}),
+      ...seedUser,
+      username: seedUser.username,
+      role: seedUser.role,
+      password: STANDARD_TEAM_DEFAULT_PASSWORD,
+      passwordHash: '',
+      passwordSalt: '',
+      passwordVersion: 0,
+      passwordUpdatedAt: '',
+      requirePasswordChange: false,
+      clientIds: []
+    };
   });
-  const resolvedManagerIdx = validUsers.findIndex(
-    u=>String(u.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
-  );
-
-  if(resolvedManagerIdx >= 0){
-    // Keep the default manager account always available.
-    const defaultManager = validUsers[resolvedManagerIdx];
-    defaultManager.username = DEFAULT_MANAGER_USERNAME;
-    defaultManager.role = 'manager';
-    defaultManager.clientIds = [];
-    defaultManager.requirePasswordChange = false;
-    if(!hasAnyStoredPassword(defaultManager)){
-      defaultManager.password = DEFAULT_MANAGER_PASSWORD;
-      defaultManager.passwordHash = '';
-      defaultManager.passwordSalt = '';
-      defaultManager.passwordVersion = 0;
-      defaultManager.passwordUpdatedAt = '';
-    }
-    return validUsers;
-  }
-
-  const maxId = validUsers.reduce((acc, u)=>Math.max(acc, Number(u.id) || 0), 0);
-  validUsers.unshift({
-    id: Math.max(1, maxId + 1),
-    username: DEFAULT_MANAGER_USERNAME,
-    password: DEFAULT_MANAGER_PASSWORD,
-    passwordHash: '',
-    passwordSalt: '',
-    passwordVersion: 0,
-    passwordUpdatedAt: '',
-    requirePasswordChange: false,
-    role: 'manager',
-    clientIds: []
-  });
-  return validUsers;
 }
 
 function buildStateSignature(clients, salleAssignments, users, draft, recycleBin, recycleArchive, importHistory){
@@ -11670,13 +11644,26 @@ function parseExcelData(rows, sheet = null){
     tribunal: ['tribunal', 'trib', 'tr'],
     statut: ['statut', 'status', 'etat', 'état', 'statut dossier', 'etat dossier', 'état dossier', 'solde', 'soldé', 'soldée']
   };
+  dossierHeaderKeys.adversaire = ['adversaire', 'nom adversaire', 'partie adverse', 'adverse party'];
+  dossierHeaderKeys.refClient = [...new Set([...(dossierHeaderKeys.refClient || []), 'reference dossier sanlam', 'référence dossier sanlam', 'ref dossier sanlam'])];
+  dossierHeaderKeys.immatriculation = [...new Set([...(dossierHeaderKeys.immatriculation || []), 'ww'])];
+  dossierHeaderKeys.sanlamPolice = ['police n', 'police n°', 'police no', 'police numero', 'police numéro'];
+  dossierHeaderKeys.sanlamSinistre = ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numéro'];
+  dossierHeaderKeys.sanlamDateAccident = ['date accident', 'date d accident', 'date du sinistre'];
+  dossierHeaderKeys.sanlamCinConducteur = ['cin conducteur', 'cni conducteur', 'cin du conducteur', 'cni du conducteur'];
+  dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
 
   const audienceHeaderKeys = {
+    adversaire: ['adversaire'],
+    sanlamSinistre: ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numéro'],
     refClient: ['ref client', 'refclient', 'reference client', 'réference client', 'référence client'],
     debiteur: ['debiteur', 'débiteur'],
     refDossier: [
       'ref dossier',
       'reference dossier',
+      'reference dossier sanlam',
+      'référence dossier sanlam',
+      'ref dossier sanlam',
       'référence dossier',
       'ref dossier assignation',
       'reference dossier assignation',
@@ -11708,7 +11695,9 @@ function parseExcelData(rows, sheet = null){
     const hasAudience = getColIndex(map, audienceHeaderKeys.audience) !== -1;
     const hasIdentity =
       getColIndex(map, audienceHeaderKeys.refClient) !== -1
-      || getColIndex(map, audienceHeaderKeys.debiteur) !== -1;
+      || getColIndex(map, audienceHeaderKeys.debiteur) !== -1
+      || getColIndex(map, audienceHeaderKeys.adversaire) !== -1
+      || getColIndex(map, audienceHeaderKeys.sanlamSinistre) !== -1;
     return hasRefDossier && hasAudience && hasIdentity;
   };
   const normalizeImportColorHex = (value)=>{
@@ -11884,7 +11873,9 @@ function parseExcelData(rows, sheet = null){
     const dossierColMap = buildHeaderMap(rows[i] || []);
     const looksLikeAudienceHeader = isAudienceHeaderMap(dossierColMap);
     if(looksLikeAudienceHeader) continue;
-    const hasDebiteur = getColIndex(dossierColMap, dossierHeaderKeys.debiteur) !== -1;
+    const hasDebiteur =
+      getColIndex(dossierColMap, dossierHeaderKeys.debiteur) !== -1
+      || getColIndex(dossierColMap, dossierHeaderKeys.adversaire) !== -1;
     const hasClientLike = getColIndex(dossierColMap, dossierHeaderKeys.client) !== -1;
     const hasDossierSignals =
       getColIndex(dossierColMap, dossierHeaderKeys.procedure) !== -1
@@ -11931,6 +11922,13 @@ function parseExcelData(rows, sheet = null){
       tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal),
       statut: getColIndex(dossierColMap, dossierHeaderKeys.statut)
     };
+    idx.adversaire = getColIndex(dossierColMap, dossierHeaderKeys.adversaire);
+    idx.sanlamNRef = getColIndex(dossierColMap, dossierHeaderKeys.nRef);
+    idx.sanlamPolice = getColIndex(dossierColMap, dossierHeaderKeys.sanlamPolice);
+    idx.sanlamSinistre = getColIndex(dossierColMap, dossierHeaderKeys.sanlamSinistre);
+    idx.sanlamDateAccident = getColIndex(dossierColMap, dossierHeaderKeys.sanlamDateAccident);
+    idx.sanlamCinConducteur = getColIndex(dossierColMap, dossierHeaderKeys.sanlamCinConducteur);
+    idx.sanlamSouscripteur = getColIndex(dossierColMap, dossierHeaderKeys.sanlamSouscripteur);
 
     let carriedAffectationDate = '';
     let carriedMontant = '';
@@ -11948,9 +11946,13 @@ function parseExcelData(rows, sheet = null){
       if(rowLooksLikeHeader) break;
 
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
+      const debiteur = idx.debiteur !== -1
+        ? normalizeImportedDebiteurName(row[idx.debiteur])
+        : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
+      const adversaire = idx.adversaire !== -1 ? String(row[idx.adversaire] || '').trim() : '';
       const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
+      const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
       const gestionnaire = idx.gestionnaire !== -1 ? String(row[idx.gestionnaire] || '').trim() : '';
       const type = idx.type !== -1 ? String(row[idx.type] || '').trim() : '';
@@ -11978,6 +11980,11 @@ function parseExcelData(rows, sheet = null){
       const efNumber = idx.efNumber !== -1 ? String(row[idx.efNumber] || '').trim() : '';
       const conservation = idx.conservation !== -1 ? String(row[idx.conservation] || '').trim() : '';
       const metrage = idx.metrage !== -1 ? String(row[idx.metrage] || '').trim() : '';
+      const sanlamPolice = idx.sanlamPolice !== -1 ? String(row[idx.sanlamPolice] || '').trim() : '';
+      const sanlamSinistre = idx.sanlamSinistre !== -1 ? String(row[idx.sanlamSinistre] || '').trim() : '';
+      const sanlamDateAccident = idx.sanlamDateAccident !== -1 ? parseExcelDateValue(row[idx.sanlamDateAccident]) : '';
+      const sanlamCinConducteur = idx.sanlamCinConducteur !== -1 ? String(row[idx.sanlamCinConducteur] || '').trim() : '';
+      const sanlamSouscripteur = idx.sanlamSouscripteur !== -1 ? String(row[idx.sanlamSouscripteur] || '').trim() : '';
       const montantRaw = idx.montant !== -1 ? String(row[idx.montant] || '').trim() : '';
       const montantValues = parseExcelMontantValues(montantRaw);
       const montant = String(montantValues[0] || '').trim();
@@ -11992,7 +11999,7 @@ function parseExcelData(rows, sheet = null){
       const sort = idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '';
       const sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
-      const isEmptyDossierRow = !refClient && !debiteur && !clientName && !procedureText && !type && !montant && !dateAffectation;
+      const isEmptyDossierRow = !refClient && !debiteur && !adversaire && !sanlamNRef && !clientName && !procedureText && !type && !montant && !dateAffectation;
       if(isEmptyDossierRow) break;
       const hasExplicitReferences = !!(refAssignation || refRestitution || refSfdc || refInjonction);
       const hasOtherDossierSignals = !!(
@@ -12009,6 +12016,11 @@ function parseExcelData(rows, sheet = null){
         || efNumber
         || conservation
         || metrage
+        || sanlamPolice
+        || sanlamSinistre
+        || sanlamDateAccident
+        || sanlamCinConducteur
+        || sanlamSouscripteur
       );
       const isCarryDossierRow = !refClient
         && !debiteur
@@ -12030,6 +12042,7 @@ function parseExcelData(rows, sheet = null){
         rowNumber: j + 1,
         clientName,
         nRef,
+        sanlamNRef,
         dateAffectation,
         carriedAffectationDate,
         gestionnaire,
@@ -12039,6 +12052,7 @@ function parseExcelData(rows, sheet = null){
         procedureText,
         refClient,
         debiteur,
+        adversaire,
         montant,
         montantExtra,
         immatriculation,
@@ -12054,6 +12068,11 @@ function parseExcelData(rows, sheet = null){
         efNumber,
         conservation,
         metrage,
+        sanlamPolice,
+        sanlamSinistre,
+        sanlamDateAccident,
+        sanlamCinConducteur,
+        sanlamSouscripteur,
         refAssignation,
         refRestitution,
         refSfdc,
@@ -12082,6 +12101,8 @@ function parseExcelData(rows, sheet = null){
     const idx = {
       refClient: getColIndex(map, audienceHeaderKeys.refClient),
       debiteur: getColIndex(map, audienceHeaderKeys.debiteur),
+      adversaire: getColIndex(map, audienceHeaderKeys.adversaire),
+      sanlamSinistre: getColIndex(map, audienceHeaderKeys.sanlamSinistre),
       refDossier: getColIndex(map, audienceHeaderKeys.refDossier),
       procedure: getColIndex(map, audienceHeaderKeys.procedure),
       audience: getColIndex(map, audienceHeaderKeys.audience),
@@ -12096,15 +12117,19 @@ function parseExcelData(rows, sheet = null){
     for(let j=i+1; j<rows.length; j++){
       const row = rows[j] || [];
       const refDossier = idx.refDossier !== -1 ? String(row[idx.refDossier] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
+      const debiteur = idx.debiteur !== -1
+        ? normalizeImportedDebiteurName(row[idx.debiteur])
+        : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
-      if(!refDossier && !debiteur && !refClient) break;
+      const sanlamSinistre = idx.sanlamSinistre !== -1 ? String(row[idx.sanlamSinistre] || '').trim() : '';
+      if(!refDossier && !debiteur && !refClient && !sanlamSinistre) break;
       const sortOrdText = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const importColorMeta = getAudienceOrdonnanceMetaFromValue(sortOrdText);
       audiences.push({
         rowNumber: j + 1,
         refClient,
         debiteur,
+        sanlamSinistre,
         refDossier,
         procedureText: idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '',
         audience: idx.audience !== -1 ? parseExcelDateValue(row[idx.audience]) : '',
@@ -12968,7 +12993,7 @@ async function applyExcelImport(payload, options = {}){
   const importSkippedRows = [];
   const importWarningRows = [];
   const importInfoRows = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'Sanlam']);
   const defaultDossierProceduresWhenMissing = ['ASS', 'Restitution', 'SFDC'];
   let importedDossiersCount = 0;
   let skippedDossiersCount = 0;
@@ -13418,6 +13443,7 @@ async function applyExcelImport(payload, options = {}){
       importGlobalBatchId: globalImportEntry ? globalImportEntry.id : '',
       createdAt: new Date().toISOString(),
       debiteur: row.debiteur,
+      adversaire: String(row.adversaire || '').trim(),
       nRef: String(row.nRef || '').trim(),
       boiteNo: row.boiteNo || '',
       referenceClient: row.refClient || row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction || '',
@@ -13441,6 +13467,12 @@ async function applyExcelImport(payload, options = {}){
       ww: row.immatriculation,
       marque: row.marque,
       type: row.type,
+      sanlamNRef: String(row.sanlamNRef || row.nRef || '').trim(),
+      sanlamPolice: String(row.sanlamPolice || '').trim(),
+      sanlamSinistre: String(row.sanlamSinistre || '').trim(),
+      sanlamDateAccident: String(row.sanlamDateAccident || '').trim(),
+      sanlamCinConducteur: String(row.sanlamCinConducteur || '').trim(),
+      sanlamSouscripteur: String(row.sanlamSouscripteur || '').trim(),
       note: '',
       avancement: '',
       statut: importedStatus.statut || 'En cours',
@@ -15757,6 +15789,7 @@ async function addDossier(){
     if(selected.length === 0) return alert('Choisir au moins une procédure');
 
     const details = collectProcedureDraftFromCards({ trimValues: true });
+    const hasAssProcedure = selected.some((value)=>normalizeProcedureName(getProcedureBaseName(String(value || '').trim())) === 'ass');
 
     const rawDateAffectation = String($('dateAffectation')?.value || '').trim();
     if(!rawDateAffectation){
@@ -15785,6 +15818,7 @@ async function addDossier(){
       isAudienceOrphanImport: previousImportMeta?.isAudienceOrphanImport === true,
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
+      adversaire: $('adversaireInput')?.value.trim() || '',
       nRef: $('nRefInput')?.value.trim() || '',
       boiteNo: $('boiteNoInput')?.value.trim() || '',
       referenceClient: $('referenceClientInput').value.trim(),
@@ -15800,11 +15834,11 @@ async function addDossier(){
       ww: $('wwInput').value.trim(),
       marque: $('marqueInput').value.trim(),
       type: $('typeInput').value.trim(),
-      caution: $('cautionInput')?.value.trim() || '',
-      cautionAdresse: $('cautionAdresseInput')?.value.trim() || '',
-      cautionVille: $('cautionVilleInput')?.value.trim() || '',
-      cautionCin: $('cautionCinInput')?.value.trim() || '',
-      cautionRc: $('cautionRcInput')?.value.trim() || '',
+      caution: hasAssProcedure ? ($('cautionInput')?.value.trim() || '') : '',
+      cautionAdresse: hasAssProcedure ? ($('cautionAdresseInput')?.value.trim() || '') : '',
+      cautionVille: hasAssProcedure ? ($('cautionVilleInput')?.value.trim() || '') : '',
+      cautionCin: hasAssProcedure ? ($('cautionCinInput')?.value.trim() || '') : '',
+      cautionRc: hasAssProcedure ? ($('cautionRcInput')?.value.trim() || '') : '',
       efNumber: $('efNumberInput')?.value.trim() || '',
       conservation: $('conservationInput')?.value.trim() || '',
       metrage: $('metrageInput')?.value.trim() || '',
@@ -16447,6 +16481,7 @@ function editDossier(clientId, index){
 
   $('selectClient').value = clientId;
   $('debiteurInput').value = d.debiteur || '';
+  if($('adversaireInput')) $('adversaireInput').value = d.adversaire || '';
   if($('nRefInput')) $('nRefInput').value = d.nRef || '';
   if($('boiteNoInput')) $('boiteNoInput').value = d.boiteNo || '';
   $('referenceClientInput').value = d.referenceClient || '';
@@ -16605,6 +16640,7 @@ function openDossierDetails(clientId, index){
     ['Client', client.name || '-'],
     ['N / ref', dossier.nRef || '-'],
     ['Débiteur', dossier.debiteur || '-'],
+    ['Adversaire', dossier.adversaire || '-'],
     ['Boîte N°', dossier.boiteNo || '-'],
     ['Référence Client', dossier.referenceClient || '-'],
     ['Date d’affectation', dossier.dateAffectation || '-'],
@@ -20529,7 +20565,7 @@ function buildAudienceSelectedExportTableRow(row, options = {}){
   const jugeValue = draft.juge || p.juge || '';
   const sortValue = blankSort ? '' : formatMixedDirectionExportText(rawSortValue);
   const clientValue = formatAudienceExportWrappedName(row?.c?.name || '');
-  const adversaireValue = formatAudienceExportWrappedName(d.debiteur || '');
+  const adversaireValue = formatAudienceExportWrappedName(d.adversaire || d.debiteur || '');
   const out = [
     clientValue,
     adversaireValue,

@@ -598,26 +598,7 @@ const LOCAL_STORAGE_CACHE_MAX_AUDIENCE_DRAFTS = 12000;
 const REMOTE_STATE_PAGED_LOAD_MIN_CLIENTS = 250;
 const REMOTE_STATE_PAGED_LOAD_MIN_DOSSIERS = 25000;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
-const LOCAL_ONLY_MODE = (() => {
-  if(typeof window === 'undefined') return false;
-  const query = new URLSearchParams(window.location.search);
-  const rawFlag = String(
-    query.get('localOnly')
-    || query.get('offline')
-    || ''
-  ).trim().toLowerCase();
-  if(rawFlag){
-    return !['0', 'false', 'no', 'off'].includes(rawFlag);
-  }
-  const protocol = String(window.location?.protocol || '').toLowerCase();
-  const hostname = String(window.location?.hostname || '').trim().toLowerCase();
-  const isLocalHttpHost = (protocol === 'http:' || protocol === 'https:')
-    && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1');
-  if(typeof window.CABINET_LOCAL_ONLY === 'boolean') return window.CABINET_LOCAL_ONLY;
-  if(IS_FILE_PROTOCOL) return true;
-  if(isLocalHttpHost) return true;
-  return !!window.cabinetDesktopState;
-})();
+const LOCAL_ONLY_MODE = false;
 const IS_REMOTE_WEB_HOST = (() => {
   if(typeof window === 'undefined' || !window.location) return false;
   const hostname = String(window.location.hostname || '').toLowerCase();
@@ -625,8 +606,8 @@ const IS_REMOTE_WEB_HOST = (() => {
   if(hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   return true;
 })();
-const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 900 : 2500;
-const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1500 : 4000;
+const API_PROBE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 2500 : 3500;
+const API_HEALTH_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 3000 : 5000;
 const API_STATE_LOAD_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 1800 : 25000;
 const API_STATE_SAVE_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 30000 : 20000;
 const API_AUTH_LOGIN_TIMEOUT_MS = IS_REMOTE_WEB_HOST ? 4000 : 5000;
@@ -1416,9 +1397,12 @@ function appendCandidateVariants(candidates, seen, value){
 function buildApiBaseCandidates(){
   const out = [];
   const seen = new Set();
-  appendCandidateVariants(out, seen, API_BASE);
   const queryApiBase = new URLSearchParams(window.location.search).get('apiBase');
   appendCandidateVariants(out, seen, queryApiBase);
+  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
+    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
+  }
+  appendCandidateVariants(out, seen, API_BASE);
   if(typeof localStorage !== 'undefined'){
     try{
       appendCandidateVariants(out, seen, localStorage.getItem(API_BASE_STORAGE_KEY));
@@ -1429,10 +1413,6 @@ function buildApiBaseCandidates(){
   appendCandidateVariants(out, seen, window.CABINET_API_BASE);
   const metaApiBase = document.querySelector('meta[name="api-base"]')?.getAttribute('content');
   appendCandidateVariants(out, seen, metaApiBase);
-
-  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
-    appendCandidateVariants(out, seen, `${window.location.origin}/api`);
-  }
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   const runningOnDefaultLocalApiPort = Number(window.location.port || 0) === 3000;
@@ -2620,21 +2600,13 @@ function setSyncStatus(status, message){
   
   let next = ['ok', 'error', 'syncing', 'pending', 'conflict'].includes(status) ? status : 'pending';
   
-  // Si on est en mode local seulement, on ne veut pas effrayer l'utilisateur avec
-  // des messages de "Synchronisation serveur" qui n'auront pas lieu immédiatement.
-  const isLocal = LOCAL_ONLY_MODE || !remoteServerReachable;
-
-  if(isLocal && next === 'syncing'){
-    next = 'ok';
-  }
-
   badge.classList.add(`is-${next}`);
   
   const fallbackText = {
     pending: 'Modification détectée...',
     syncing: 'Synchronisation serveur...',
-    ok: isLocal ? 'Mode local (actif)' : 'Connecté au serveur (actif)',
-    error: 'Serveur indisponible (local)',
+    ok: 'Connecté au serveur (actif)',
+    error: 'Serveur indisponible',
     conflict: 'Conflit détecté, rechargement...'
   };
   
@@ -4431,10 +4403,6 @@ async function pingApiBaseWithLatency(base, timeoutMs = 3500){
 }
 
 async function resolveApiBase(forceRetry = false){
-  if(LOCAL_ONLY_MODE){
-    API_BASE_RESOLVED = true;
-    return API_BASE;
-  }
   if(API_BASE_RESOLVED && !forceRetry){
     return API_BASE;
   }
@@ -4457,13 +4425,6 @@ async function resolveApiBase(forceRetry = false){
 
 async function refreshServerConnectionStatus(options = {}){
   if(remoteSyncHealthCheckInFlight) return false;
-  if(LOCAL_ONLY_MODE){
-    setPingMetric(null);
-    lastLiveDelayMs = null;
-    renderSyncMetrics();
-    setSyncStatus('ok', 'Mode local (actif)');
-    return false;
-  }
   const force = options?.force === true;
   if(remoteSyncStreamConnected && !force){
     return true;
@@ -4494,7 +4455,7 @@ async function refreshServerConnectionStatus(options = {}){
     setPingMetric(null);
     lastLiveDelayMs = null;
     renderSyncMetrics();
-    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Mode local (serveur indisponible)');
+    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible');
     return false;
   }finally{
     remoteSyncHealthCheckInFlight = false;
@@ -4502,10 +4463,6 @@ async function refreshServerConnectionStatus(options = {}){
 }
 
 async function refreshPreLoginServerStatus(){
-  if(LOCAL_ONLY_MODE){
-    setSyncStatus('ok', 'Mode local (actif)');
-    return false;
-  }
   const connected = await refreshServerConnectionStatus({ force: true });
   if(hasRemoteAuthSession()) return connected;
   if(connected){
@@ -4517,7 +4474,7 @@ async function refreshPreLoginServerStatus(){
   }
   setSyncStatus(
     remoteBootstrapSetupRequired ? 'pending' : 'error',
-    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Mode local (serveur indisponible)'
+    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Serveur indisponible'
   );
   return false;
 }
@@ -6680,7 +6637,6 @@ function parseProcedureToken(token){
   const raw = String(token || '').trim();
   if(!raw) return '';
   const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if(compact === 'sanlam') return 'Sanlam';
   if(compact === 'ass') return 'ASS';
   if(compact === 'rest' || compact === 'restitution' || compact === 'restit' || compact === 'rv' || compact === 'res') return 'Restitution';
   if(compact === 'commandement' || compact === 'cmd' || compact === 'com') return 'Commandement';
@@ -7707,18 +7663,6 @@ async function migrateUsersToSecureStorage(users){
 
 async function hardenUsersOnBoot(){
   USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
-  if(!LOCAL_ONLY_MODE){
-    return false;
-  }
-  const migration = await migrateUsersToSecureStorage(USERS);
-  USERS = ensureManagerUser(migration.users);
-  if(!migration.changed) return false;
-  try{
-    await persistStateSliceNow('users', USERS, { source: 'user-security-migration' });
-  }catch(err){
-    console.warn('Impossible de renforcer la sécurité des mots de passe', err);
-  }
-  syncCurrentUserFromUsers();
   return true;
 }
 
@@ -7802,7 +7746,7 @@ function updateBootstrapSetupUi(options = {}){
 }
 
 function shouldOfferLocalBootstrapSetup(){
-  return isBootstrapSetupRequiredForUsers(USERS) && (LOCAL_ONLY_MODE || !remoteServerReachable);
+  return false;
 }
 
 function configurePasswordSetupModal(mode = PASSWORD_SETUP_MODE_FORCED){
@@ -7884,9 +7828,6 @@ async function submitLocalBootstrapPasswordSetup(password, options = {}){
 }
 
 async function submitRemoteBootstrapPasswordSetup(password, options = {}){
-  if(LOCAL_ONLY_MODE){
-    throw new Error('Mode local uniquement.');
-  }
   await resolveApiBase();
   const res = await fetchWithTimeout(`${API_BASE}/auth/bootstrap`, {
     method: 'POST',
@@ -8934,7 +8875,10 @@ function clearRecycleBinToBackup(){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut vider la corbeille');
   const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
   if(!items.length) return alert('Corbeille vide');
-  if(!window.confirm(`Vider la corbeille (${items.length} élément(s)) ?\nLes éléments seront gardés dans le backup interne.`)) return;
+  if(!confirmDangerousAction(
+    `Vider la corbeille (${items.length} element(s)) ?\nLes elements seront gardes dans le backup interne.`,
+    { confirmationWord: 'VIDER' }
+  )) return;
   pushRecycleArchiveEntries(items);
   AppState.recycleBin = [];
   queuePersistAppState();
@@ -10364,22 +10308,7 @@ function getSyncQueueItems(){
 }
 
 async function enqueueSyncAction(pathname, body){
-  const db = await getIndexedDbConnection();
-  if(!db) return false;
-  return new Promise((resolve)=>{
-    try{
-      const tx = db.transaction(INDEXED_DB_SYNC_STORE, 'readwrite');
-      const store = tx.objectStore(INDEXED_DB_SYNC_STORE);
-      store.add({ pathname, body, timestamp: Date.now() });
-      tx.oncomplete = ()=>{
-        resolve(true);
-        triggerSyncQueueFlush();
-      };
-      tx.onerror = ()=>resolve(false);
-    }catch(err){
-      resolve(false);
-    }
-  });
+  return persistRemoteRequestNow(pathname, body);
 }
 
 let isSyncingQueue = false;
@@ -10808,80 +10737,37 @@ function shouldSkipFullLocalStorageCache(payload){
 }
 
 async function persistLocalStateSnapshot(payload = null, options = {}){
-  const source = String(options?.source || 'persist');
   const safePayload = resolveAppStateSnapshotPayload(payload);
   const nextSignature = typeof options.signature === 'string'
     ? options.signature
     : getStateSignatureFromPayload(safePayload);
-  if(!options.force && nextSignature && nextSignature === lastLocalSnapshotSignature){
-    queueDesktopStateFilePersist(safePayload, { signature: nextSignature });
-    return safePayload;
-  }
   if(nextSignature){
     lastPersistedStateSignature = nextSignature;
     lastLocalSnapshotSignature = nextSignature;
   }
-  const preferDeferredCacheWrite = options.force !== true && (
-    heavyUiOperationCount > 0
-    || importInProgress
-    || shouldSkipFullLocalStorageCache(safePayload)
-    || isLargeDatasetMode()
-    || source === 'diligence'
-    || source === 'audience'
-  );
-  if(preferDeferredCacheWrite){
-    queueDeferredLocalStateSnapshot(safePayload, { source, signature: nextSignature });
-  }else{
-    await writeStateToIndexedDb(safePayload);
-    writeStateToLocalStorage(safePayload);
-  }
-  await createAutoBackupSnapshot(safePayload, { source, signature: nextSignature });
-  queueDesktopStateFilePersist(safePayload, { signature: nextSignature });
   return safePayload;
 }
 
 function queueDeferredLocalStateSnapshot(payload = null, options = {}){
-  const source = String(options?.source || 'persist');
   const hasProvidedPayload = !!(payload && typeof payload === 'object');
   const nextSignature = typeof options.signature === 'string'
     ? options.signature
     : (hasProvidedPayload ? getStateSignatureFromPayload(payload) : '');
   if(nextSignature){
     lastPersistedStateSignature = nextSignature;
+    lastLocalSnapshotSignature = nextSignature;
   }
-  deferredLocalSnapshotPayload = hasProvidedPayload ? payload : null;
-  deferredLocalSnapshotSource = source;
-  deferredLocalSnapshotSignature = nextSignature;
-  if(deferredLocalSnapshotTimer) return hasProvidedPayload ? payload : null;
-  deferredLocalSnapshotTimer = setTimeout(()=>{
-    const pendingPayload = deferredLocalSnapshotPayload;
-    const pendingSource = deferredLocalSnapshotSource;
-    const pendingSignature = deferredLocalSnapshotSignature;
-    deferredLocalSnapshotTimer = null;
-    deferredLocalSnapshotPayload = null;
-    deferredLocalSnapshotSource = 'persist';
-    deferredLocalSnapshotSignature = '';
-    persistLocalStateSnapshot(pendingPayload, { source: pendingSource, signature: pendingSignature }).catch((err)=>{
-      console.warn('Impossible de sauvegarder le snapshot local différé', err);
-    });
-  }, DEFERRED_LOCAL_SNAPSHOT_DEBOUNCE_MS);
   return hasProvidedPayload ? payload : null;
 }
 
 async function persistRemoteRequestNow(pathname, body){
-  if(LOCAL_ONLY_MODE){
-    setSyncStatus('ok', 'Mode local (données sauvegardées)');
-    return true;
-  }
   if(!hasRemoteAuthSession()){
-    setSyncStatus('ok', 'Mode local (données sauvegardées)');
-    return true;
+    setSyncStatus('pending', 'Connexion serveur requise');
+    throw new Error('Connexion serveur requise.');
   }
-  // Fast-path: if the server was previously found unreachable, skip the
-  // remote save entirely so that local operations never block.
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
-    return true;
+    setSyncStatus('error', 'Serveur indisponible');
+    throw new Error('Serveur indisponible.');
   }
   setSyncStatus('syncing');
   try{
@@ -10920,9 +10806,9 @@ async function persistRemoteRequestNow(pathname, body){
     return true;
   }catch(err){
     remoteServerReachable = false;
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible');
     console.warn('Impossible de sauvegarder sur le serveur', err);
-    return true;
+    throw err;
   }
 }
 
@@ -11074,65 +10960,20 @@ function triggerSyncQueueFlush(){
 }
 
 async function flushSyncQueueNow(){
-  if(isSyncingQueue) return;
-  if(!remoteServerReachable || !hasRemoteAuthSession()) return;
-  if(LOCAL_ONLY_MODE) return;
-
-  const db = await getIndexedDbConnection();
-  if(!db) return;
-
-  isSyncingQueue = true;
-  let hasFailures = false;
-  
-  try {
-    const tx = db.transaction(INDEXED_DB_SYNC_STORE, 'readwrite');
-    const store = tx.objectStore(INDEXED_DB_SYNC_STORE);
-    const req = store.openCursor();
-    
-    return new Promise((resolve)=>{
-      req.onsuccess = async (event) => {
-        const cursor = event.target.result;
-        if(!cursor || hasFailures){
-          tx.oncomplete = ()=>resolve(true);
-          return;
-        }
-        
-        const item = cursor.value;
-        try {
-          const success = await persistRemoteRequestNow(item.pathname, item.body);
-          if(success){
-            cursor.delete();
-            cursor.continue();
-          } else {
-            hasFailures = true;
-            resolve(false);
-          }
-        } catch(err){
-          hasFailures = true;
-          resolve(false);
-        }
-      };
-      req.onerror = ()=>resolve(false);
-    });
-  } finally {
-    isSyncingQueue = false;
-    updateSyncStatusLabel();
-  }
+  updateSyncStatusLabel();
+  return true;
 }
 
 function updateSyncStatusLabel(){
-  getSyncQueueItems().then(items=>{
-    if(!items.length){
-      setSyncStatus('ok');
-    } else {
-      const isLocal = LOCAL_ONLY_MODE || !remoteServerReachable;
-      if (isLocal) {
-        setSyncStatus('ok', 'Mode local (données sauvegardées)');
-      } else {
-        setSyncStatus('syncing', `Synchronisation: ${items.length} modification(s) en attente`);
-      }
-    }
-  });
+  if(!remoteServerReachable){
+    setSyncStatus('error', 'Serveur indisponible');
+    return;
+  }
+  if(!hasRemoteAuthSession()){
+    setSyncStatus('pending', 'Connexion serveur en attente');
+    return;
+  }
+  setSyncStatus('ok');
 }
 
 async function flushQueuedDossierPatchesNow(){
@@ -11460,141 +11301,73 @@ async function fetchRemoteStateSnapshot(remoteMeta = null){
 }
 
 async function loadPersistedState(){
-  let loaded = false;
-  let changed = false;
-  if(!LOCAL_ONLY_MODE && hasRemoteAuthSession()){
+  if(!hasRemoteAuthSession()) return false;
+  try{
+    let remoteMeta = null;
     try{
-      let remoteMeta = null;
-      try{
-        remoteMeta = await fetchRemoteStateMetadata();
-      }catch(err){
-        console.warn('Metadata distante indisponible, fallback snapshot complet', err);
-      }
-      if(remoteMeta && typeof remoteMeta === 'object'){
-        markApiBaseHealthy(API_BASE);
-        updateRemoteStateMetadata(remoteMeta);
-        const remoteSignature = buildRemoteStateVersionSignature(remoteMeta);
-        if(remoteSignature && remoteSignature === lastPersistedStateSignature){
-          loaded = true;
-          lastRemoteStateLoadVersion = remoteStateVersion;
-          lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
-          setSyncStatus('ok', 'Etat charge depuis serveur');
-          return false;
-        }
-        const targetVersion = Number(remoteMeta?.version);
-        const sourceVersion = Number(lastRemoteStateLoadVersion);
-        if(Number.isFinite(targetVersion) && targetVersion > 0 && Number.isFinite(sourceVersion) && sourceVersion > 0 && targetVersion > sourceVersion){
-          try{
-            const deltaPayload = await fetchRemoteStateChanges(sourceVersion);
-            if(
-              deltaPayload
-              && deltaPayload.snapshotRequired !== true
-              && Number(deltaPayload?.version) === targetVersion
-              && String(deltaPayload?.updatedAt || '') === String(remoteMeta?.updatedAt || '')
-            ){
-              const appliedIncrementally = await applyRemoteStateChangesIncrementally(deltaPayload);
-              if(appliedIncrementally){
-                loaded = true;
-                changed = true;
-                return true;
-              }
-            }
-          }catch(err){
-            console.warn('Delta distante indisponible, fallback snapshot', err);
-          }
-        }
-      }
-      const parsed = await fetchRemoteStateSnapshot(remoteMeta);
-      if(parsed && typeof parsed === 'object'){
-        markApiBaseHealthy(API_BASE);
-        if(!remoteMeta) updateRemoteStateMetadata(parsed);
-        const normalizedState = normalizePersistedStateSource(parsed);
-        if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
-          loaded = true;
-          lastRemoteStateLoadVersion = remoteStateVersion;
-          lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
-          setSyncStatus('ok', 'Etat charge depuis serveur');
-          return false;
-        }
-        await applyPersistedStateSource(normalizedState, {
-          source: 'server',
-          writeIndexedDb: true,
-          writeLocalStorage: true,
-          deferWriteIndexedDb: true,
-          deferWriteLocalStorage: true,
-          syncStatusMessage: 'Etat charge depuis serveur'
-        });
+      remoteMeta = await fetchRemoteStateMetadata();
+    }catch(err){
+      console.warn('Metadata distante indisponible, fallback snapshot complet', err);
+    }
+    if(remoteMeta && typeof remoteMeta === 'object'){
+      markApiBaseHealthy(API_BASE);
+      updateRemoteStateMetadata(remoteMeta);
+      const remoteSignature = buildRemoteStateVersionSignature(remoteMeta);
+      if(remoteSignature && remoteSignature === lastPersistedStateSignature){
         lastRemoteStateLoadVersion = remoteStateVersion;
         lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
-        loaded = true;
-        changed = true;
+        setSyncStatus('ok', 'Etat charge depuis serveur');
+        return false;
       }
-    }catch(err){
-      console.warn('Impossible de charger depuis le serveur', err);
-    }
-  }
-
-  if(loaded) return changed;
-  if(
-    hasDesktopStateBridge()
-    && typeof window.cabinetDesktopState.readState === 'function'
-  ){
-    try{
-      const desktopResult = await window.cabinetDesktopState.readState();
-      const parsed = desktopResult?.data;
-      if(parsed && typeof parsed === 'object'){
-        const normalizedState = normalizePersistedStateSource(parsed);
-        if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
-          return false;
+      const targetVersion = Number(remoteMeta?.version);
+      const sourceVersion = Number(lastRemoteStateLoadVersion);
+      if(Number.isFinite(targetVersion) && targetVersion > 0 && Number.isFinite(sourceVersion) && sourceVersion > 0 && targetVersion > sourceVersion){
+        try{
+          const deltaPayload = await fetchRemoteStateChanges(sourceVersion);
+          if(
+            deltaPayload
+            && deltaPayload.snapshotRequired !== true
+            && Number(deltaPayload?.version) === targetVersion
+            && String(deltaPayload?.updatedAt || '') === String(remoteMeta?.updatedAt || '')
+          ){
+            const appliedIncrementally = await applyRemoteStateChangesIncrementally(deltaPayload);
+            if(appliedIncrementally){
+              lastRemoteStateLoadVersion = remoteStateVersion;
+              lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
+              return true;
+            }
+          }
+        }catch(err){
+          console.warn('Delta distante indisponible, fallback snapshot', err);
         }
-        await applyPersistedStateSource(normalizedState, {
-          source: 'desktop',
-          writeIndexedDb: true,
-          writeLocalStorage: true,
-          deferWriteIndexedDb: true,
-          deferWriteLocalStorage: true,
-          syncStatusMessage: 'Etat charge depuis Cabinet Walid Araqi'
-        });
-        return true;
       }
-    }catch(err){
-      console.warn('Impossible de charger Cabinet Walid Araqi.json', err);
     }
-  }
-
-  const indexedState = await readStateFromIndexedDb();
-  if(indexedState && typeof indexedState === 'object'){
-    const normalizedState = normalizePersistedStateSource(indexedState);
-    if(normalizedState.signature && normalizedState.signature !== lastPersistedStateSignature){
+    const parsed = await fetchRemoteStateSnapshot(remoteMeta);
+    if(parsed && typeof parsed === 'object'){
+      markApiBaseHealthy(API_BASE);
+      if(!remoteMeta) updateRemoteStateMetadata(parsed);
+      const normalizedState = normalizePersistedStateSource(parsed);
+      if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
+        lastRemoteStateLoadVersion = remoteStateVersion;
+        lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
+        setSyncStatus('ok', 'Etat charge depuis serveur');
+        return false;
+      }
       await applyPersistedStateSource(normalizedState, {
-        source: 'indexeddb',
-        writeLocalStorage: true,
-        deferWriteLocalStorage: true,
-        syncStatusMessage: 'Etat charge depuis IndexedDB'
+        source: 'server',
+        syncStatusMessage: 'Etat charge depuis serveur'
       });
+      lastRemoteStateLoadVersion = remoteStateVersion;
+      lastRemoteStateLoadUpdatedAt = remoteStateUpdatedAt;
       return true;
     }
-  }
-
-  if(typeof localStorage === 'undefined') return false;
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return false;
-    const parsed = JSON.parse(raw);
-    const normalizedState = normalizePersistedStateSource(parsed);
-    if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
-      return false;
-    }
-    await applyPersistedStateSource(normalizedState);
-    return true;
   }catch(err){
-    console.warn('Etat local corrompu, utilisation des valeurs par défaut', err);
-    return false;
+    console.warn('Impossible de charger depuis le serveur', err);
   }
+  return false;
 }
 
 async function refreshRemoteState(){
-  if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
   if(
     !remoteRefreshPending
@@ -11656,13 +11429,8 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 }
 
 function startRemoteSync(){
-  if(LOCAL_ONLY_MODE){
-    updateRemoteStateMetadata({ version: 0, updatedAt: '' });
-    setSyncStatus('ok', 'Mode local (actif)');
-    return;
-  }
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible');
     return;
   }
   if(!hasRemoteAuthSession()){
@@ -11739,7 +11507,6 @@ function scheduleRemoteSyncStreamRetry(){
 }
 
 function startRemoteSyncStream(){
-  if(LOCAL_ONLY_MODE) return;
   if(typeof EventSource === 'undefined') return;
   if(!hasRemoteAuthSession()) return;
   if(remoteSyncStream) return;
@@ -11877,7 +11644,6 @@ function parseExcelData(rows, sheet = null){
     statut: ['statut', 'status', 'etat', 'état', 'statut dossier', 'etat dossier', 'état dossier', 'solde', 'soldé', 'soldée']
   };
   dossierHeaderKeys.adversaire = ['adversaire', 'nom adversaire', 'partie adverse', 'adverse party'];
-  dossierHeaderKeys.refClient = [...new Set([...(dossierHeaderKeys.refClient || []), 'reference dossier sanlam', 'rÃ©fÃ©rence dossier sanlam', 'ref dossier sanlam'])];
   dossierHeaderKeys.immatriculation = [...new Set([...(dossierHeaderKeys.immatriculation || []), 'ww'])];
   dossierHeaderKeys.sanlamPolice = ['police n', 'police n°', 'police no', 'police numero', 'police numéro'];
   dossierHeaderKeys.sanlamSinistre = ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numéro'];
@@ -11886,16 +11652,11 @@ function parseExcelData(rows, sheet = null){
   dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
 
   const audienceHeaderKeys = {
-    adversaire: ['adversaire'],
-    sanlamSinistre: ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numÃ©ro'],
     refClient: ['ref client', 'refclient', 'reference client', 'réference client', 'référence client'],
     debiteur: ['debiteur', 'débiteur'],
     refDossier: [
       'ref dossier',
       'reference dossier',
-      'reference dossier sanlam',
-      'rÃ©fÃ©rence dossier sanlam',
-      'ref dossier sanlam',
       'référence dossier',
       'ref dossier assignation',
       'reference dossier assignation',
@@ -11927,9 +11688,7 @@ function parseExcelData(rows, sheet = null){
     const hasAudience = getColIndex(map, audienceHeaderKeys.audience) !== -1;
     const hasIdentity =
       getColIndex(map, audienceHeaderKeys.refClient) !== -1
-      || getColIndex(map, audienceHeaderKeys.debiteur) !== -1
-      || getColIndex(map, audienceHeaderKeys.adversaire) !== -1
-      || getColIndex(map, audienceHeaderKeys.sanlamSinistre) !== -1;
+      || getColIndex(map, audienceHeaderKeys.debiteur) !== -1;
     return hasRefDossier && hasAudience && hasIdentity;
   };
   const normalizeImportColorHex = (value)=>{
@@ -12105,9 +11864,7 @@ function parseExcelData(rows, sheet = null){
     const dossierColMap = buildHeaderMap(rows[i] || []);
     const looksLikeAudienceHeader = isAudienceHeaderMap(dossierColMap);
     if(looksLikeAudienceHeader) continue;
-    const hasDebiteur =
-      getColIndex(dossierColMap, dossierHeaderKeys.debiteur) !== -1
-      || getColIndex(dossierColMap, dossierHeaderKeys.adversaire) !== -1;
+    const hasDebiteur = getColIndex(dossierColMap, dossierHeaderKeys.debiteur) !== -1;
     const hasClientLike = getColIndex(dossierColMap, dossierHeaderKeys.client) !== -1;
     const hasDossierSignals =
       getColIndex(dossierColMap, dossierHeaderKeys.procedure) !== -1
@@ -12155,7 +11912,6 @@ function parseExcelData(rows, sheet = null){
       statut: getColIndex(dossierColMap, dossierHeaderKeys.statut)
     };
     idx.adversaire = getColIndex(dossierColMap, dossierHeaderKeys.adversaire);
-    idx.sanlamNRef = getColIndex(dossierColMap, dossierHeaderKeys.nRef);
     idx.sanlamPolice = getColIndex(dossierColMap, dossierHeaderKeys.sanlamPolice);
     idx.sanlamSinistre = getColIndex(dossierColMap, dossierHeaderKeys.sanlamSinistre);
     idx.sanlamDateAccident = getColIndex(dossierColMap, dossierHeaderKeys.sanlamDateAccident);
@@ -12178,11 +11934,8 @@ function parseExcelData(rows, sheet = null){
       if(rowLooksLikeHeader) break;
 
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1
-        ? normalizeImportedDebiteurName(row[idx.debiteur])
-        : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
+      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
       const adversaire = idx.adversaire !== -1 ? String(row[idx.adversaire] || '').trim() : '';
-      const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
       const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
@@ -12231,7 +11984,7 @@ function parseExcelData(rows, sheet = null){
       const sort = idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '';
       const sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
-      const isEmptyDossierRow = !refClient && !debiteur && !adversaire && !sanlamNRef && !clientName && !procedureText && !type && !montant && !dateAffectation;
+      const isEmptyDossierRow = !refClient && !debiteur && !adversaire && !clientName && !procedureText && !type && !montant && !dateAffectation;
       if(isEmptyDossierRow) break;
       const hasExplicitReferences = !!(refAssignation || refRestitution || refSfdc || refInjonction);
       const hasOtherDossierSignals = !!(
@@ -12274,7 +12027,6 @@ function parseExcelData(rows, sheet = null){
         rowNumber: j + 1,
         clientName,
         nRef,
-        sanlamNRef,
         dateAffectation,
         carriedAffectationDate,
         gestionnaire,
@@ -12333,8 +12085,6 @@ function parseExcelData(rows, sheet = null){
     const idx = {
       refClient: getColIndex(map, audienceHeaderKeys.refClient),
       debiteur: getColIndex(map, audienceHeaderKeys.debiteur),
-      adversaire: getColIndex(map, audienceHeaderKeys.adversaire),
-      sanlamSinistre: getColIndex(map, audienceHeaderKeys.sanlamSinistre),
       refDossier: getColIndex(map, audienceHeaderKeys.refDossier),
       procedure: getColIndex(map, audienceHeaderKeys.procedure),
       audience: getColIndex(map, audienceHeaderKeys.audience),
@@ -12349,19 +12099,15 @@ function parseExcelData(rows, sheet = null){
     for(let j=i+1; j<rows.length; j++){
       const row = rows[j] || [];
       const refDossier = idx.refDossier !== -1 ? String(row[idx.refDossier] || '').trim() : '';
-      const debiteur = idx.debiteur !== -1
-        ? normalizeImportedDebiteurName(row[idx.debiteur])
-        : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
+      const debiteur = idx.debiteur !== -1 ? normalizeImportedDebiteurName(row[idx.debiteur]) : '';
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
-      const sanlamSinistre = idx.sanlamSinistre !== -1 ? String(row[idx.sanlamSinistre] || '').trim() : '';
-      if(!refDossier && !debiteur && !refClient && !sanlamSinistre) break;
+      if(!refDossier && !debiteur && !refClient) break;
       const sortOrdText = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const importColorMeta = getAudienceOrdonnanceMetaFromValue(sortOrdText);
       audiences.push({
         rowNumber: j + 1,
         refClient,
         debiteur,
-        sanlamSinistre,
         refDossier,
         procedureText: idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '',
         audience: idx.audience !== -1 ? parseExcelDateValue(row[idx.audience]) : '',
@@ -13225,7 +12971,7 @@ async function applyExcelImport(payload, options = {}){
   const importSkippedRows = [];
   const importWarningRows = [];
   const importInfoRows = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'Sanlam']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction']);
   const defaultDossierProceduresWhenMissing = ['ASS', 'Restitution', 'SFDC'];
   let importedDossiersCount = 0;
   let skippedDossiersCount = 0;
@@ -13699,7 +13445,6 @@ async function applyExcelImport(payload, options = {}){
       ww: row.immatriculation,
       marque: row.marque,
       type: row.type,
-      sanlamNRef: String(row.sanlamNRef || row.nRef || '').trim(),
       sanlamPolice: String(row.sanlamPolice || '').trim(),
       sanlamSinistre: String(row.sanlamSinistre || '').trim(),
       sanlamDateAccident: String(row.sanlamDateAccident || '').trim(),
@@ -14649,33 +14394,28 @@ async function exportBackupExcelImportable(){
 
 // ================== INIT ==================
 async function initApplication(){
-  setSyncStatus(LOCAL_ONLY_MODE ? 'ok' : 'pending', LOCAL_ONLY_MODE ? 'Mode local (actif)' : 'Vérification serveur...');
+  setSyncStatus('pending', 'Vérification serveur...');
   renderSyncMetrics();
-  if(!LOCAL_ONLY_MODE){
-    try{
-      await resolveApiBase();
-    }catch(err){
-      console.warn('Résolution API impossible, passage en mode local', err);
-    }
-    // If the server wasn't found during boot, immediately switch to local
-    // mode so the app never appears frozen.
-    if(!remoteServerReachable){
-      setSyncStatus('error', 'Mode local (serveur indisponible)');
-    }
+  try{
+    await resolveApiBase();
+  }catch(err){
+    console.warn('Résolution API impossible', err);
+  }
+  if(!remoteServerReachable){
+    setSyncStatus('error', 'Serveur indisponible');
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
   const localBootstrapSetupRequired = shouldOfferLocalBootstrapSetup();
   updateBootstrapSetupUi({
-    visible: localBootstrapSetupRequired || (!LOCAL_ONLY_MODE && remoteBootstrapSetupRequired),
-    remote: !LOCAL_ONLY_MODE && remoteBootstrapSetupRequired
+    visible: localBootstrapSetupRequired || remoteBootstrapSetupRequired,
+    remote: remoteBootstrapSetupRequired
   });
   const startupAudienceReconciliation = reconcileAudienceOrphanDossiers();
   if(startupAudienceReconciliation.matchedDossiers > 0){
     handleDossierDataChange({ audience: true });
   }
   applicationBootFailed = false;
-  scheduleInitialDesktopStatePersist();
   hasLoadedState = true;
   if(startupAudienceReconciliation.matchedDossiers > 0){
     queuePersistAppState();
@@ -14702,7 +14442,7 @@ async function initApplication(){
     setTimeout(()=>{
       openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL });
     }, 120);
-  }else if(!LOCAL_ONLY_MODE && remoteBootstrapSetupRequired){
+  }else if(remoteBootstrapSetupRequired){
     setTimeout(()=>{
       openPasswordSetupModal({ mode: PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE });
     }, 120);
@@ -14720,13 +14460,13 @@ async function bootstrapApplication(){
         await refreshPreLoginServerStatus();
       }catch(err){
         console.warn('Vérification serveur pré-connexion impossible', err);
-        setSyncStatus('error', 'Mode local (serveur indisponible)');
+        setSyncStatus('error', 'Serveur indisponible');
       }
     }
   }catch(err){
     applicationBootFailed = false;
     console.error('Initialisation application impossible', err);
-    setSyncStatus(LOCAL_ONLY_MODE ? 'ok' : 'error', LOCAL_ONLY_MODE ? 'Mode local (actif)' : 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible');
   }
   updateSyncStatusLabel();
   setInterval(flushSyncQueueNow, 30000);
@@ -15437,7 +15177,7 @@ async function login(){
       x=>String(x.username || '').trim().toLowerCase() === usernameInput
     );
     let user = userIndex >= 0 ? USERS[userIndex] : null;
-    let isValid = await verifyUserPassword(user, passwordInput);
+    let isValid = remoteLoginState === 'ok' ? true : await verifyUserPassword(user, passwordInput);
     if((!user || !isValid) && remoteLoginState === 'ok'){
       await loadPersistedState();
       USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
@@ -15445,7 +15185,7 @@ async function login(){
         x=>String(x.username || '').trim().toLowerCase() === usernameInput
       );
       user = userIndex >= 0 ? USERS[userIndex] : null;
-      isValid = await verifyUserPassword(user, passwordInput);
+      isValid = true;
     }
     if(!user || !isValid){
       if(remoteLoginState === 'unavailable'){
@@ -15583,7 +15323,7 @@ async function login(){
     safeRun('applyRoleUI', ()=>applyRoleUI({ skipNavigation: true }));
     safeRun('primeDashboardTotalClients', ()=>animateDashboardMetric('totalClients', getVisibleClients().length, { immediate: true }));
     queueLoginPostBoot();
-    if(shouldUpgradePasswordSecurity && (LOCAL_ONLY_MODE || !hasRemoteAuthSession())){
+    if(shouldUpgradePasswordSecurity && !hasRemoteAuthSession()){
       setTimeout(async ()=>{
         try{
           const latestUser = USERS[userIndex];
@@ -15601,7 +15341,7 @@ async function login(){
         }
       }, 0);
     }
-    if(!LOCAL_ONLY_MODE && hasRemoteAuthSession()){
+    if(hasRemoteAuthSession()){
       const remoteSyncDelayMs = isLargeDatasetMode() ? 900 : 0;
       if(remoteSyncDelayMs > 0){
         setTimeout(()=>{
@@ -15616,7 +15356,7 @@ async function login(){
         refreshRemoteState().catch(()=>{});
       }, 80);
     }else if(remoteLoginState === 'unavailable'){
-      setSyncStatus('error', 'Mode local (serveur indisponible)');
+      setSyncStatus('error', 'Serveur indisponible');
     }
 
     const hasVisibleSection = [
@@ -15911,6 +15651,20 @@ function renderClients(options = {}){
     });
 }
 
+function confirmDangerousAction(message, options = {}){
+  const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
+  if(!window.confirm(String(message || '').trim())) return false;
+  const typed = window.prompt(
+    `Action sensible.\nTapez ${confirmationWord} pour confirmer.`
+  );
+  if(typed === null) return false;
+  if(String(typed || '').trim().toUpperCase() !== confirmationWord){
+    alert('Confirmation invalide. Action annulee.');
+    return false;
+  }
+  return true;
+}
+
 function deleteClient(clientId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un client');
   const idx = AppState.clients.findIndex(c=>c.id == clientId);
@@ -15920,7 +15674,7 @@ function deleteClient(clientId){
   const warning = dossierCount > 0
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
-  if(!window.confirm(warning)) return;
+  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
 
   pushRecycleBinEntry('client_delete', {
     client: JSON.parse(JSON.stringify(client || {})),
@@ -15958,7 +15712,7 @@ function deleteAllClients(){
   const warning =
     `Supprimer TOUS les clients (${totalClients}) et TOUS les dossiers (${totalDossiers}) ?\n\n`
     + 'Cette action est irréversible.';
-  if(!window.confirm(warning)) return;
+  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
 
   pushRecycleBinEntry('all_clients_delete', {
     clients: JSON.parse(JSON.stringify(AppState.clients || [])),
@@ -16783,7 +16537,7 @@ function deleteDossier(clientId, index){
   const dossier = client.dossiers[index];
   if(!dossier) return;
   const ref = dossier.referenceClient || dossier.debiteur || `#${index + 1}`;
-  if(!window.confirm(`Supprimer définitivement le dossier "${ref}" ?`)) return;
+  if(!confirmDangerousAction(`Supprimer définitivement le dossier "${ref}" ?`, { confirmationWord: 'SUPPRIMER' })) return;
   pushRecycleBinEntry('dossier_delete', {
     clientId: client.id,
     clientName: client.name || '',

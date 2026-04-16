@@ -3,7 +3,7 @@ const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArc
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const REMOTE_MANAGER_USERNAME = 'manager';
-const LEGACY_MANAGER_USERNAMES = ['walid'];
+const LEGACY_MANAGER_USERNAMES = [];
 const IMPORT_HISTORY_MAX_ENTRIES = 80;
 const IMPORT_HISTORY_PANEL_MARKUP_CACHE_LIMIT = 16;
 const IMPORT_HISTORY_MENU_MARKUP_CACHE_LIMIT = 32;
@@ -19,10 +19,20 @@ const PASSWORD_SETUP_MODE_FORCED = 'forced';
 const PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL = 'bootstrap-local';
 const PASSWORD_SETUP_MODE_BOOTSTRAP_REMOTE = 'bootstrap-remote';
 const STANDARD_TEAM_TOTAL_MANAGERS = 2;
-const STANDARD_TEAM_TOTAL_ADMINS = 8;
-const STANDARD_TEAM_TOTAL_CLIENTS = 5;
+const STANDARD_TEAM_TOTAL_ADMINS = 6;
+const STANDARD_TEAM_TOTAL_CLIENTS = 0;
 const STANDARD_TEAM_DEFAULT_PASSWORD = '1234';
-const STANDARD_TEAM_MANAGER_USERNAMES = ['manager', 'amine'];
+const STANDARD_TEAM_MANAGER_USERNAMES = ['manager', 'walid'];
+const FIXED_TEAM_USERS = [
+  { id: 1, username: 'manager', role: 'manager' },
+  { id: 2, username: 'walid', role: 'manager' },
+  { id: 3, username: 'admin1', role: 'admin' },
+  { id: 4, username: 'admin2', role: 'admin' },
+  { id: 5, username: 'admin3', role: 'admin' },
+  { id: 6, username: 'admin4', role: 'admin' },
+  { id: 7, username: 'admin5', role: 'admin' },
+  { id: 8, username: 'admin6', role: 'admin' }
+];
 
 function normalizeLoginUsername(value){
   return String(value || '').trim().toLowerCase();
@@ -51,20 +61,18 @@ function resolveRemoteLoginUsername(value){
 }
 
 function buildSeedUsers(){
-  return [
-    {
-      id: 1,
-      username: DEFAULT_MANAGER_USERNAME,
-      password: DEFAULT_MANAGER_PASSWORD,
-      passwordHash: '',
-      passwordSalt: '',
-      passwordVersion: 0,
-      passwordUpdatedAt: '',
-      requirePasswordChange: false,
-      role: 'manager',
-      clientIds: []
-    }
-  ];
+  return FIXED_TEAM_USERS.map((user)=>({
+    id: user.id,
+    username: user.username,
+    password: STANDARD_TEAM_DEFAULT_PASSWORD,
+    passwordHash: '',
+    passwordSalt: '',
+    passwordVersion: 0,
+    passwordUpdatedAt: '',
+    requirePasswordChange: false,
+    role: user.role,
+    clientIds: []
+  }));
 }
 
 let USERS = buildSeedUsers();
@@ -435,6 +443,7 @@ const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
 const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
+  adversaire: 'Adversaire',
   nRef: 'N / ref',
   boiteNo: 'Boîte N°',
   referenceClient: 'Référence Client',
@@ -9544,64 +9553,28 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 }
 
 function ensureManagerUser(users){
-  const validUsers = Array.isArray(users) ? users.filter(Boolean).map(u=>({ ...u })) : [];
-  const defaultManagerIdx = validUsers.findIndex(
-    u=>String(u?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+  const allowedUsers = new Map(
+    (Array.isArray(users) ? users : [])
+      .filter(Boolean)
+      .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
+      .filter(([username])=>username)
   );
-  if(defaultManagerIdx === -1){
-    const legacyManagerIdx = validUsers.findIndex(
-      u=>LEGACY_MANAGER_USERNAMES.includes(String(u?.username || '').trim().toLowerCase())
-    );
-    if(legacyManagerIdx >= 0){
-      validUsers[legacyManagerIdx].username = DEFAULT_MANAGER_USERNAME;
-      validUsers[legacyManagerIdx].role = 'manager';
-      validUsers[legacyManagerIdx].clientIds = [];
-    }
-  }
-  const existingUsernames = new Set(
-    validUsers.map(u=>String(u?.username || '').trim().toLowerCase()).filter(Boolean)
-  );
-  buildSeedUsers().forEach(seedUser=>{
-    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
-    if(!usernameKey || existingUsernames.has(usernameKey)) return;
-    validUsers.push({ ...seedUser });
-    existingUsernames.add(usernameKey);
+  return buildSeedUsers().map((seedUser)=>{
+    const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
+    return {
+      ...(existingUser && typeof existingUser === 'object' ? existingUser : {}),
+      ...seedUser,
+      username: seedUser.username,
+      role: seedUser.role,
+      password: STANDARD_TEAM_DEFAULT_PASSWORD,
+      passwordHash: '',
+      passwordSalt: '',
+      passwordVersion: 0,
+      passwordUpdatedAt: '',
+      requirePasswordChange: false,
+      clientIds: []
+    };
   });
-  const resolvedManagerIdx = validUsers.findIndex(
-    u=>String(u.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
-  );
-
-  if(resolvedManagerIdx >= 0){
-    // Keep the default manager account always available.
-    const defaultManager = validUsers[resolvedManagerIdx];
-    defaultManager.username = DEFAULT_MANAGER_USERNAME;
-    defaultManager.role = 'manager';
-    defaultManager.clientIds = [];
-    defaultManager.requirePasswordChange = false;
-    if(!hasAnyStoredPassword(defaultManager)){
-      defaultManager.password = DEFAULT_MANAGER_PASSWORD;
-      defaultManager.passwordHash = '';
-      defaultManager.passwordSalt = '';
-      defaultManager.passwordVersion = 0;
-      defaultManager.passwordUpdatedAt = '';
-    }
-    return validUsers;
-  }
-
-  const maxId = validUsers.reduce((acc, u)=>Math.max(acc, Number(u.id) || 0), 0);
-  validUsers.unshift({
-    id: Math.max(1, maxId + 1),
-    username: DEFAULT_MANAGER_USERNAME,
-    password: DEFAULT_MANAGER_PASSWORD,
-    passwordHash: '',
-    passwordSalt: '',
-    passwordVersion: 0,
-    passwordUpdatedAt: '',
-    requirePasswordChange: false,
-    role: 'manager',
-    clientIds: []
-  });
-  return validUsers;
 }
 
 function buildStateSignature(clients, salleAssignments, users, draft, recycleBin, recycleArchive, importHistory){
@@ -15980,6 +15953,7 @@ async function addDossier(){
     if(selected.length === 0) return alert('Choisir au moins une procédure');
 
     const details = collectProcedureDraftFromCards({ trimValues: true });
+    const hasAssProcedure = selected.some((value)=>normalizeProcedureName(getProcedureBaseName(String(value || '').trim())) === 'ass');
 
     const rawDateAffectation = String($('dateAffectation')?.value || '').trim();
     if(!rawDateAffectation){
@@ -16023,11 +15997,12 @@ async function addDossier(){
       ww: $('wwInput').value.trim(),
       marque: $('marqueInput').value.trim(),
       type: $('typeInput').value.trim(),
-      caution: $('cautionInput')?.value.trim() || '',
-      cautionAdresse: $('cautionAdresseInput')?.value.trim() || '',
-      cautionVille: $('cautionVilleInput')?.value.trim() || '',
-      cautionCin: $('cautionCinInput')?.value.trim() || '',
-      cautionRc: $('cautionRcInput')?.value.trim() || '',
+      adversaire: $('adversaireInput')?.value.trim() || '',
+      caution: hasAssProcedure ? ($('cautionInput')?.value.trim() || '') : '',
+      cautionAdresse: hasAssProcedure ? ($('cautionAdresseInput')?.value.trim() || '') : '',
+      cautionVille: hasAssProcedure ? ($('cautionVilleInput')?.value.trim() || '') : '',
+      cautionCin: hasAssProcedure ? ($('cautionCinInput')?.value.trim() || '') : '',
+      cautionRc: hasAssProcedure ? ($('cautionRcInput')?.value.trim() || '') : '',
       efNumber: $('efNumberInput')?.value.trim() || '',
       conservation: $('conservationInput')?.value.trim() || '',
       metrage: $('metrageInput')?.value.trim() || '',
@@ -16670,6 +16645,7 @@ function editDossier(clientId, index){
 
   $('selectClient').value = clientId;
   $('debiteurInput').value = d.debiteur || '';
+  if($('adversaireInput')) $('adversaireInput').value = d.adversaire || '';
   if($('nRefInput')) $('nRefInput').value = d.nRef || '';
   if($('boiteNoInput')) $('boiteNoInput').value = d.boiteNo || '';
   $('referenceClientInput').value = d.referenceClient || '';
@@ -16828,6 +16804,7 @@ function openDossierDetails(clientId, index){
     ['Client', client.name || '-'],
     ['N / ref', dossier.nRef || '-'],
     ['Débiteur', dossier.debiteur || '-'],
+    ['Adversaire', dossier.adversaire || '-'],
     ['Boîte N°', dossier.boiteNo || '-'],
     ['Référence Client', dossier.referenceClient || '-'],
     ['Date d’affectation', dossier.dateAffectation || '-'],

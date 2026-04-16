@@ -19,7 +19,17 @@ const SSL_DIR = path.join(__dirname, 'ssl');
 const SSL_KEY_FILE = process.env.SSL_KEY_FILE || path.join(SSL_DIR, 'local.key');
 const SSL_CERT_FILE = process.env.SSL_CERT_FILE || path.join(SSL_DIR, 'local.crt');
 const DEFAULT_MANAGER_USERNAME = 'manager';
-const DEFAULT_MANAGER_PASSWORD = 'Raja-1234';
+const DEFAULT_MANAGER_PASSWORD = '1234';
+const FIXED_TEAM_USERS = [
+  { id: 1, username: 'manager', role: 'manager' },
+  { id: 2, username: 'walid', role: 'manager' },
+  { id: 3, username: 'admin1', role: 'admin' },
+  { id: 4, username: 'admin2', role: 'admin' },
+  { id: 5, username: 'admin3', role: 'admin' },
+  { id: 6, username: 'admin4', role: 'admin' },
+  { id: 7, username: 'admin5', role: 'admin' },
+  { id: 8, username: 'admin6', role: 'admin' }
+];
 const PASSWORD_HASH_ITERATIONS = 120000;
 const PASSWORD_MIN_LENGTH = 1;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -120,20 +130,18 @@ function hasAnyStoredPassword(user) {
 }
 
 function buildBootstrapUsers() {
-  return [
-    {
-      id: 1,
-      username: DEFAULT_MANAGER_USERNAME,
-      password: DEFAULT_MANAGER_PASSWORD,
-      passwordHash: '',
-      passwordSalt: '',
-      passwordVersion: 0,
-      passwordUpdatedAt: '',
-      requirePasswordChange: false,
-      role: 'manager',
-      clientIds: []
-    }
-  ];
+  return FIXED_TEAM_USERS.map((user) => ({
+    id: user.id,
+    username: user.username,
+    password: DEFAULT_MANAGER_PASSWORD,
+    passwordHash: '',
+    passwordSalt: '',
+    passwordVersion: 0,
+    passwordUpdatedAt: '',
+    requirePasswordChange: false,
+    role: user.role,
+    clientIds: []
+  }));
 }
 
 function getAuthUsersFromState(state) {
@@ -142,35 +150,28 @@ function getAuthUsersFromState(state) {
 }
 
 function ensureManagerUser(users) {
-  const validUsers = Array.isArray(users) ? users.filter((user) => user && typeof user === 'object').map((user) => ({ ...user })) : [];
-  const existingUsernames = new Set(
-    validUsers.map((user) => String(user?.username || '').trim().toLowerCase()).filter(Boolean)
+  const existingUsers = new Map(
+    (Array.isArray(users) ? users : [])
+      .filter((user) => user && typeof user === 'object')
+      .map((user) => [String(user?.username || '').trim().toLowerCase(), user])
+      .filter(([username]) => username)
   );
-  buildBootstrapUsers().forEach((seedUser) => {
-    const usernameKey = String(seedUser?.username || '').trim().toLowerCase();
-    if (!usernameKey || existingUsernames.has(usernameKey)) return;
-    validUsers.push({ ...seedUser });
-    existingUsernames.add(usernameKey);
+  return buildBootstrapUsers().map((seedUser) => {
+    const existingUser = existingUsers.get(String(seedUser.username || '').trim().toLowerCase());
+    return {
+      ...(existingUser && typeof existingUser === 'object' ? existingUser : {}),
+      ...seedUser,
+      username: seedUser.username,
+      role: seedUser.role,
+      password: DEFAULT_MANAGER_PASSWORD,
+      passwordHash: '',
+      passwordSalt: '',
+      passwordVersion: 0,
+      passwordUpdatedAt: '',
+      requirePasswordChange: false,
+      clientIds: []
+    };
   });
-  const managerIndex = validUsers.findIndex(
-    (user) => String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
-  );
-  if (managerIndex >= 0) {
-    const manager = validUsers[managerIndex];
-    manager.username = DEFAULT_MANAGER_USERNAME;
-    manager.role = 'manager';
-    manager.clientIds = [];
-    manager.requirePasswordChange = false;
-    if (!hasAnyStoredPassword(manager)) {
-      manager.password = DEFAULT_MANAGER_PASSWORD;
-      manager.passwordHash = '';
-      manager.passwordSalt = '';
-      manager.passwordVersion = 0;
-      manager.passwordUpdatedAt = '';
-    }
-    return validUsers;
-  }
-  return validUsers;
 }
 
 function isBootstrapSetupRequired(state) {
@@ -321,9 +322,11 @@ function normalizeStoredState(rawState, previousState = null) {
     salleAssignments: hasOwn('salleAssignments')
       ? (Array.isArray(sourceState.salleAssignments) ? sourceState.salleAssignments : [])
       : (Array.isArray(previous.salleAssignments) ? previous.salleAssignments : []),
-    users: hasOwn('users')
-      ? (Array.isArray(sourceState.users) ? sourceState.users : [])
-      : (Array.isArray(previous.users) ? previous.users : []),
+    users: ensureManagerUser(
+      hasOwn('users')
+        ? (Array.isArray(sourceState.users) ? sourceState.users : [])
+        : (Array.isArray(previous.users) ? previous.users : [])
+    ),
     audienceDraft: hasOwn('audienceDraft')
       ? (sourceState.audienceDraft && typeof sourceState.audienceDraft === 'object' && !Array.isArray(sourceState.audienceDraft) ? sourceState.audienceDraft : {})
       : (previous.audienceDraft && typeof previous.audienceDraft === 'object' && !Array.isArray(previous.audienceDraft) ? previous.audienceDraft : {}),
@@ -346,6 +349,7 @@ function hydrateStoredState(rawState) {
   return {
     ...DEFAULT_STATE,
     ...(rawState && typeof rawState === 'object' ? rawState : {}),
+    users: ensureManagerUser(Array.isArray(rawState?.users) ? rawState.users : []),
     version: Number.isFinite(parsedVersion) && parsedVersion >= 0 ? parsedVersion : 0,
     updatedAt: String(rawState?.updatedAt || new Date().toISOString())
   };

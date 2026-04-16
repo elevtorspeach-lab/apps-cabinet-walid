@@ -1,3 +1,5 @@
+import loginLogo from '../assets/login-logo.png'
+
 function LoginScreen() {
   return (
     <div id="loginScreen" className="login-screen">
@@ -5,7 +7,7 @@ function LoginScreen() {
       <div className="login-orb login-orb-b"></div>
       <div className="login-box">
         <div className="login-badge-wrap">
-          <div className="login-badge-logo"></div>
+          <img className="login-badge-logo" src={loginLogo} alt="Cabinet Walid Araqi" />
         </div>
         <h2><i className="fa-solid fa-gavel"></i> Cabinet Walid Araqi</h2>
         <p className="login-subtitle">Plateforme sécurisée de gestion des dossiers</p>
