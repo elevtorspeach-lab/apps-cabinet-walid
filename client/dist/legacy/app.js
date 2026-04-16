@@ -562,10 +562,10 @@ const SALLE_EXPORT_CSV_THRESHOLD_LARGE = 160;
 const SALLE_EXPORT_CSV_THRESHOLD_VERY_LARGE = 80;
 const SALLE_SIDEBAR_COMPACT_RENDER_AUDIENCE_THRESHOLD = 4000;
 const SALLE_SIDEBAR_COMPACT_RENDER_JUDGE_THRESHOLD = 40;
-const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 300;
-const LARGE_DATASET_DOSSIERS_THRESHOLD = 30000;
-const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 450;
-const ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD = 50000;
+const LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 40;
+const LARGE_DATASET_DOSSIERS_THRESHOLD = 4000;
+const ULTRA_LARGE_DATASET_VISIBLE_CLIENTS_THRESHOLD = 120;
+const ULTRA_LARGE_DATASET_DOSSIERS_THRESHOLD = 10000;
 const REMOTE_SYNC_SECTION_MIN_INTERVAL_LARGE_MS = 1200;
 const REMOTE_SYNC_SECTION_MIN_INTERVAL_VERY_LARGE_MS = 3200;
 const REMOTE_SYNC_SECTION_MIN_INTERVAL_BY_SECTION = Object.freeze({
@@ -1637,7 +1637,7 @@ function isVeryLargeLiveSyncMode(){
   if(isUltraLargeDatasetMode()) return true;
   if(!isLargeDatasetMode()) return false;
   if(remoteSyncStreamConnected || hasRemoteAuthSession()) return true;
-  return getVisibleClients().length >= 250 || getVisibleDossierCount() >= 35000;
+  return getVisibleClients().length >= 40 || getVisibleDossierCount() >= 5000;
 }
 
 function shouldPreferFastWorkbookPath(rowCount = 0){
@@ -2611,11 +2611,25 @@ function formatSyncMetricMs(value){
   return `${Math.round(num)}ms`;
 }
 
+function formatLastSyncDelay(value){
+  const num = Number(value);
+  if(!Number.isFinite(num) || num < 0) return '--';
+  if(num < 1000) return 'maintenant';
+  const seconds = Math.round(num / 1000);
+  if(seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if(minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if(hours < 24) return `${hours} h`;
+  const days = Math.round(hours / 24);
+  return `${days} j`;
+}
+
 function renderSyncMetrics(){
   const pingNode = $('syncPingMetric');
   const liveNode = $('syncLiveMetric');
   if(pingNode) pingNode.innerText = `Ping: ${formatSyncMetricMs(lastPingMs)}`;
-  if(liveNode) liveNode.innerText = `Live: ${formatSyncMetricMs(lastLiveDelayMs)}`;
+  if(liveNode) liveNode.innerText = `Derniere synchro: ${formatLastSyncDelay(lastLiveDelayMs)}`;
 }
 
 function queueSyncMetricsRender(){

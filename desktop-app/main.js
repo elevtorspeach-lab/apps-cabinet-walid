@@ -1,4 +1,5 @@
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -6,19 +7,107 @@ const fsp = require('fs/promises');
 const STATE_FILE_NAME = 'Cabinet Walid Araqi.json';
 const EXPORTS_DIR_NAME = 'Cabinet Walid Araqi Exports';
 
-// Dynamic Server IP Resolution
-let SERVER_IP = 'localhost';
-try {
-  const configPath = path.join(__dirname, 'server_ip.txt');
-  if (fs.existsSync(configPath)) {
-    SERVER_IP = fs.readFileSync(configPath, 'utf8').trim();
+const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
+const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '1').trim();
+
+function readConfiguredServerHost() {
+  try {
+    if (fs.existsSync(SERVER_IP_CONFIG_PATH)) {
+      return String(fs.readFileSync(SERVER_IP_CONFIG_PATH, 'utf8') || '').trim();
+    }
+  } catch (_error) {
+    console.log('Using automatic server detection');
   }
-} catch (e) {
-  console.log('Using default server IP');
+  return '';
 }
 
-const DESKTOP_REMOTE_API_BASE = String(process.env.CABINET_DESKTOP_API_BASE || `http://${SERVER_IP}:3000/api`).trim();
-const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '1').trim();
+function isPrivateIpv4(address) {
+  if (!address || typeof address !== 'string') return false;
+  return (
+    address.startsWith('10.')
+    || address.startsWith('192.168.')
+    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(address)
+  );
+}
+
+function getLanIpv4Candidates() {
+  const interfaces = os.networkInterfaces();
+  const preferred = [];
+  const others = [];
+
+  Object.entries(interfaces).forEach(([name, entries]) => {
+    (entries || []).forEach((entry) => {
+      if (!entry || entry.family !== 'IPv4' || entry.internal || !entry.address) return;
+      const candidate = {
+        name,
+        address: entry.address
+      };
+      if (/wi-?fi|wlan|wireless/i.test(name) && isPrivateIpv4(entry.address)) {
+        preferred.push(candidate);
+      } else {
+        others.push(candidate);
+      }
+    });
+  });
+
+  return [...preferred, ...others].map((item) => item.address);
+}
+
+function buildServerHostCandidates() {
+  const unique = new Set();
+  const ordered = [];
+  const add = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || unique.has(normalized.toLowerCase())) return;
+    unique.add(normalized.toLowerCase());
+    ordered.push(normalized);
+  };
+
+  const envBase = String(process.env.CABINET_DESKTOP_API_BASE || '').trim();
+  if (envBase) {
+    try {
+      add(new URL(envBase).hostname);
+    } catch (_error) {
+      add(envBase);
+    }
+  }
+
+  add(readConfiguredServerHost());
+  add(os.hostname());
+  add('localhost');
+  add('127.0.0.1');
+  getLanIpv4Candidates().forEach(add);
+
+  return ordered;
+}
+
+function buildApiBaseForHost(host) {
+  return `http://${host}:3000/api`;
+}
+
+async function canReachServer(host) {
+  return new Promise((resolve) => {
+    const req = require('http').get(`${buildApiBaseForHost(host)}/health`, { timeout: 1800 }, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 500);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function resolveDesktopServerHost() {
+  const candidates = buildServerHostCandidates();
+  for (const host of candidates) {
+    if (await canReachServer(host)) {
+      return host;
+    }
+  }
+  return candidates[0] || 'localhost';
+}
 
 function getDesktopStateFilePath() {
   return path.join(app.getPath('downloads'), STATE_FILE_NAME);
@@ -145,14 +234,16 @@ async function createWindow() {
     }
   });
 
-  const appUrl = `http://${SERVER_IP}:3000`;
-  
+  const resolvedHost = await resolveDesktopServerHost();
+  const appUrl = `http://${resolvedHost}:3000`;
+  const remoteApiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost(resolvedHost)).trim();
+
   win.loadURL(appUrl).catch(() => {
     console.warn('Live server not reachable, falling back to local files.');
     resolveAppIndexPath().then(appIndexPath => {
       win.loadFile(appIndexPath, {
         query: {
-          apiBase: DESKTOP_REMOTE_API_BASE,
+          apiBase: remoteApiBase,
           localOnly: DESKTOP_REMOTE_LOCAL_ONLY
         }
       });

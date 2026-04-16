@@ -200,7 +200,8 @@ async function ensureDossiersSchema(connection) {
     'Make dossiers.externalId mandatory'
   );
 
-  if (!(await hasIndex(connection, databaseName, 'dossiers', 'uk_dossier_external'))) {
+  const hasExternalIdUniqueKey = await hasIndex(connection, databaseName, 'dossiers', 'uk_dossier_external');
+  if (!hasExternalIdUniqueKey) {
     await runQuery(
       connection,
       'ALTER TABLE dossiers ADD UNIQUE KEY uk_dossier_external (externalId)',

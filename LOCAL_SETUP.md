@@ -2,6 +2,43 @@
 
 To test the application locally without pushing changes to GitHub, follow these steps:
 
+## Clean MySQL + Wi-Fi IP Setup
+
+If you want a fresh empty database and you want the app to connect through the server Wi-Fi IP:
+
+1. Copy `server/.env.example` to `server/.env`.
+2. Update the MySQL values in `server/.env`:
+   - `DB_HOST`
+   - `DB_PORT`
+   - `DB_USER`
+   - `DB_PASSWORD`
+   - `DB_NAME`
+3. Keep `HOST=0.0.0.0` in `server/.env` so the API is reachable from other machines on the same Wi-Fi.
+4. Reset MySQL to an empty application state:
+   ```bash
+   cd server
+   npm run db:reset
+   ```
+5. Save the Wi-Fi server IP for the desktop app:
+   ```bash
+   cd desktop-app
+   npm run set:server-ip
+   ```
+   Or set it manually:
+   ```bash
+   cd desktop-app
+   node set-server-ip.js 192.168.1.20
+   ```
+6. Start the API:
+   ```bash
+   cd server
+   npm start
+   ```
+7. The desktop app will read the server IP from `desktop-app/server_ip.txt` and connect to `http://<wifi-ip>:3000`.
+
+> [!WARNING]
+> `npm run db:reset` clears the application data in MySQL and replaces it with an empty state.
+
 ### 1. Run the Web Application (Vite)
 The Vite server is currently running in your workspace. You can access it at:
 - **URL**: [http://localhost:5174/](http://localhost:5174/)
@@ -20,16 +57,16 @@ If you want to test the plain HTML/JS version in the root directory:
 ### 3. MySQL Configuration (New)
 The application now uses MySQL for data storage.
 1. Ensure you have **MySQL 5.7+** installed and running.
-2. Open `server/.env` and enter your database credentials.
+2. Create `server/.env` from `server/.env.example`, then enter your database credentials.
 3. Run the migration script to move your data from JSON to MySQL:
    ```bash
    cd server
-   node migrate-to-mysql.js
+   npm run db:init
    ```
 4. Start the server:
    ```bash
    cd server
-   node index.js
+   npm start
    ```
 
 ### 4. Verification of the Sorting Fix

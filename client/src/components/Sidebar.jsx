@@ -31,7 +31,7 @@ function Sidebar() {
         </div>
         <div className="sync-metrics" aria-live="polite">
           <span id="syncPingMetric" className="sync-metric">Ping: --</span>
-          <span id="syncLiveMetric" className="sync-metric">Live: --</span>
+          <span id="syncLiveMetric" className="sync-metric">Derniere synchro: --</span>
         </div>
         
         {!isClient && (

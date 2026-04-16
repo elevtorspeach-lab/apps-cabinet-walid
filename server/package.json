@@ -5,6 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:background": "powershell -ExecutionPolicy Bypass -File ./start-server-background.ps1",
+    "db:backup": "node backup-mysql-state.js",
+    "db:init": "node migrate-to-mysql.js",
+    "db:reset": "node reset-mysql.js",
     "ssl:local": "sh ./create-local-ssl.sh"
   },
   "dependencies": {
