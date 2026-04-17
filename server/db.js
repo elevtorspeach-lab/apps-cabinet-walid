@@ -572,6 +572,141 @@ async function saveFullState(state) {
   }
 }
 
+async function saveStateMetadata(connection, meta = {}) {
+  const version = String(Number(meta?.version) || 0);
+  const updatedAt = String(meta?.updatedAt || new Date().toISOString());
+  await runQuery(
+    connection,
+    'INSERT INTO app_metadata (id, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+    ['version', version],
+    'Upsert metadata.version'
+  );
+  await runQuery(
+    connection,
+    'INSERT INTO app_metadata (id, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+    ['updatedAt', updatedAt],
+    'Upsert metadata.updatedAt'
+  );
+}
+
+async function saveUsersState(users, meta = {}) {
+  const connection = await pool.getConnection();
+  const safeUsers = Array.isArray(users) ? users : [];
+  try {
+    await connection.beginTransaction();
+    await runQuery(connection, 'DELETE FROM users', [], 'Clear users before partial save');
+    for (const user of safeUsers) {
+      const userId = normalizeDatabaseId(user?.id);
+      if (userId === null) continue;
+      const { id, username, passwordHash, passwordSalt, role, ...rest } = user;
+      await runQuery(
+        connection,
+        'INSERT INTO users (id, username, passwordHash, passwordSalt, role, data) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          String(userId),
+          String(username || '').trim(),
+          String(passwordHash || ''),
+          String(passwordSalt || ''),
+          String(role || ''),
+          serializeJsonValue(rest, {})
+        ],
+        `Insert partial user ${String(username || userId)}`
+      );
+    }
+    await saveStateMetadata(connection, meta);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    logDatabaseError('Partial users save failed', error, { users: safeUsers.length });
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function applyDossierMutation(patch, meta = {}) {
+  const connection = await pool.getConnection();
+  const action = String(patch?.action || '').trim().toLowerCase();
+  const clientId = normalizeDatabaseId(patch?.clientId);
+  const targetClientId = normalizeDatabaseId(patch?.targetClientId);
+  const previousExternalId = String(patch?.previousExternalId || '').trim();
+  const dossier = isPlainObject(patch?.dossier) ? patch.dossier : null;
+
+  try {
+    await connection.beginTransaction();
+
+    if (action === 'create') {
+      if (clientId === null || !dossier) {
+        throw new Error('Invalid dossier create payload.');
+      }
+      const externalId = buildDossierExternalId(clientId, dossier, Date.now());
+      const payload = {
+        ...dossier,
+        externalId,
+        clientId
+      };
+      await runQuery(
+        connection,
+        'INSERT INTO dossiers (externalId, clientId, referenceClient, debiteur, procedure_name, data) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          externalId,
+          String(clientId),
+          String(dossier.referenceClient || '').trim(),
+          String(dossier.debiteur || '').trim(),
+          String(dossier.procedure || '').trim(),
+          serializeJsonValue(payload, {})
+        ],
+        `Insert dossier ${externalId}`
+      );
+    } else if (action === 'update') {
+      if (!previousExternalId || !dossier) {
+        throw new Error('Invalid dossier update payload.');
+      }
+      const nextClientId = targetClientId === null ? clientId : targetClientId;
+      const payload = {
+        ...dossier,
+        externalId: String(dossier.externalId || previousExternalId).trim() || previousExternalId,
+        clientId: nextClientId
+      };
+      await runQuery(
+        connection,
+        'UPDATE dossiers SET externalId = ?, clientId = ?, referenceClient = ?, debiteur = ?, procedure_name = ?, data = ? WHERE externalId = ?',
+        [
+          String(payload.externalId),
+          String(nextClientId),
+          String(dossier.referenceClient || '').trim(),
+          String(dossier.debiteur || '').trim(),
+          String(dossier.procedure || '').trim(),
+          serializeJsonValue(payload, {}),
+          previousExternalId
+        ],
+        `Update dossier ${previousExternalId}`
+      );
+    } else if (action === 'delete') {
+      if (!previousExternalId) {
+        throw new Error('Invalid dossier delete payload.');
+      }
+      await runQuery(
+        connection,
+        'DELETE FROM dossiers WHERE externalId = ?',
+        [previousExternalId],
+        `Delete dossier ${previousExternalId}`
+      );
+    } else {
+      throw new Error(`Unsupported dossier mutation action: ${action || 'unknown'}`);
+    }
+
+    await saveStateMetadata(connection, meta);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    logDatabaseError('Partial dossier mutation failed', error, { action, clientId, targetClientId, previousExternalId });
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 async function batchUpdateDossiers(updates) {
   const connection = await pool.getConnection();
   try {
@@ -654,5 +789,7 @@ module.exports = {
   saveClientState,
   loadFullState,
   saveFullState,
+  saveUsersState,
+  applyDossierMutation,
   batchUpdateDossiers
 };

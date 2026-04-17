@@ -940,6 +940,80 @@ function findDossierIndexForPatch(dossiers, requestedIndex, referenceClient) {
   return safeDossiers.findIndex((entry) => normalizePatchReference(entry?.referenceClient) === normalizedReference);
 }
 
+function buildGeneratedDossierExternalId(clientId, dossier = {}) {
+  const preferred = String(dossier?.externalId || '').trim();
+  if (preferred) return preferred;
+  const ref = String(dossier?.referenceClient || '').trim().replace(/\s+/g, '-').slice(0, 48) || 'ref';
+  const debiteur = String(dossier?.debiteur || '').trim().replace(/\s+/g, '-').slice(0, 32) || 'debiteur';
+  return `dossier-${String(clientId || 'unknown')}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${ref}-${debiteur}`;
+}
+
+function resolveDossierPatchSnapshot(currentState, body) {
+  const action = String(body?.action || '').trim().toLowerCase();
+  const clientId = Number(body?.clientId);
+  const dossierIndex = Number(body?.dossierIndex);
+  const targetClientId = Number(body?.targetClientId);
+  const referenceClient = resolvePatchReference(body, body?.dossier);
+  const clients = Array.isArray(currentState?.clients) ? currentState.clients : [];
+
+  if (action === 'create') {
+    const clientIdx = findClientIndexById(clients, clientId);
+    if (clientIdx === -1) throw new Error('Client not found.');
+    return {
+      action,
+      clientId,
+      targetClientId: clientId,
+      sourceClientIdx: clientIdx,
+      previousDossier: null,
+      previousExternalId: ''
+    };
+  }
+
+  if (!Number.isFinite(clientId) || !Number.isFinite(dossierIndex)) {
+    throw new Error('Invalid dossier patch coordinates.');
+  }
+
+  const sourceClientIdx = findClientIndexById(clients, clientId);
+  if (sourceClientIdx === -1) throw new Error('Source client not found.');
+  const sourceDossiers = Array.isArray(clients[sourceClientIdx]?.dossiers) ? clients[sourceClientIdx].dossiers : [];
+  const resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient);
+  if (resolvedSourceDossierIndex < 0 || resolvedSourceDossierIndex >= sourceDossiers.length) {
+    throw new Error('Source dossier not found.');
+  }
+
+  const previousDossier = sourceDossiers[resolvedSourceDossierIndex];
+  return {
+    action,
+    clientId,
+    targetClientId: Number.isFinite(targetClientId) ? targetClientId : clientId,
+    sourceClientIdx,
+    resolvedSourceDossierIndex,
+    previousDossier,
+    previousExternalId: String(previousDossier?.externalId || '').trim()
+  };
+}
+
+function enrichDossierPatchBody(currentState, rawBody) {
+  const body = rawBody && typeof rawBody === 'object' ? deepCloneJson(rawBody) : {};
+  const action = String(body?.action || '').trim().toLowerCase();
+  const snapshot = resolveDossierPatchSnapshot(currentState, body);
+
+  if (action === 'create') {
+    body.dossier = sanitizePatchObject(body.dossier) || {};
+    body.dossier.externalId = buildGeneratedDossierExternalId(snapshot.clientId, body.dossier);
+    body.dossier.clientId = snapshot.clientId;
+    return body;
+  }
+
+  body.previousExternalId = snapshot.previousExternalId;
+  if (action === 'update') {
+    body.dossier = sanitizePatchObject(body.dossier) || {};
+    body.dossier.externalId = String(body.dossier.externalId || snapshot.previousExternalId).trim();
+    body.dossier.clientId = snapshot.targetClientId;
+  }
+  return body;
+}
+
 function deepCloneJson(value) {
   if (value === null || value === undefined) return value;
   return JSON.parse(JSON.stringify(value));
@@ -1359,7 +1433,22 @@ async function persistJournalMutation(mutation, options = {}) {
   const currentState = await readState();
   const saved = applyMutationToState(currentState, mutation);
   await appendMutationJournalEntry(buildJournalMutationEntry(saved, mutation, options));
-  await writeStateSnapshot(saved, { clearJournal: false });
+  if (mutation?.type === 'users') {
+    await db.saveUsersState(saved?.users, {
+      version: saved?.version,
+      updatedAt: saved?.updatedAt
+    });
+    setCachedState(saved);
+  } else if (mutation?.type === 'dossier') {
+    const patch = mutation?.body && typeof mutation.body === 'object' ? mutation.body : {};
+    await db.applyDossierMutation(patch, {
+      version: saved?.version,
+      updatedAt: saved?.updatedAt
+    });
+    setCachedState(saved);
+  } else {
+    await writeStateSnapshot(saved, { clearJournal: false });
+  }
   if (pendingSnapshotFlushTimer) {
     clearTimeout(pendingSnapshotFlushTimer);
     pendingSnapshotFlushTimer = null;
@@ -1389,7 +1478,19 @@ async function persistJournalMutations(mutations, options = {}) {
     cachedJournalEntries = [];
   }
   cachedJournalEntries.push(...journalEntries);
-  await writeStateSnapshot(saved, { clearJournal: false });
+  const dossierOnlyMutations = safeMutations.every((mutation) => mutation?.type === 'dossier');
+  if (dossierOnlyMutations) {
+    for (const mutation of safeMutations) {
+      const patch = mutation?.body && typeof mutation.body === 'object' ? mutation.body : {};
+      await db.applyDossierMutation(patch, {
+        version: saved?.version,
+        updatedAt: saved?.updatedAt
+      });
+    }
+    setCachedState(saved);
+  } else {
+    await writeStateSnapshot(saved, { clearJournal: false });
+  }
   if (pendingSnapshotFlushTimer) {
     clearTimeout(pendingSnapshotFlushTimer);
     pendingSnapshotFlushTimer = null;
@@ -2030,7 +2131,9 @@ app.post('/api/state/dossiers', async (req, res) => {
   try {
     const result = await enqueueStateMutation(async () => {
       await ensureDataFile();
-      const body = getRequestBodyObject(req);
+      const rawBody = getRequestBodyObject(req);
+      const currentState = await readState();
+      const body = enrichDossierPatchBody(currentState, rawBody);
       const sourceId = String(body?._sourceId || '').trim();
       const saved = await persistJournalMutation({
         type: 'dossier',
@@ -2057,10 +2160,14 @@ app.post('/api/state/dossiers/batch', async (req, res) => {
   try {
     const result = await enqueueStateMutation(async () => {
       await ensureDataFile();
-      const body = getRequestBodyObject(req);
+      const rawBody = getRequestBodyObject(req);
+      const currentState = await readState();
+      const body = rawBody && typeof rawBody === 'object' ? rawBody : {};
       const sourceId = String(body?._sourceId || '').trim();
       const patches = Array.isArray(body?.patches)
-        ? body.patches.filter((patch) => patch && typeof patch === 'object')
+        ? body.patches
+          .filter((patch) => patch && typeof patch === 'object')
+          .map((patch) => enrichDossierPatchBody(currentState, patch))
         : [];
       if (!patches.length) {
         throw new Error('Missing dossier patches.');

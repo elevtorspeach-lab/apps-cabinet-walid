@@ -16,6 +16,10 @@ const path = require('path');
 const { spawn } = require('child_process');
 const http = require('http');
 const os = require('os');
+const mysql = require(path.join(__dirname, '..', 'server', 'node_modules', 'mysql2', 'promise'));
+require(path.join(__dirname, '..', 'server', 'node_modules', 'dotenv')).config({
+  path: path.join(__dirname, '..', 'server', '.env')
+});
 
 // ─── CONFIG ────────────────────────────────────────────────────
 const TARGET_CLIENTS       = Number(process.env.TARGET_CLIENTS || 700);
@@ -32,6 +36,16 @@ const ROOT_DIR             = path.resolve(__dirname, '..');
 const SERVER_DIR           = path.join(ROOT_DIR, 'server');
 const SERVER_ENTRY         = path.join(SERVER_DIR, 'index.js');
 const FIXTURE_SOURCE       = process.env.FIXTURE_SOURCE || '';
+const FIXED_BENCH_USERS    = [
+  { id: 1, username: 'manager', role: 'manager', clientIds: [] },
+  { id: 2, username: 'walid', role: 'manager', clientIds: [] },
+  { id: 3, username: 'admin1', role: 'admin', clientIds: [] },
+  { id: 4, username: 'admin2', role: 'admin', clientIds: [] },
+  { id: 5, username: 'admin3', role: 'admin', clientIds: [] },
+  { id: 6, username: 'admin4', role: 'admin', clientIds: [] },
+  { id: 7, username: 'admin5', role: 'admin', clientIds: [] },
+  { id: 8, username: 'admin6', role: 'admin', clientIds: [] }
+];
 
 // ─── HELPERS ───────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -104,7 +118,8 @@ function generateFixture() {
   const memBefore = process.memoryUsage().heapUsed;
   const started = process.hrtime.bigint();
 
-  const procedures = ['ASS', 'ASS NB', 'Injonction', 'SFDC', 'S/bien', 'Commandement'];
+  const audienceProcedures = ['Restitution', 'Nantissement', 'Redressement', 'Liquidation judiciaire', 'Sanlam'];
+  const diligenceProcedures = ['SFDC', 'S/bien', 'Injonction'];
   const tribunals = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Agadir', 'Oujda', 'Meknès'];
   const villes = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Kenitra', 'Tétouan', 'Safi'];
   const sorts = ['En cours', 'Renvoi', 'att PV', 'PV OK', 'NB'];
@@ -126,31 +141,45 @@ function generateFixture() {
 
     for (let d = 0; d < numDossiers; d++) {
       dossierCount++;
+      const remainingDossiers = TARGET_DOSSIERS - dossierCount;
       const refClient = `REF-${clientId}-${d+1}`;
       const debiteur = `Débiteur ${dossierCount}`;
       const ville = villes[dossierCount % villes.length];
       const procedureDetails = {};
       const montantByProcedure = {};
 
-      // Distribute audience and diligence procedures
       const procsToAdd = [];
       if (audienceCount < TARGET_AUDIENCE) {
-        const audienceProc = procedures[dossierCount % 3]; // ASS, ASS NB, Injonction
+        const audienceProc = audienceProcedures[(audienceCount + dossierCount) % audienceProcedures.length];
         procsToAdd.push(audienceProc);
         audienceCount++;
       }
       if (diligenceCount < TARGET_DILIGENCE) {
-        const diligenceProc = procedures[3 + (dossierCount % 3)]; // SFDC, S/bien, Commandement
-        procsToAdd.push(diligenceProc);
+        const diligenceProc = diligenceProcedures[(diligenceCount + dossierCount) % diligenceProcedures.length];
+        if (!procsToAdd.includes(diligenceProc)) {
+          procsToAdd.push(diligenceProc);
+        }
         diligenceCount++;
       }
-      // If we need more audience, add extra procedures
-      if (audienceCount < TARGET_AUDIENCE && procsToAdd.length < 3) {
-        const extra = procedures[(dossierCount + 1) % 3];
-        if (!procsToAdd.includes(extra)) {
-          procsToAdd.push(extra);
-          audienceCount++;
-        }
+      while (
+        audienceCount < TARGET_AUDIENCE
+        && procsToAdd.length < 5
+        && (TARGET_AUDIENCE - audienceCount) > remainingDossiers
+      ) {
+        const extraAudienceProc = audienceProcedures[(audienceCount + dossierCount + procsToAdd.length) % audienceProcedures.length];
+        if (procsToAdd.includes(extraAudienceProc)) break;
+        procsToAdd.push(extraAudienceProc);
+        audienceCount++;
+      }
+      while (
+        diligenceCount < TARGET_DILIGENCE
+        && procsToAdd.length < 5
+        && (TARGET_DILIGENCE - diligenceCount) > remainingDossiers
+      ) {
+        const extraDiligenceProc = diligenceProcedures[(diligenceCount + dossierCount + procsToAdd.length) % diligenceProcedures.length];
+        if (procsToAdd.includes(extraDiligenceProc)) break;
+        procsToAdd.push(extraDiligenceProc);
+        diligenceCount++;
       }
 
       for (const proc of procsToAdd) {
@@ -201,60 +230,14 @@ function generateFixture() {
     });
   }
 
-  // Fill remaining audience if needed
-  let fillIdx = 0;
-  while (audienceCount < TARGET_AUDIENCE) {
-    const client = clients[fillIdx % clients.length];
-    const dossier = client.dossiers[fillIdx % client.dossiers.length];
-    const extraProc = `Extra Audience ${fillIdx}`;
-    if (!dossier.procedureDetails[extraProc]) {
-      dossier.procedureDetails[extraProc] = {
-        audience: '2026-06-15',
-        juge: juges[fillIdx % juges.length],
-        tribunal: tribunals[fillIdx % tribunals.length],
-        sort: 'En cours'
-      };
-      dossier.procedure += `, ${extraProc}`;
-      audienceCount++;
-    }
-    fillIdx++;
-    if (fillIdx > TARGET_AUDIENCE * 2) break;
-  }
-
-  // Build users
-  const users = [];
-  let userId = 1;
-  for (let i = 0; i < TOTAL_MANAGERS; i++) {
-    users.push({
-      id: userId++,
-      username: i === 0 ? 'manager' : `manager${i+1}`,
-      password: '1234', passwordHash: '', passwordSalt: '',
-      passwordVersion: 0, requirePasswordChange: false,
-      role: 'manager', clientIds: []
-    });
-  }
-  for (let i = 0; i < TOTAL_ADMINS; i++) {
-    users.push({
-      id: userId++,
-      username: `admin${i+1}`,
-      password: '1234', passwordHash: '', passwordSalt: '',
-      passwordVersion: 0, requirePasswordChange: false,
-      role: 'admin', clientIds: []
-    });
-  }
-  for (let i = 0; i < TOTAL_CLIENT_USERS; i++) {
-    const assignedClients = [];
-    const startClient = (i * Math.floor(TARGET_CLIENTS / TOTAL_CLIENT_USERS)) + 1;
-    const endClient = Math.min(startClient + Math.floor(TARGET_CLIENTS / TOTAL_CLIENT_USERS), TARGET_CLIENTS);
-    for (let c = startClient; c <= endClient; c++) assignedClients.push(c);
-    users.push({
-      id: userId++,
-      username: `client${i+1}`,
-      password: '1234', passwordHash: '', passwordSalt: '',
-      passwordVersion: 0, requirePasswordChange: false,
-      role: 'client', clientIds: assignedClients
-    });
-  }
+  const users = FIXED_BENCH_USERS.map((user) => ({
+    ...user,
+    password: '1234',
+    passwordHash: '',
+    passwordSalt: '',
+    passwordVersion: 0,
+    requirePasswordChange: false
+  }));
 
   const state = {
     clients,
@@ -270,7 +253,7 @@ function generateFixture() {
   const genMs = hrMs(started);
   const memAfter = process.memoryUsage().heapUsed;
   log(`Generated: ${TARGET_CLIENTS} clients, ${dossierCount} dossiers, ${audienceCount} audience, ${diligenceCount} diligence`);
-  log(`Users: ${TOTAL_MANAGERS} managers, ${TOTAL_ADMINS} admins, ${TOTAL_CLIENT_USERS} clients`);
+  log(`Users: ${users.length} fixed team users`);
   log(`Generation time: ${fmtMs(genMs)} | Memory: ${MB(memAfter - memBefore)} used`);
   return state;
 }
@@ -279,6 +262,7 @@ function generateFixture() {
 async function startTestServer(tmpDir) {
   const dataDir = path.join(tmpDir, 'data');
   await fsp.mkdir(dataDir, { recursive: true });
+  const benchDbName = `cabinet_bench_${Date.now()}`;
 
   log('Serializing state to disk...');
   const serializeStart = process.hrtime.bigint();
@@ -306,8 +290,16 @@ async function startTestServer(tmpDir) {
   const nmSrc = path.join(SERVER_DIR, 'node_modules');
   const nmDst = path.join(tmpDir, 'node_modules');
   if (fs.existsSync(nmSrc) && !fs.existsSync(nmDst)) {
-    await fsp.symlink(nmSrc, nmDst, 'dir');
+    try {
+      await fsp.symlink(nmSrc, nmDst, 'junction');
+    } catch (error) {
+      logWarn(`node_modules link failed (${error.message}), copying fallback files...`);
+      await fsp.cp(nmSrc, nmDst, { recursive: true });
+    }
   }
+
+  log(`Seeding isolated MySQL database ${benchDbName}...`);
+  await seedBenchmarkDatabase(tmpDir, benchDbName, state);
 
   log(`Starting test server on port ${SERVER_PORT}...`);
   const server = spawn(process.execPath, ['index.js'], {
@@ -317,6 +309,7 @@ async function startTestServer(tmpDir) {
       PORT: String(SERVER_PORT),
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
+      DB_NAME: benchDbName,
       NODE_OPTIONS: '--max-old-space-size=4096'
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -342,7 +335,7 @@ async function startTestServer(tmpDir) {
     throw new Error('Server failed to start within 240s');
   }
   logOk(`Server ready in ${fmtMs(hrMs(healthStart))}`);
-  return { server, tmpDir };
+  return { server, tmpDir, benchDbName };
 }
 
 // ─── HTTP HELPERS ──────────────────────────────────────────────
@@ -392,9 +385,63 @@ function httpPost(url, data, timeoutMs = 60000) {
   });
 }
 
+async function createBenchmarkDatabase(dbName) {
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || ''
+  });
+  try {
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  } finally {
+    await connection.end();
+  }
+}
+
+async function dropBenchmarkDatabase(dbName) {
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || ''
+  });
+  try {
+    await connection.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
+  } finally {
+    await connection.end();
+  }
+}
+
+async function seedBenchmarkDatabase(tmpDir, dbName, state) {
+  await createBenchmarkDatabase(dbName);
+  const dbModulePath = path.join(tmpDir, 'db.js');
+  const previousDbName = process.env.DB_NAME;
+  process.env.DB_NAME = dbName;
+  delete require.cache[require.resolve(dbModulePath)];
+  let db = null;
+  try {
+    db = require(dbModulePath);
+    await db.initializeDatabase();
+    await db.saveFullState(state);
+  } finally {
+    if (db?.pool?.end) {
+      await db.pool.end().catch(() => {});
+    }
+    delete require.cache[require.resolve(dbModulePath)];
+    if (previousDbName === undefined) {
+      delete process.env.DB_NAME;
+    } else {
+      process.env.DB_NAME = previousDbName;
+    }
+  }
+}
+
 // ─── BENCHMARK RUNNER ──────────────────────────────────────────
 async function runBenchmark(token) {
   const results = [];
+  const benchLoginUsers = FIXED_BENCH_USERS.map((user) => user.username);
+  let availableClientIds = [];
 
   async function bench(name, fn, opts = {}) {
     const { repeat = 1, timeout = 120000 } = opts;
@@ -419,6 +466,9 @@ async function runBenchmark(token) {
     const result = { name, repeat, avg: Math.round(avg), min: Math.round(min), max: Math.round(max), failures, lastError };
     results.push(result);
     console.log(`  ${status} ${pad(name, 40)} avg=${pad(fmtMs(avg), 8)} min=${pad(fmtMs(min), 8)} max=${pad(fmtMs(max), 8)} (${repeat}x${failures > 0 ? `, ${failures} failures` : ''})`);
+    if (failures > 0 && lastError) {
+      console.log(`      ↳ ${lastError}`);
+    }
     return result;
   }
 
@@ -440,8 +490,7 @@ async function runBenchmark(token) {
   await bench(`POST /api/auth/login x${CONCURRENT_REQUESTS} concurrent`, async () => {
     const promises = [];
     for (let i = 0; i < CONCURRENT_REQUESTS; i++) {
-      const user = i < TOTAL_MANAGERS ? (i === 0 ? 'manager' : `manager${i+1}`)
-        : (i < TOTAL_MANAGERS + TOTAL_ADMINS ? `admin${i - TOTAL_MANAGERS + 1}` : `client${i - TOTAL_MANAGERS - TOTAL_ADMINS + 1}`);
+      const user = benchLoginUsers[i % benchLoginUsers.length];
       promises.push(httpPost(`${BASE_URL}/api/auth/login`, { username: user, password: '1234' }, 60000));
     }
     const results = await Promise.all(promises);
@@ -453,8 +502,21 @@ async function runBenchmark(token) {
   await bench('GET /api/state (full load)', async () => {
     const res = await httpGet(`${BASE_URL}/api/state?token=${token}`, 120000);
     if (res.statusCode !== 200) throw new Error(`status ${res.statusCode}`);
-    const sizeMB = (Buffer.byteLength(res.body) / 1024 / 1024).toFixed(1);
-    // log(`  Response size: ${sizeMB} MB`);
+    const parsed = JSON.parse(res.body || '{}');
+    availableClientIds = Array.isArray(parsed?.clients)
+      ? parsed.clients
+        .map((client) => Number(client?.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+    if (!availableClientIds.length) {
+      const topLevelKeys = parsed && typeof parsed === 'object'
+        ? Object.keys(parsed).slice(0, 8).join(',')
+        : typeof parsed;
+      const sampleClient = Array.isArray(parsed?.clients) && parsed.clients.length
+        ? JSON.stringify(parsed.clients[0]).slice(0, 240)
+        : 'n/a';
+      throw new Error(`No client IDs found in loaded state (keys=${topLevelKeys}; sampleClient=${sampleClient})`);
+    }
   }, { repeat: 3 });
 
   log('── Test 5: State meta ──');
@@ -482,9 +544,10 @@ async function runBenchmark(token) {
 
   log('── Test 8: Write (save single dossier) ──');
   await bench('POST /api/state/dossiers (single)', async () => {
+    const clientId = availableClientIds[0] || 1;
     const res = await httpPost(`${BASE_URL}/api/state/dossiers?token=${token}`, {
       action: 'create',
-      clientId: 1,
+      clientId,
       dossier: {
         referenceClient: `BENCH-SINGLE-${Date.now()}`,
         debiteur: 'Debiteur Test Updated',
@@ -502,7 +565,7 @@ async function runBenchmark(token) {
     const promises = Array.from({ length: CONCURRENT_REQUESTS }, (_, i) =>
       httpPost(`${BASE_URL}/api/state/dossiers?token=${token}`, {
         action: 'create',
-        clientId: (i % TARGET_CLIENTS) + 1,
+        clientId: availableClientIds[i % availableClientIds.length] || availableClientIds[0] || 1,
         dossier: {
           referenceClient: `BENCH-CONCURRENT-${Date.now()}-${i}`,
           debiteur: `Concurrent Write ${i}`,
@@ -520,17 +583,7 @@ async function runBenchmark(token) {
 
   log('── Test 10: Save users (full team) ──');
   await bench('POST /api/state/users', async () => {
-    const users = [];
-    for (let i = 0; i < TOTAL_MANAGERS + TOTAL_ADMINS + TOTAL_CLIENT_USERS; i++) {
-      users.push({
-        id: i + 1,
-        username: i < TOTAL_MANAGERS ? (i === 0 ? 'manager' : `manager${i+1}`)
-          : (i < TOTAL_MANAGERS + TOTAL_ADMINS ? `admin${i - TOTAL_MANAGERS + 1}` : `client${i - TOTAL_MANAGERS - TOTAL_ADMINS + 1}`),
-        password: '1234',
-        role: i < TOTAL_MANAGERS ? 'manager' : (i < TOTAL_MANAGERS + TOTAL_ADMINS ? 'admin' : 'client'),
-        clientIds: []
-      });
-    }
+    const users = FIXED_BENCH_USERS.map((user) => ({ ...user, password: '1234' }));
     const res = await httpPost(`${BASE_URL}/api/state/users?token=${token}`, { users }, 30000);
     if (res.statusCode !== 200) throw new Error(`status ${res.statusCode}: ${res.body?.slice(0, 200)}`);
   }, { repeat: 3 });
@@ -544,7 +597,7 @@ function printReport(results) {
   console.log('  STRESS TEST REPORT');
   console.log('═'.repeat(90));
   console.log(`  Volume: ${TARGET_CLIENTS} clients | ${TARGET_DOSSIERS.toLocaleString()} dossiers | ${TARGET_AUDIENCE.toLocaleString()} audience | ${TARGET_DILIGENCE.toLocaleString()} diligence`);
-  console.log(`  Users:  ${TOTAL_MANAGERS} managers | ${TOTAL_ADMINS} admins | ${TOTAL_CLIENT_USERS} clients`);
+  console.log(`  Users:  ${FIXED_BENCH_USERS.length} fixed team users`);
   console.log(`  Concurrent requests: ${CONCURRENT_REQUESTS}`);
   console.log('─'.repeat(90));
   console.log(`  ${pad('Test', 45)} ${pad('Avg', 10)} ${pad('Min', 10)} ${pad('Max', 10)} ${pad('Fail', 6)}`);
@@ -557,6 +610,9 @@ function printReport(results) {
     if (r.max > 30000) slowTests++;
     totalFail += r.failures;
     console.log(`  ${status} ${pad(r.name, 43)} ${pad(fmtMs(r.avg), 10)} ${pad(fmtMs(r.min), 10)} ${pad(fmtMs(r.max), 10)} ${r.failures}`);
+    if (r.failures > 0 && r.lastError) {
+      console.log(`      ↳ ${r.lastError}`);
+    }
   }
 
   console.log('─'.repeat(90));
@@ -614,6 +670,12 @@ async function main() {
       await sleep(2000);
       if (!serverHandle.server.killed) serverHandle.server.kill('SIGKILL');
       logOk('Server stopped');
+    }
+    if (serverHandle?.benchDbName) {
+      log(`Dropping isolated MySQL database ${serverHandle.benchDbName}...`);
+      await dropBenchmarkDatabase(serverHandle.benchDbName).catch((err) => {
+        logWarn(`Failed to drop benchmark DB ${serverHandle.benchDbName}: ${err.message}`);
+      });
     }
     // Cleanup temp files
     log(`Temp files at: ${tmpDir}`);
