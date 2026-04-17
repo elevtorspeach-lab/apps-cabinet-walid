@@ -137,6 +137,7 @@ let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
 let customProcedures = [];
+let sanlamAdversaireDraft = {};
 let suppressProcedureChange = false;
 let currentUser = null;
 let currentView = '';
@@ -16047,6 +16048,7 @@ async function addDossier(){
       referenceClient: $('referenceClientInput').value.trim(),
       dateAffectation: normalizedDateAffectation,
       gestionnaire: $('gestionnaireInput')?.value.trim() || '',
+      sanlamAdversaires: collectSanlamAdversaireDraft(),
       procedure: selected.join(', '),
       procedureList: selected.slice(),
       procedureDetails: details,
@@ -16733,6 +16735,7 @@ function editDossier(clientId, index){
   if($('sanlamDateAccidentInput')) $('sanlamDateAccidentInput').value = d.sanlamDateAccident || '';
   if($('sanlamCinConducteurInput')) $('sanlamCinConducteurInput').value = d.sanlamCinConducteur || '';
   if($('sanlamSouscripteurInput')) $('sanlamSouscripteurInput').value = d.sanlamSouscripteur || '';
+  sanlamAdversaireDraft = { ...(d.sanlamAdversaires || {}) };
   uploadedFiles = Array.isArray(d.files) ? d.files.map(f=>({ ...f })) : [];
   renderFileList();
 
@@ -16758,7 +16761,7 @@ function editDossier(clientId, index){
 
   d.procedureList = procs.slice();
   d.procedure = procs.join(', ');
-  const standardLower = new Set(['ass','restitution','commandement','nantissement','redressement','vérification de créance','liquidation judiciaire','sfdc','s/bien','injonction']);
+  const standardLower = new Set(['ass','restitution','commandement','nantissement','redressement','vérification de créance','liquidation judiciaire','sfdc','s/bien','injonction','sanlam']);
   customProcedures = procs.filter(p=>!standardLower.has(String(p).trim().toLowerCase()));
   $('procedureCustom').value = '';
   renderCustomProcedures();
@@ -16811,6 +16814,7 @@ function resetCreationForm(clientId = ''){
   editingDossier = null;
   editingOriginalProcedures = [];
   customProcedures = [];
+  sanlamAdversaireDraft = {};
   uploadedFiles = [];
   procedureMontantGroups = [];
   clearCreationReferenceClientError();
@@ -22402,7 +22406,68 @@ function activateProcedureCheckboxes(procList){
   });
 }
 
-function buildProcedureCardFieldsHtml(baseProc, tribunalFieldHtml, addOnlyButtonHtml){
+function collectSanlamAdversaireDraft(root = document){
+  const next = { ...(sanlamAdversaireDraft || {}) };
+  root.querySelectorAll('#sanlamAdversairesContainer input[data-sanlam-adversaire-index]').forEach(input=>{
+    const idx = Number(input.dataset.sanlamAdversaireIndex);
+    if(!Number.isFinite(idx) || idx < 2) return;
+    next[idx] = String(input.value || '').trim();
+  });
+  sanlamAdversaireDraft = next;
+  return next;
+}
+
+function getSanlamVariantIndexes(procList){
+  const indexes = new Set();
+  (procList || []).forEach(name=>{
+    if(getProcedureBaseName(name) !== 'Sanlam') return;
+    const idx = getProcedureVariantIndex(name);
+    if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
+  });
+  return [...indexes].sort((a, b)=>a - b);
+}
+
+function renderSanlamAdversaireFields(procList){
+  const container = $('sanlamAdversairesContainer');
+  if(!container) return;
+  collectSanlamAdversaireDraft();
+  const indexes = getSanlamVariantIndexes(procList);
+  if(!indexes.length){
+    container.innerHTML = '';
+    container.style.display = 'none';
+    return;
+  }
+  container.innerHTML = '';
+  container.style.display = '';
+  indexes.forEach(idx=>{
+    const wrap = document.createElement('div');
+    const toneClass = idx === 2
+      ? 'creation-sanlam-2-field'
+      : idx === 3
+        ? 'creation-sanlam-3-field'
+        : 'creation-sanlam-4-field';
+    wrap.className = `form-group creation-layout-card ${toneClass}`;
+    const label = document.createElement('label');
+    label.textContent = `Adversaire ${idx}`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = `sanlamAdversaire${idx}Input`;
+    input.placeholder = `Adversaire ${idx}`;
+    input.dataset.sanlamAdversaireIndex = String(idx);
+    input.value = String(sanlamAdversaireDraft?.[idx] || '').trim();
+    input.addEventListener('input', ()=>collectSanlamAdversaireDraft());
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    container.appendChild(wrap);
+  });
+}
+
+function getProcedureVariantIndex(procName){
+  const match = String(procName || '').trim().match(/(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, addOnlyButtonHtml){
   const b = String(baseProc || '').trim().toLowerCase();
   if(b === 'commandement'){
     return `
@@ -22487,6 +22552,17 @@ function buildProcedureCardFieldsHtml(baseProc, tribunalFieldHtml, addOnlyButton
       ${addOnlyButtonHtml}
     `;
   }
+  if(b === 'sanlam'){
+    return `
+      <input type="text" data-field="dateDepot" placeholder="Date d’affectation">
+      <input type="text" data-field="depotLe" placeholder="Dépôt le">
+      <input type="text" data-field="referenceClient" placeholder="Référence dossier">
+      <input type="text" data-field="audience" placeholder="Audience">
+      <input type="text" data-field="juge" placeholder="Juge">
+      <input type="text" data-field="sort" placeholder="Sort">
+      ${tribunalFieldHtml}
+    `;
+  }
   return `
     <input type="text" data-field="dateDepot" placeholder="Date d’affectation">
     <input type="text" data-field="depotLe" placeholder="Dépôt le">
@@ -22567,7 +22643,13 @@ function getProcedureColorClass(procName){
   if(b === 'sfdc') return 'proc-sfdc';
   if(b === 's/bien') return 'proc-sbien';
   if(b === 'injonction') return 'proc-injonction';
-  if(b === 'sanlam') return 'proc-sanlam';
+  if(b === 'sanlam'){
+    const variantIndex = getProcedureVariantIndex(procName);
+    if(variantIndex === 2) return 'proc-sanlam-2';
+    if(variantIndex === 3) return 'proc-sanlam-3';
+    if(variantIndex && variantIndex >= 4) return 'proc-sanlam-4';
+    return 'proc-sanlam';
+  }
   if(customProcedures.some(p => p.toLowerCase() === b)) return 'proc-autre';
   return '';
 }
@@ -22759,6 +22841,7 @@ function renderProcedureDetails(forceList, forceDraft){
     }
   });
   syncConditionalCreationFieldsVisibility(finalList);
+  renderSanlamAdversaireFields(finalList);
 
   finalList.forEach(proc=>{
     if(!proc || !String(proc).trim()) return;
@@ -22787,7 +22870,7 @@ function renderProcedureDetails(forceList, forceDraft){
         </div>
       `
       : `<input type="text" data-field="tribunal" list="${PROCEDURE_TRIBUNAL_DATALIST_ID}" placeholder="Tribunal" autocomplete="off">`;
-    const fieldsHtml = buildProcedureCardFieldsHtml(baseProc, tribunalFieldHtml, addOnlyButtonHtml);
+    const fieldsHtml = buildProcedureCardFieldsHtml(proc, baseProc, tribunalFieldHtml, addOnlyButtonHtml);
     const title = document.createElement('h4');
     title.textContent = proc;
     const head = document.createElement('div');
@@ -22864,6 +22947,19 @@ function addCustomProcedure(){
   if(!input) return;
   const value = input.value.trim();
   if(!value) return;
+  const normalizedValue = String(value || '').trim().toLowerCase();
+  if(normalizedValue === 'sanlam'){
+    customProcedures = customProcedures.filter(proc=>String(proc || '').trim().toLowerCase() !== 'sanlam');
+    input.value = '';
+    renderCustomProcedures();
+    const checkbox = [...document.querySelectorAll('.proc-check')].find(cb=>String(cb.value || '').trim().toLowerCase() === 'sanlam');
+    if(checkbox){
+      checkbox.checked = true;
+      checkbox.closest('label')?.classList.add('active');
+    }
+    renderProcedureDetails();
+    return;
+  }
   if(customProcedures.includes(value)) return;
   customProcedures.push(value);
   input.value = '';
@@ -22881,7 +22977,9 @@ function renderCustomProcedures(){
   const container = $('customProcedures');
   if(!container) return;
   container.innerHTML = '';
-  customProcedures.forEach(v=>{
+  customProcedures
+    .filter(v=>String(v || '').trim().toLowerCase() !== 'sanlam')
+    .forEach(v=>{
     const chip = document.createElement('span');
     chip.className = 'custom-proc custom-red';
     chip.appendChild(document.createTextNode(`${v} `));

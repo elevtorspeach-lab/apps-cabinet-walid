@@ -1451,6 +1451,132 @@ tr:hover{background:#f1f5f9}
   box-shadow:0 0 0 5px rgba(15,23,42,.20);
 }
 
+.creation-layout-card.creation-sanlam-2-field{
+  position:relative;
+  overflow:hidden;
+  border:1px solid #16a34a;
+  background:
+    radial-gradient(180px 110px at 100% 0%, rgba(34,197,94,.20), transparent 72%),
+    linear-gradient(145deg, rgba(240,253,244,.99) 0%, rgba(220,252,231,.98) 58%, rgba(255,255,255,.98) 100%);
+  box-shadow:0 16px 34px rgba(22,163,74,.14);
+}
+
+.creation-layout-card.creation-sanlam-2-field::before{
+  content:'';
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:0;
+  width:5px;
+  background:linear-gradient(180deg, #15803d 0%, #22c55e 100%);
+}
+
+.creation-layout-card.creation-sanlam-2-field label{
+  color:#166534;
+}
+
+.creation-layout-card.creation-sanlam-2-field input,
+.creation-layout-card.creation-sanlam-2-field select{
+  border:1.5px solid #4ade80;
+  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(240,253,244,.95) 100%);
+  box-shadow:0 0 0 4px rgba(134,239,172,.28);
+}
+
+.creation-layout-card.creation-sanlam-2-field input::placeholder,
+.creation-layout-card.creation-sanlam-2-field select::placeholder{
+  color:#4b5563;
+}
+
+.creation-layout-card.creation-sanlam-2-field input:focus,
+.creation-layout-card.creation-sanlam-2-field select:focus{
+  border-color:#15803d;
+  box-shadow:0 0 0 5px rgba(34,197,94,.22);
+}
+
+.creation-layout-card.creation-sanlam-3-field{
+  position:relative;
+  overflow:hidden;
+  border:1px solid #7c3aed;
+  background:
+    radial-gradient(180px 110px at 100% 0%, rgba(168,85,247,.18), transparent 72%),
+    linear-gradient(145deg, rgba(250,245,255,.99) 0%, rgba(243,232,255,.98) 58%, rgba(255,255,255,.98) 100%);
+  box-shadow:0 16px 34px rgba(124,58,237,.14);
+}
+
+.creation-layout-card.creation-sanlam-3-field::before{
+  content:'';
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:0;
+  width:5px;
+  background:linear-gradient(180deg, #6d28d9 0%, #a855f7 100%);
+}
+
+.creation-layout-card.creation-sanlam-3-field label{
+  color:#6b21a8;
+}
+
+.creation-layout-card.creation-sanlam-3-field input,
+.creation-layout-card.creation-sanlam-3-field select{
+  border:1.5px solid #c084fc;
+  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(250,245,255,.95) 100%);
+  box-shadow:0 0 0 4px rgba(216,180,254,.28);
+}
+
+.creation-layout-card.creation-sanlam-3-field input::placeholder,
+.creation-layout-card.creation-sanlam-3-field select::placeholder{
+  color:#6b7280;
+}
+
+.creation-layout-card.creation-sanlam-3-field input:focus,
+.creation-layout-card.creation-sanlam-3-field select:focus{
+  border-color:#7c3aed;
+  box-shadow:0 0 0 5px rgba(168,85,247,.22);
+}
+
+.creation-layout-card.creation-sanlam-4-field{
+  position:relative;
+  overflow:hidden;
+  border:1px solid #d97706;
+  background:
+    radial-gradient(180px 110px at 100% 0%, rgba(251,191,36,.20), transparent 72%),
+    linear-gradient(145deg, rgba(255,251,235,.99) 0%, rgba(254,243,199,.98) 58%, rgba(255,255,255,.98) 100%);
+  box-shadow:0 16px 34px rgba(217,119,6,.14);
+}
+
+.creation-layout-card.creation-sanlam-4-field::before{
+  content:'';
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:0;
+  width:5px;
+  background:linear-gradient(180deg, #b45309 0%, #f59e0b 100%);
+}
+
+.creation-layout-card.creation-sanlam-4-field label{
+  color:#92400e;
+}
+
+.creation-layout-card.creation-sanlam-4-field input,
+.creation-layout-card.creation-sanlam-4-field select{
+  border:1.5px solid #fbbf24;
+  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(255,251,235,.95) 100%);
+  box-shadow:0 0 0 4px rgba(252,211,77,.28);
+}
+
+.creation-layout-card.creation-sanlam-4-field input::placeholder,
+.creation-layout-card.creation-sanlam-4-field select::placeholder{
+  color:#78716c;
+}
+
+.creation-layout-card.creation-sanlam-4-field input:focus,
+.creation-layout-card.creation-sanlam-4-field select:focus{
+  border-color:#d97706;
+  box-shadow:0 0 0 5px rgba(251,191,36,.24);
+}
+
 .creation-priority-field{
   position:relative;
   overflow:hidden;
@@ -1639,6 +1765,10 @@ tr:hover{background:#f1f5f9}
 .proc-add-variant-btn--proc-sfdc{background:#fffbeb;border-color:#fcd34d;color:#92400e}
 .proc-add-variant-btn--proc-sbien{background:#ffe4e6;border-color:#fda4af;color:#be123c}
 .proc-add-variant-btn--proc-injonction{background:#f0fdfa;border-color:#99f6e4;color:#115e59}
+.proc-add-variant-btn--proc-sanlam{background:#e2e8f0;border-color:#94a3b8;color:#0f172a}
+.proc-add-variant-btn--proc-sanlam-2{background:#ecfdf5;border-color:#86efac;color:#166534}
+.proc-add-variant-btn--proc-sanlam-3{background:#faf5ff;border-color:#d8b4fe;color:#7e22ce}
+.proc-add-variant-btn--proc-sanlam-4{background:#fffbeb;border-color:#fcd34d;color:#92400e}
 .proc-add-variant-btn--proc-autre{background:#fef2f2;border-color:#fecaca;color:#991b1b}
 .proc-remove-variant-btn{
   width:26px;
@@ -1682,6 +1812,9 @@ tr:hover{background:#f1f5f9}
 .proc-sbien::after{background:#e11d48}
 .proc-injonction::after{background:#0ea5a4}
 .proc-sanlam::after{background:#0f172a}
+.proc-sanlam-2::after{background:#16a34a}
+.proc-sanlam-3::after{background:#7c3aed}
+.proc-sanlam-4::after{background:#d97706}
 .proc-autre::after{background:#ef4444}
 
 .proc-ass{border-left:4px solid #2563eb}
@@ -1695,7 +1828,14 @@ tr:hover{background:#f1f5f9}
 .proc-sbien{border-left:4px solid #e11d48}
 .proc-injonction{border-left:4px solid #0ea5a4}
 .proc-sanlam{border-left:4px solid #0f172a}
+.proc-sanlam-2{border-left:4px solid #16a34a;background:#f0fdf4}
+.proc-sanlam-3{border-left:4px solid #7c3aed;background:#faf5ff}
+.proc-sanlam-4{border-left:4px solid #d97706;background:#fffbeb}
 .proc-autre{border-left:4px solid #ef4444}
+
+.proc-sanlam-2 h4{color:#166534}
+.proc-sanlam-3 h4{color:#6b21a8}
+.proc-sanlam-4 h4{color:#92400e}
 
 .procedure-montant-groups{
   display:flex;
@@ -1761,6 +1901,10 @@ tr:hover{background:#f1f5f9}
 .procedure-montant-pill.proc-sfdc{background:#ffedd5;color:#c2410c;border-color:#fdba74}
 .procedure-montant-pill.proc-sbien{background:#ffe4e6;color:#be123c;border-color:#fda4af}
 .procedure-montant-pill.proc-injonction{background:#ccfbf1;color:#0f766e;border-color:#5eead4}
+.procedure-montant-pill.proc-sanlam{background:#e2e8f0;color:#0f172a;border-color:#94a3b8}
+.procedure-montant-pill.proc-sanlam-2{background:#dcfce7;color:#166534;border-color:#86efac}
+.procedure-montant-pill.proc-sanlam-3{background:#f3e8ff;color:#7e22ce;border-color:#d8b4fe}
+.procedure-montant-pill.proc-sanlam-4{background:#fef3c7;color:#92400e;border-color:#fcd34d}
 .procedure-montant-pill.proc-autre{background:#fee2e2;color:#b91c1c;border-color:#fca5a5}
 
 
@@ -3377,6 +3521,24 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   background:#1e293b;
   color:#ffffff;
   border-color:#0f172a;
+}
+
+.proc-pill.proc-sanlam-2{
+  background:#dcfce7;
+  color:#166534;
+  border-color:#86efac;
+}
+
+.proc-pill.proc-sanlam-3{
+  background:#f3e8ff;
+  color:#7e22ce;
+  border-color:#d8b4fe;
+}
+
+.proc-pill.proc-sanlam-4{
+  background:#fef3c7;
+  color:#92400e;
+  border-color:#fcd34d;
 }
 
 .proc-pill.proc-autre{

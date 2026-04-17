@@ -170,6 +170,7 @@ function CreationSection() {
                 <input type="text" id="sanlamSouscripteurInput" placeholder="Souscripteur" />
               </div>
             </div>
+            <div id="sanlamAdversairesContainer" className="creation-form-row creation-form-row-three" style={{ display: 'none' }}></div>
           </div>
 
           <div className="form-group full">
