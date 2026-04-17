@@ -2317,6 +2317,8 @@ function normalizeDossierPatchReference(value){
 }
 
 function resolveRemoteDossierPatchReference(patch, dossier){
+  const previous = normalizeDossierPatchReference(patch?.previousReferenceClient);
+  if(previous) return previous;
   const direct = normalizeDossierPatchReference(patch?.referenceClient);
   if(direct) return direct;
   return normalizeDossierPatchReference(dossier?.referenceClient);
@@ -15875,6 +15877,7 @@ async function addDossier(){
         clientId: Number(editingDossier.clientId),
         dossierIndex: Number(editingDossier.index),
         targetClientId: Number(client.id),
+        previousReferenceClient: String(previousDossier?.referenceClient || '').trim(),
         dossier
       };
     }else{

@@ -920,6 +920,8 @@ function normalizePatchReference(value) {
 }
 
 function resolvePatchReference(body, dossier) {
+  const previous = normalizePatchReference(body?.previousReferenceClient);
+  if (previous) return previous;
   const direct = normalizePatchReference(body?.referenceClient);
   if (direct) return direct;
   return normalizePatchReference(dossier?.referenceClient);
