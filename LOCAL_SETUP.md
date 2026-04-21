@@ -36,6 +36,27 @@ If you want a fresh empty database and you want the app to connect through the s
    ```
 7. The desktop app will read the server IP from `desktop-app/server_ip.txt` and connect to `http://<wifi-ip>:3000`.
 
+## Windows Auto-Start For The API
+
+If you want the API to start automatically every time Windows boots:
+
+1. Open PowerShell as Administrator.
+2. Run:
+   ```powershell
+   cd server
+   powershell -ExecutionPolicy Bypass -File .\install-server-autostart.ps1 -StartNow
+   ```
+3. This installs a Windows Scheduled Task named `CabinetWalidAraqiApi`.
+4. On every Windows startup, the task launches `start-server-background.ps1`, which launches the supervisor.
+5. The supervisor automatically restarts `node index.js` if it crashes.
+
+To remove auto-start later:
+
+```powershell
+cd server
+powershell -ExecutionPolicy Bypass -File .\remove-server-autostart.ps1
+```
+
 > [!WARNING]
 > `npm run db:reset` clears the application data in MySQL and replaces it with an empty state.
 

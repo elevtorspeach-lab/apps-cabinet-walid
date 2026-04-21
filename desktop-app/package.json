@@ -27,6 +27,17 @@
       "preload.js",
       "offline-web/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!logs{,/**}",
+          "!data/manual-backups{,/**}"
+        ]
+      }
+    ],
     "mac": {
       "target": [
         "dmg"

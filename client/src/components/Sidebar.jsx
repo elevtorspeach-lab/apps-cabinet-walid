@@ -1,30 +1,90 @@
 import { useState, useEffect } from 'react';
 
+function humanizeUsername(value) {
+  return String(value || '')
+    .trim()
+    .replace(/([A-Za-z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([A-Za-z])/g, '$1 $2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function buildSidebarUserLabel(identity, isClient, isAdminOrManager) {
+  const username = String(identity?.username || '').trim().toLowerCase();
+  const aliases = {
+    manager: 'Walid',
+    walid: 'Walid',
+    ghita: 'Ghita',
+    doha: 'Doha',
+    najwa: 'Najwa',
+    yasmine: 'Yasmine',
+    souhaila: 'Souhaila'
+  };
+  const prettyName = aliases[username] || humanizeUsername(identity?.username || '');
+
+  if (typeof window !== 'undefined' && typeof window.isManager === 'function' && window.isManager()) {
+    return prettyName ? `Manager ${prettyName}` : 'Manager';
+  }
+  if (typeof window !== 'undefined' && typeof window.isAdmin === 'function' && window.isAdmin()) {
+    return prettyName ? `Admin ${prettyName}` : 'Admin';
+  }
+  if (typeof window !== 'undefined' && typeof window.isViewer === 'function' && window.isViewer()) {
+    return prettyName ? `Client ${prettyName}` : 'Client';
+  }
+
+  if (identity?.role === 'manager') return prettyName ? `Manager ${prettyName}` : 'Manager';
+  if (identity?.role === 'admin') return prettyName ? `Admin ${prettyName}` : 'Admin';
+  if (isAdminOrManager) return prettyName || 'Manager';
+  if (isClient) return prettyName ? `Client ${prettyName}` : 'Client';
+  return prettyName || '';
+}
+
 function Sidebar() {
   const [isClient, setIsClient] = useState(typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false);
   const [isAdminOrManager, setIsAdminOrManager] = useState(typeof window !== 'undefined' && (
     (typeof window.isAdmin === 'function' && window.isAdmin()) ||
     (typeof window.isManager === 'function' && window.isManager())
   ));
+  const [currentUserLabel, setCurrentUserLabel] = useState('');
 
   useEffect(() => {
     const updateRoles = () => {
-      setIsClient(typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false);
-      setIsAdminOrManager(typeof window !== 'undefined' && (
+      const nextIsClient = typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false;
+      const nextIsAdminOrManager = typeof window !== 'undefined' && (
         (typeof window.isAdmin === 'function' && window.isAdmin()) ||
         (typeof window.isManager === 'function' && window.isManager())
-      ));
+      );
+      const identity = typeof window !== 'undefined' && typeof window.getCurrentUserIdentity === 'function'
+        ? window.getCurrentUserIdentity()
+        : { username: '', role: '' };
+
+      setIsClient(nextIsClient);
+      setIsAdminOrManager(nextIsAdminOrManager);
+      setCurrentUserLabel(buildSidebarUserLabel(identity, nextIsClient, nextIsAdminOrManager));
     };
 
     updateRoles();
     window.addEventListener('role_changed', updateRoles);
-    return () => window.removeEventListener('role_changed', updateRoles);
+    const timer = window.setInterval(updateRoles, 1000);
+    return () => {
+      window.removeEventListener('role_changed', updateRoles);
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
     <div className="sidebar">
       <div className="sidebar-scroll">
         <h2><i className="fa-solid fa-gavel"></i> Cabinet Walid Araqi</h2>
+        {!!currentUserLabel && (
+          <div className="sidebar-react-user-label">{currentUserLabel}</div>
+        )}
         <div id="syncStatusBadge" className="sync-status is-syncing">
           <span className="dot"></span>
           <span id="syncStatusText">Synchronisation serveur...</span>

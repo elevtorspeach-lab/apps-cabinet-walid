@@ -29,6 +29,9 @@
     <div class="login-input-wrap">
       <i class="fa-solid fa-key"></i>
       <input type="password" id="password" placeholder="Entrer votre mot de passe"/>
+      <button id="togglePasswordVisibilityBtn" class="password-toggle-btn" type="button" aria-label="Afficher le mot de passe" title="Afficher le mot de passe">
+        <i id="togglePasswordVisibilityIcon" class="fa-regular fa-eye"></i>
+      </button>
     </div>
 
     <button id="loginBtn" class="btn-success login-submit">Se connecter</button>
@@ -49,6 +52,10 @@
     <div class="sync-metrics" aria-live="polite">
       <span id="syncPingMetric" class="sync-metric">Ping: --</span>
       <span id="syncLiveMetric" class="sync-metric">Live: --</span>
+    </div>
+    <div id="currentUserBadge" class="sidebar-user-badge" style="display:none;">
+      <i class="fa-solid fa-id-badge"></i>
+      <span id="currentUserDisplay">-</span>
     </div>
     <button id="openDesktopStateFileBtn" class="sidebar-file-btn" type="button">
       <i class="fa-solid fa-file-lines"></i> Fichier Cabinet Walid Araqi
@@ -729,6 +736,7 @@
               <label data-proc="Restitution"><input type="checkbox" value="Restitution" class="proc-check"> Restitution</label>
               <label data-proc="Nantissement"><input type="checkbox" value="Nantissement" class="proc-check"> Nantissement</label>
               <label data-proc="SFDC"><input type="checkbox" value="SFDC" class="proc-check"> SFDC</label>
+              <label data-proc="SAISIE ARR&#202;T"><input type="checkbox" value="SAISIE ARR&#202;T" class="proc-check"> SAISIE ARR&Ecirc;T</label>
               <label data-proc="Injonction"><input type="checkbox" value="Injonction" class="proc-check"> Injonction</label>
               <label data-proc="S/bien"><input type="checkbox" value="S/bien" class="proc-check"> S/bien</label>
               <label data-proc="Commandement"><input type="checkbox" value="Commandement" class="proc-check"> Commandement</label>

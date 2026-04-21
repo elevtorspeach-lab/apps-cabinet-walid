@@ -3,12 +3,17 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
+const http = require('http');
+const { spawn } = require('child_process');
 
 const STATE_FILE_NAME = 'Cabinet Walid Araqi.json';
 const EXPORTS_DIR_NAME = 'Cabinet Walid Araqi Exports';
+const API_PORT = 3000;
+const SERVER_START_TIMEOUT_MS = 20000;
 
 const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
 const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '1').trim();
+let desktopServerStartPromise = null;
 
 function readConfiguredServerHost() {
   try {
@@ -82,12 +87,12 @@ function buildServerHostCandidates() {
 }
 
 function buildApiBaseForHost(host) {
-  return `http://${host}:3000/api`;
+  return `http://${host}:${API_PORT}/api`;
 }
 
 async function canReachServer(host) {
   return new Promise((resolve) => {
-    const req = require('http').get(`${buildApiBaseForHost(host)}/health`, { timeout: 1800 }, (res) => {
+    const req = http.get(`${buildApiBaseForHost(host)}/health`, { timeout: 1800 }, (res) => {
       res.resume();
       resolve(res.statusCode >= 200 && res.statusCode < 500);
     });
@@ -99,12 +104,89 @@ async function canReachServer(host) {
   });
 }
 
+function getDesktopServerDirCandidates() {
+  return [
+    path.resolve(__dirname, '..', 'server'),
+    path.join(process.resourcesPath || '', 'server'),
+    path.join(path.dirname(process.execPath || ''), 'server')
+  ].filter(Boolean);
+}
+
+function resolveDesktopServerStarterScript() {
+  for (const serverDir of getDesktopServerDirCandidates()) {
+    const starterScript = path.join(serverDir, 'start-server-background.ps1');
+    if (fs.existsSync(starterScript)) {
+      return { serverDir, starterScript };
+    }
+  }
+  return null;
+}
+
+async function waitForReachableServer(hosts, timeoutMs = SERVER_START_TIMEOUT_MS) {
+  const deadline = Date.now() + Math.max(2000, Number(timeoutMs) || SERVER_START_TIMEOUT_MS);
+  const candidates = Array.from(new Set((hosts || []).map(host => String(host || '').trim()).filter(Boolean)));
+  while (Date.now() < deadline) {
+    for (const host of candidates) {
+      if (await canReachServer(host)) {
+        return host;
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 900));
+  }
+  return '';
+}
+
+async function ensureDesktopBundledServerRunning() {
+  if (desktopServerStartPromise) return desktopServerStartPromise;
+
+  desktopServerStartPromise = (async () => {
+    const localHosts = ['127.0.0.1', 'localhost'];
+    const alreadyReachable = await waitForReachableServer(localHosts, 1200);
+    if (alreadyReachable) {
+      return alreadyReachable;
+    }
+
+    const starter = resolveDesktopServerStarterScript();
+    if (!starter) {
+      return '';
+    }
+
+    try {
+      const child = spawn(
+        'powershell.exe',
+        ['-ExecutionPolicy', 'Bypass', '-File', starter.starterScript],
+        {
+          cwd: starter.serverDir,
+          windowsHide: true,
+          detached: true,
+          stdio: 'ignore'
+        }
+      );
+      child.unref();
+    } catch (err) {
+      console.warn('Unable to start bundled server automatically.', err);
+      return '';
+    }
+
+    const reachableAfterStart = await waitForReachableServer(localHosts, SERVER_START_TIMEOUT_MS);
+    return reachableAfterStart || '';
+  })().finally(() => {
+    desktopServerStartPromise = null;
+  });
+
+  return desktopServerStartPromise;
+}
+
 async function resolveDesktopServerHost() {
   const candidates = buildServerHostCandidates();
   for (const host of candidates) {
     if (await canReachServer(host)) {
       return host;
     }
+  }
+  const localHost = await ensureDesktopBundledServerRunning();
+  if (localHost) {
+    return localHost;
   }
   return candidates[0] || 'localhost';
 }

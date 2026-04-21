@@ -131,6 +131,28 @@ body{
   color:#87a0c7;
   font-size:14px;
 }
+.password-toggle-btn{
+  border:none;
+  background:transparent;
+  color:#87a0c7;
+  width:32px;
+  height:32px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  flex:0 0 auto;
+  transition:background .2s ease, color .2s ease;
+}
+.password-toggle-btn:hover{
+  background:rgba(79,140,255,.14);
+  color:#dbeafe;
+}
+.password-toggle-btn:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(79,140,255,.24);
+}
 .login-input-wrap:focus-within{
   border-color:#4f8cff;
   background:linear-gradient(180deg,#10224c,#0f1e44);
@@ -1414,6 +1436,7 @@ tr:hover{background:#f1f5f9}
 .proc-add-variant-btn--proc-verification-creance{background:#fff7ed;border-color:#fdba74;color:#c2410c}
 .proc-add-variant-btn--proc-declaration-creance{background:#fae8ff;border-color:#f0abfc;color:#a21caf}
 .proc-add-variant-btn--proc-sfdc{background:#fffbeb;border-color:#fcd34d;color:#92400e}
+.proc-add-variant-btn--proc-saisie-arret{background:#ffe4e6;border-color:#fda4af;color:#be123c}
 .proc-add-variant-btn--proc-sbien{background:#ffe4e6;border-color:#fda4af;color:#be123c}
 .proc-add-variant-btn--proc-injonction{background:#f0fdfa;border-color:#99f6e4;color:#115e59}
 .proc-add-variant-btn--proc-autre{background:#fef2f2;border-color:#fecaca;color:#991b1b}
@@ -1441,6 +1464,7 @@ tr:hover{background:#f1f5f9}
 .checkbox-group label[data-proc="Vérification de créance"].active{background:#ea580c;border-color:#ea580c}
 .checkbox-group label[data-proc="Liquidation judiciaire"].active{background:#c026d3;border-color:#c026d3}
 .checkbox-group label[data-proc="SFDC"].active{background:#f59e0b;border-color:#f59e0b}
+.checkbox-group label[data-proc="SAISIE ARRÊT"].active{background:#e11d48;border-color:#e11d48}
 .checkbox-group label[data-proc="S/bien"].active{background:#e11d48;border-color:#e11d48}
 .checkbox-group label[data-proc="Injonction"].active{background:#0ea5a4;border-color:#0ea5a4}
 .checkbox-group label[data-proc="Sanlam"].active{background:#1e293b;border-color:#1e293b}
@@ -1455,6 +1479,7 @@ tr:hover{background:#f1f5f9}
 .proc-verification-creance::after{background:#ea580c}
 .proc-declaration-creance::after{background:#c026d3}
 .proc-sfdc::after{background:#f59e0b}
+.proc-saisie-arret::after{background:#e11d48}
 .proc-sbien::after{background:#e11d48}
 .proc-injonction::after{background:#0ea5a4}
 .proc-autre::after{background:#ef4444}
@@ -1467,6 +1492,7 @@ tr:hover{background:#f1f5f9}
 .proc-verification-creance{border-left:4px solid #ea580c}
 .proc-declaration-creance{border-left:4px solid #c026d3}
 .proc-sfdc{border-left:4px solid #f59e0b}
+.proc-saisie-arret{border-left:4px solid #e11d48}
 .proc-sbien{border-left:4px solid #e11d48}
 .proc-injonction{border-left:4px solid #0ea5a4}
 .proc-autre{border-left:4px solid #ef4444}
@@ -1532,6 +1558,7 @@ tr:hover{background:#f1f5f9}
 .procedure-montant-pill.proc-verification-creance{background:#ffedd5;color:#c2410c;border-color:#fdba74}
 .procedure-montant-pill.proc-declaration-creance{background:#fae8ff;color:#a21caf;border-color:#f0abfc}
 .procedure-montant-pill.proc-sfdc{background:#ffedd5;color:#c2410c;border-color:#fdba74}
+.procedure-montant-pill.proc-saisie-arret{background:#ffe4e6;color:#be123c;border-color:#fda4af}
 .procedure-montant-pill.proc-sbien{background:#ffe4e6;color:#be123c;border-color:#fda4af}
 .procedure-montant-pill.proc-injonction{background:#ccfbf1;color:#0f766e;border-color:#5eead4}
 .procedure-montant-pill.proc-autre{background:#fee2e2;color:#b91c1c;border-color:#fca5a5}
@@ -3120,6 +3147,11 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   background:#ffedd5;
   color:#c2410c;
   border-color:#fdba74;
+}
+.proc-pill.proc-saisie-arret{
+  background:#ffe4e6;
+  color:#be123c;
+  border-color:#fda4af;
 }
 
 .proc-pill.proc-sbien{

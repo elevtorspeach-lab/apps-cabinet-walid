@@ -21,15 +21,17 @@ const SSL_CERT_FILE = process.env.SSL_CERT_FILE || path.join(SSL_DIR, 'local.crt
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const FIXED_TEAM_USERS = [
-  { id: 1, username: 'manager', role: 'manager' },
-  { id: 2, username: 'walid', role: 'manager' },
-  { id: 3, username: 'admin1', role: 'admin' },
-  { id: 4, username: 'admin2', role: 'admin' },
-  { id: 5, username: 'admin3', role: 'admin' },
-  { id: 6, username: 'admin4', role: 'admin' },
-  { id: 7, username: 'admin5', role: 'admin' },
-  { id: 8, username: 'admin6', role: 'admin' }
+  { id: 1, username: 'manager', role: 'manager', password: '1234' },
+  { id: 2, username: 'walid', role: 'manager', password: 'messi@123' },
+  { id: 3, username: 'ghita', role: 'admin', password: 'ghita@2110' },
+  { id: 4, username: 'doha', role: 'admin', password: 'sahi@345' },
+  { id: 5, username: 'najwa', role: 'admin', password: 'najwa@1234' },
+  { id: 6, username: 'yasmine', role: 'admin', password: 'yasmine@092' },
+  { id: 7, username: 'souhaila', role: 'admin', password: 'souhaila@192' }
 ];
+const FIXED_TEAM_USER_PASSWORDS = new Map(
+  FIXED_TEAM_USERS.map((user) => [String(user.username || '').trim().toLowerCase(), String(user.password || '')])
+);
 const PASSWORD_HASH_ITERATIONS = 120000;
 const PASSWORD_MIN_LENGTH = 1;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -133,7 +135,7 @@ function buildBootstrapUsers() {
   return FIXED_TEAM_USERS.map((user) => ({
     id: user.id,
     username: user.username,
-    password: DEFAULT_MANAGER_PASSWORD,
+    password: user.password,
     passwordHash: '',
     passwordSalt: '',
     passwordVersion: 0,
@@ -158,12 +160,11 @@ function ensureManagerUser(users) {
   );
   return buildBootstrapUsers().map((seedUser) => {
     const existingUser = existingUsers.get(String(seedUser.username || '').trim().toLowerCase());
-    return {
-      ...(existingUser && typeof existingUser === 'object' ? existingUser : {}),
+    const bootstrapUser = {
       ...seedUser,
       username: seedUser.username,
       role: seedUser.role,
-      password: DEFAULT_MANAGER_PASSWORD,
+      password: seedUser.password,
       passwordHash: '',
       passwordSalt: '',
       passwordVersion: 0,
@@ -171,6 +172,34 @@ function ensureManagerUser(users) {
       requirePasswordChange: false,
       clientIds: []
     };
+    if (!existingUser || typeof existingUser !== 'object') {
+      return bootstrapUser;
+    }
+
+    const mergedUser = {
+      ...bootstrapUser,
+      ...existingUser,
+      id: seedUser.id,
+      username: seedUser.username,
+      role: seedUser.role,
+      clientIds: []
+    };
+
+    if (!hasAnyStoredPassword(existingUser)) {
+      return bootstrapUser;
+    }
+
+    if (hasStoredPasswordHash(existingUser)) {
+      mergedUser.password = '';
+      return mergedUser;
+    }
+
+    mergedUser.password = normalizeLoginPassword(existingUser.password || '')
+      ? String(existingUser.password || '')
+      : seedUser.password;
+    mergedUser.passwordHash = '';
+    mergedUser.passwordSalt = '';
+    return mergedUser;
   });
 }
 
@@ -221,8 +250,8 @@ function verifyServerUserPassword(user, rawPassword) {
   const normalizedPassword = normalizeLoginPassword(rawPassword);
   if (!user || !normalizedPassword) return false;
   
-  // Emergency fallback for 'manager' user
-  if (String(user.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME && normalizedPassword === normalizeLoginPassword(DEFAULT_MANAGER_PASSWORD)) return true;
+  const fixedTeamPassword = FIXED_TEAM_USER_PASSWORDS.get(String(user.username || '').trim().toLowerCase());
+  if (fixedTeamPassword && normalizedPassword === normalizeLoginPassword(fixedTeamPassword)) return true;
 
   if (hasStoredPasswordHash(user)) {
     try {
@@ -295,7 +324,22 @@ function requireApiAuth(req, res, next) {
 
 app.use(express.json({ limit: '250mb' }));
 app.use(express.static(WEB_DIR, {
-  index: false
+  index: false,
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, filePath) => {
+    const lower = String(filePath || '').toLowerCase();
+    if(
+      lower.endsWith('.html')
+      || lower.endsWith('.js')
+      || lower.endsWith('.css')
+    ){
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
+    }
+  }
 }));
 
 async function ensureDataFile() {
@@ -785,6 +829,12 @@ async function maybeWriteBackupSnapshot(state) {
 
 async function writeStateSnapshot(safeState, options = {}) {
   await db.saveFullState(safeState);
+  let persistedState = safeState;
+  try {
+    persistedState = await db.loadFullState();
+  } catch (err) {
+    console.warn('Failed to reload hydrated state after snapshot save, using in-memory snapshot.', err);
+  }
   if (options.clearJournal !== false) {
     if (pendingSnapshotFlushTimer) {
       clearTimeout(pendingSnapshotFlushTimer);
@@ -793,8 +843,8 @@ async function writeStateSnapshot(safeState, options = {}) {
     pendingJournalMutationCount = 0;
     cachedJournalEntries = [];
   }
-  setCachedState(safeState);
-  return safeState;
+  setCachedState(persistedState);
+  return persistedState;
 }
 
 async function writeState(nextState, options = {}) {

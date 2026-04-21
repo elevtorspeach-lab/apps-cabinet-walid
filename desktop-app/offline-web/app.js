@@ -15809,7 +15809,8 @@ function renderClients(options = {}){
 
   const canUseWorker = !!getClientFilterWorker() && allVisibleClients.length >= 200;
   const scheduleRowsRender = (rows, loadingMessage = 'Chargement des clients...')=>{
-    if(!shouldDeferHeavySectionRender(rows.length, options)){
+    const visibleRowCount = paginateRows(rows, 'clients').rows.length;
+    if(!shouldDeferHeavySectionRender(visibleRowCount, options)){
       renderRows(rows);
       return;
     }
