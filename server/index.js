@@ -158,7 +158,9 @@ function ensureManagerUser(users) {
       .map((user) => [String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username]) => username)
   );
-  return buildBootstrapUsers().map((seedUser) => {
+  const seedUsers = buildBootstrapUsers();
+  const fixedUsernames = new Set(seedUsers.map((user) => String(user?.username || '').trim().toLowerCase()).filter(Boolean));
+  const mergedFixedUsers = seedUsers.map((seedUser) => {
     const existingUser = existingUsers.get(String(seedUser.username || '').trim().toLowerCase());
     const bootstrapUser = {
       ...seedUser,
@@ -201,6 +203,49 @@ function ensureManagerUser(users) {
     mergedUser.passwordSalt = '';
     return mergedUser;
   });
+  let nextId = mergedFixedUsers.reduce((max, user) => Math.max(max, Number(user?.id) || 0), 0) + 1;
+  const usedIds = new Set(mergedFixedUsers.map((user) => Number(user?.id)).filter((id) => Number.isFinite(id)));
+  const extraUsers = (Array.isArray(users) ? users : [])
+    .filter((user) => user && typeof user === 'object')
+    .map((user) => ({ ...user }))
+    .filter((user) => {
+      const username = String(user?.username || '').trim().toLowerCase();
+      return username && !fixedUsernames.has(username);
+    })
+    .map((user) => {
+      const role = String(user?.role || '').trim().toLowerCase() || 'client';
+      const normalizedClientIds = role === 'client'
+        ? [...new Set((Array.isArray(user?.clientIds) ? user.clientIds : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value)))]
+        : [];
+      let userId = Number(user?.id);
+      if (!Number.isFinite(userId) || usedIds.has(userId)) {
+        userId = nextId++;
+      }
+      usedIds.add(userId);
+      const normalizedUser = {
+        ...user,
+        id: userId,
+        username: String(user?.username || '').trim(),
+        role,
+        clientIds: normalizedClientIds
+      };
+      if (hasStoredPasswordHash(user)) {
+        normalizedUser.password = '';
+        return normalizedUser;
+      }
+      normalizedUser.password = normalizeLoginPassword(user?.password || '')
+        ? String(user.password || '')
+        : DEFAULT_MANAGER_PASSWORD;
+      normalizedUser.passwordHash = '';
+      normalizedUser.passwordSalt = '';
+      normalizedUser.passwordVersion = Number(user?.passwordVersion) || 0;
+      normalizedUser.passwordUpdatedAt = String(user?.passwordUpdatedAt || '');
+      normalizedUser.requirePasswordChange = user?.requirePasswordChange === true;
+      return normalizedUser;
+    });
+  return [...mergedFixedUsers, ...extraUsers];
 }
 
 function isBootstrapSetupRequired(state) {
@@ -291,6 +336,12 @@ function createAuthSession(user) {
   };
   authSessions.set(token, session);
   return session;
+}
+
+function normalizeTeamRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'manager' || role === 'admin' || role === 'client') return role;
+  return 'client';
 }
 
 function cleanupAuthSessions() {
@@ -825,6 +876,54 @@ async function maybeWriteBackupSnapshot(state) {
   lastBackupAt = now;
   lastBackupSignature = signature;
   await pruneBackupFiles();
+}
+
+function countStateDossiers(state) {
+  const clients = Array.isArray(state?.clients) ? state.clients : [];
+  return clients.reduce((sum, client) => {
+    const dossiers = Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
+    return sum + dossiers;
+  }, 0);
+}
+
+function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
+  const type = String(mutation?.type || '').trim();
+  const body = mutation?.body && typeof mutation.body === 'object' ? mutation.body : {};
+
+  if (type === 'clients') {
+    const action = String(body?.action || '').trim().toLowerCase();
+    return action === 'delete' || action === 'delete-all';
+  }
+
+  if (type === 'dossier') {
+    const action = String(body?.action || '').trim().toLowerCase();
+    return action === 'delete';
+  }
+
+  if (type === 'users') {
+    const previousCount = Array.isArray(currentState?.users) ? currentState.users.length : 0;
+    const nextCount = Array.isArray(nextState?.users) ? nextState.users.length : 0;
+    return nextCount < previousCount;
+  }
+
+  if (type === 'salle-assignments') {
+    const previousCount = Array.isArray(currentState?.salleAssignments) ? currentState.salleAssignments.length : 0;
+    const nextCount = Array.isArray(nextState?.salleAssignments) ? nextState.salleAssignments.length : 0;
+    return nextCount < previousCount;
+  }
+
+  if (type === 'replace') {
+    const next = nextState && typeof nextState === 'object' ? nextState : {};
+    const previousClients = Array.isArray(currentState?.clients) ? currentState.clients.length : 0;
+    const nextClients = Array.isArray(next?.clients) ? next.clients.length : 0;
+    const previousUsers = Array.isArray(currentState?.users) ? currentState.users.length : 0;
+    const nextUsers = Array.isArray(next?.users) ? next.users.length : 0;
+    const previousDossiers = countStateDossiers(currentState);
+    const nextDossiers = countStateDossiers(next);
+    return nextClients < previousClients || nextUsers < previousUsers || nextDossiers < previousDossiers;
+  }
+
+  return false;
 }
 
 async function writeStateSnapshot(safeState, options = {}) {
@@ -1482,6 +1581,9 @@ function scheduleSnapshotFlush(delayMs = SERVER_SNAPSHOT_FLUSH_DELAY_MS) {
 async function persistJournalMutation(mutation, options = {}) {
   const currentState = await readState();
   const saved = applyMutationToState(currentState, mutation);
+  if (shouldCreateSafetyBackup(currentState, mutation, saved)) {
+    await maybeWriteBackupSnapshot(currentState);
+  }
   await appendMutationJournalEntry(buildJournalMutationEntry(saved, mutation, options));
   if (mutation?.type === 'users') {
     await db.saveUsersState(saved?.users, {
@@ -1514,6 +1616,7 @@ async function persistJournalMutations(mutations, options = {}) {
     throw new Error('No mutations to persist.');
   }
   let saved = await readState();
+  const originalState = saved;
   const journalEntries = [];
   const safePatches = Array.isArray(options.patches) ? options.patches : [];
   for (let index = 0; index < safeMutations.length; index += 1) {
@@ -1523,6 +1626,9 @@ async function persistJournalMutations(mutations, options = {}) {
       patchKind: options.patchKind,
       patch: safePatches[index]
     }));
+  }
+  if (safeMutations.some((mutation) => shouldCreateSafetyBackup(originalState, mutation, saved))) {
+    await maybeWriteBackupSnapshot(originalState);
   }
   if (!Array.isArray(cachedJournalEntries)) {
     cachedJournalEntries = [];
@@ -1779,6 +1885,79 @@ app.post('/api/auth/login', async (req, res) => {
   });
 });
 
+app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
+  try {
+    if (String(req.authSession?.role || '').trim().toLowerCase() !== 'manager') {
+      return sendJsonError(res, 403, 'FORBIDDEN', 'Manager access required.');
+    }
+    await ensureDataFile();
+    const body = getRequestBodyObject(req);
+    const state = await readState();
+    const users = ensureManagerUser(Array.isArray(state?.users) ? state.users : []);
+    const requestedId = Number(body?.id);
+    const requestedUsername = String(body?.username || '').trim();
+    const requestedPassword = normalizeLoginPassword(body?.password || '');
+    const requestedRole = normalizeTeamRole(body?.role || 'client');
+    const requestedClientIds = requestedRole === 'client'
+      ? [...new Set((Array.isArray(body?.clientIds) ? body.clientIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0))]
+      : [];
+
+    if (!requestedUsername) {
+      return sendJsonError(res, 400, 'INVALID_USERNAME', 'Username obligatoire');
+    }
+    if (requestedRole === 'client' && !requestedClientIds.length) {
+      return sendJsonError(res, 400, 'INVALID_CLIENTS', 'Choisir au moins un client pour ce compte client');
+    }
+
+    const existingIndex = users.findIndex((user) => (
+      (Number.isFinite(requestedId) && Number(user?.id) === requestedId)
+      || String(user?.username || '').trim().toLowerCase() === requestedUsername.toLowerCase()
+    ));
+    const existingUser = existingIndex >= 0 ? users[existingIndex] : null;
+    const nextId = existingUser
+      ? Number(existingUser.id)
+      : users.reduce((max, user) => Math.max(max, Number(user?.id) || 0), 0) + 1;
+
+    const usernameTaken = users.some((user) => (
+      String(user?.username || '').trim().toLowerCase() === requestedUsername.toLowerCase()
+      && Number(user?.id) !== Number(nextId)
+    ));
+    if (usernameTaken) {
+      return sendJsonError(res, 400, 'USERNAME_TAKEN', 'Username déjà utilisé');
+    }
+
+    let nextUser = {
+      ...(existingUser && typeof existingUser === 'object' ? existingUser : {}),
+      id: nextId,
+      username: requestedUsername,
+      role: requestedRole,
+      clientIds: requestedClientIds,
+      requirePasswordChange: false
+    };
+
+    if (!existingUser && !requestedPassword) {
+      return sendJsonError(res, 400, 'INVALID_PASSWORD', 'Mot de passe obligatoire');
+    }
+
+    if (requestedPassword) {
+      nextUser = secureServerUserPassword(nextUser, requestedPassword, { requirePasswordChange: false });
+    }
+
+    await db.upsertUserState(nextUser, {
+      version: Number(state?.version || 0) + 1,
+      updatedAt: new Date().toISOString()
+    });
+
+    const refreshed = await db.loadFullState();
+    setCachedState(refreshed);
+    return res.json({ ok: true, user: nextUser });
+  } catch (err) {
+    return sendJsonError(res, 500, 'TEAM_USER_UPSERT_FAILED', 'Team user save failed.', err);
+  }
+});
+
 app.use('/api/state', requireApiAuth);
 
 app.get('/api/state', async (req, res) => {
@@ -1942,7 +2121,25 @@ app.post('/api/state', async (req, res) => {
       const statePayload = { ...body };
       delete statePayload._sourceId;
       delete statePayload._baseVersion;
-      const saved = await writeState(statePayload, { previousState: currentState });
+      const explicitUsers = Array.isArray(statePayload.users)
+        ? ensureManagerUser(statePayload.users)
+        : null;
+      let saved = await writeState(statePayload, { previousState: currentState });
+      if (explicitUsers) {
+        await db.saveUsersState(explicitUsers, {
+          version: saved?.version,
+          updatedAt: saved?.updatedAt
+        });
+        try {
+          saved = await db.loadFullState();
+        } catch {
+          saved = {
+            ...saved,
+            users: explicitUsers
+          };
+        }
+        setCachedState(saved);
+      }
       broadcastStateUpdated({ ...saved, sourceId });
       return { saved };
     });
@@ -2078,7 +2275,7 @@ app.post('/api/state/users', async (req, res) => {
       if (baseVersion !== null && Number(currentState?.version || 0) !== baseVersion) {
         return { conflict: true, state: currentState };
       }
-      const nextUsers = sanitizePatchArray(body?.users);
+      const nextUsers = ensureManagerUser(sanitizePatchArray(body?.users));
       const saved = await persistJournalMutation({
         type: 'users',
         body: { users: nextUsers }

@@ -9,6 +9,8 @@ const http = require('http');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const SERVER_DIR = path.join(ROOT_DIR, 'server');
 const SERVER_ENTRY = path.join(SERVER_DIR, 'index.js');
+require(path.join(SERVER_DIR, 'node_modules', 'dotenv')).config({ path: path.join(SERVER_DIR, '.env') });
+const db = require(path.join(SERVER_DIR, 'db'));
 const DATA_DIR = path.join(SERVER_DIR, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const JOURNAL_FILE = path.join(DATA_DIR, 'state.journal');
@@ -27,6 +29,7 @@ const TARGET_CLIENTS = Number(process.env.TARGET_CLIENTS || 300);
 const TARGET_DOSSIERS = Number(process.env.TARGET_DOSSIERS || 40000);
 const TARGET_AUDIENCE = Number(process.env.TARGET_AUDIENCE || 60000);
 const TARGET_DILIGENCE = Number(process.env.TARGET_DILIGENCE || 40000);
+const USE_FIXED_APP_USERS = String(process.env.BENCH_USE_FIXED_APP_USERS || '1').trim() !== '0';
 const TEST_DURATION_MS = Number(process.env.BENCH_DURATION_MS || (15 * 60 * 1000));
 const SESSION_OPEN_BATCH = 4;
 const SESSION_OPEN_PAUSE_MS = 1500;
@@ -45,6 +48,19 @@ const REPORT_FILE = path.join(RUN_DIR, 'report.json');
 const PROGRESS_FILE = path.join(RUN_DIR, 'progress.json');
 const SERVER_STDOUT_FILE = path.join(RUN_DIR, 'server.stdout.log');
 const SERVER_STDERR_FILE = path.join(RUN_DIR, 'server.stderr.log');
+
+const FIXED_MANAGER_USERS = [
+  { username: 'manager', role: 'manager', password: '1234' },
+  { username: 'walid', role: 'manager', password: 'messi@123' }
+];
+
+const FIXED_ADMIN_USERS = [
+  { username: 'ghita', role: 'admin', password: 'ghita@2110' },
+  { username: 'doha', role: 'admin', password: 'sahi@345' },
+  { username: 'najwa', role: 'admin', password: 'najwa@1234' },
+  { username: 'yasmine', role: 'admin', password: 'yasmine@092' },
+  { username: 'souhaila', role: 'admin', password: 'souhaila@192' }
+];
 
 const MONITOR_INIT_SCRIPT = `
 (() => {
@@ -270,11 +286,11 @@ function addExtraAudienceProcedures(state, targetAudienceCount) {
 function buildUsers(clients) {
   const users = [];
   let nextId = 1;
-  const pushUser = (username, role, clientIds = []) => {
+  const pushUser = (username, role, password, clientIds = []) => {
     users.push({
       id: nextId++,
       username,
-      password: '1234',
+      password,
       passwordHash: '',
       passwordSalt: '',
       passwordVersion: 0,
@@ -284,15 +300,30 @@ function buildUsers(clients) {
       clientIds
     });
   };
-  for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
-    pushUser(index === 0 ? 'manager' : `manager${index + 1}`, 'manager', []);
-  }
-  for (let index = 0; index < TOTAL_ADMINS; index += 1) {
-    pushUser(`admin${index + 1}`, 'admin', []);
+  if (USE_FIXED_APP_USERS) {
+    FIXED_MANAGER_USERS.slice(0, TOTAL_MANAGERS).forEach((user) => {
+      pushUser(user.username, user.role, user.password, []);
+    });
+    FIXED_ADMIN_USERS.slice(0, TOTAL_ADMINS).forEach((user) => {
+      pushUser(user.username, user.role, user.password, []);
+    });
+    for (let index = FIXED_MANAGER_USERS.length; index < TOTAL_MANAGERS; index += 1) {
+      pushUser(`manager${index + 1}`, 'manager', '1234', []);
+    }
+    for (let index = FIXED_ADMIN_USERS.length; index < TOTAL_ADMINS; index += 1) {
+      pushUser(`admin${index + 1}`, 'admin', '1234', []);
+    }
+  } else {
+    for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
+      pushUser(index === 0 ? 'manager' : `manager${index + 1}`, 'manager', '1234', []);
+    }
+    for (let index = 0; index < TOTAL_ADMINS; index += 1) {
+      pushUser(`admin${index + 1}`, 'admin', '1234', []);
+    }
   }
   const clientIds = (clients || []).map((client) => Number(client?.id)).filter((id) => Number.isFinite(id));
   for (let index = 0; index < TOTAL_CLIENTS; index += 1) {
-    pushUser(`client${index + 1}`, 'client', clientIds[index] ? [clientIds[index]] : []);
+    pushUser(`client${index + 1}`, 'client', '1234', clientIds[index] ? [clientIds[index]] : []);
   }
   return users;
 }
@@ -323,6 +354,8 @@ async function ensureRunDir() {
 }
 
 async function backupCurrentDataFiles() {
+  await db.initializeDatabase();
+  const dbState = await db.loadFullState();
   const backup = {};
   for (const file of [STATE_FILE, JOURNAL_FILE]) {
     try {
@@ -331,11 +364,18 @@ async function backupCurrentDataFiles() {
       backup[file] = null;
     }
   }
-  return backup;
+  return {
+    dbState,
+    files: backup
+  };
 }
 
 async function restoreCurrentDataFiles(backup) {
-  for (const [file, content] of Object.entries(backup || {})) {
+  if (backup?.dbState) {
+    await db.initializeDatabase();
+    await db.saveFullState(backup.dbState);
+  }
+  for (const [file, content] of Object.entries(backup?.files || {})) {
     if (content === null) {
       await fsp.unlink(file).catch(() => {});
       continue;
@@ -345,6 +385,8 @@ async function restoreCurrentDataFiles(backup) {
 }
 
 async function writeTestData(state) {
+  await db.initializeDatabase();
+  await db.saveFullState(state);
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.writeFile(STATE_FILE, JSON.stringify(state), 'utf8');
   await fsp.writeFile(JOURNAL_FILE, '', 'utf8');
@@ -518,21 +560,56 @@ function buildOperatorProfiles() {
 function createUserPlan() {
   const operatorProfiles = buildOperatorProfiles();
   const users = [];
-  for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
-    users.push({
-      username: index === 0 ? 'manager' : `manager${index + 1}`,
-      password: '1234',
-      role: 'manager',
-      profile: operatorProfiles[index]
+  if (USE_FIXED_APP_USERS) {
+    FIXED_MANAGER_USERS.slice(0, TOTAL_MANAGERS).forEach((user, index) => {
+      users.push({
+        username: user.username,
+        password: user.password,
+        role: user.role,
+        profile: operatorProfiles[index]
+      });
     });
-  }
-  for (let index = 0; index < TOTAL_ADMINS; index += 1) {
-    users.push({
-      username: `admin${index + 1}`,
-      password: '1234',
-      role: 'admin',
-      profile: operatorProfiles[TOTAL_MANAGERS + index]
+    FIXED_ADMIN_USERS.slice(0, TOTAL_ADMINS).forEach((user, index) => {
+      users.push({
+        username: user.username,
+        password: user.password,
+        role: user.role,
+        profile: operatorProfiles[TOTAL_MANAGERS + index]
+      });
     });
+    for (let index = FIXED_MANAGER_USERS.length; index < TOTAL_MANAGERS; index += 1) {
+      users.push({
+        username: `manager${index + 1}`,
+        password: '1234',
+        role: 'manager',
+        profile: operatorProfiles[index]
+      });
+    }
+    for (let index = FIXED_ADMIN_USERS.length; index < TOTAL_ADMINS; index += 1) {
+      users.push({
+        username: `admin${index + 1}`,
+        password: '1234',
+        role: 'admin',
+        profile: operatorProfiles[TOTAL_MANAGERS + index]
+      });
+    }
+  } else {
+    for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
+      users.push({
+        username: index === 0 ? 'manager' : `manager${index + 1}`,
+        password: '1234',
+        role: 'manager',
+        profile: operatorProfiles[index]
+      });
+    }
+    for (let index = 0; index < TOTAL_ADMINS; index += 1) {
+      users.push({
+        username: `admin${index + 1}`,
+        password: '1234',
+        role: 'admin',
+        profile: operatorProfiles[TOTAL_MANAGERS + index]
+      });
+    }
   }
   for (let index = 0; index < TOTAL_CLIENTS; index += 1) {
     users.push({

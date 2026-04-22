@@ -11,10 +11,42 @@ const TARGET_DILIGENCE = Number(process.env.TARGET_DILIGENCE || 8_000);
 const TOTAL_MANAGERS = Number(process.env.TOTAL_MANAGERS || 1);
 const TOTAL_ADMINS = Number(process.env.TOTAL_ADMINS || 8);
 const TOTAL_CLIENT_USERS = Number(process.env.TOTAL_CLIENT_USERS || 2);
+const USE_FIXED_APP_USERS = String(process.env.BENCH_USE_FIXED_APP_USERS || '1').trim() !== '0';
 const OUTPUT_FILE = path.resolve(process.env.OUTPUT_FILE || path.join(ROOT_DIR, 'bench-runs', `fixture-${Date.now()}.json`));
+
+const FIXED_MANAGER_USERS = [
+  { username: 'manager', role: 'manager', password: '1234' },
+  { username: 'walid', role: 'manager', password: 'messi@123' }
+];
+
+const FIXED_ADMIN_USERS = [
+  { username: 'ghita', role: 'admin', password: 'ghita@2110' },
+  { username: 'doha', role: 'admin', password: 'sahi@345' },
+  { username: 'najwa', role: 'admin', password: 'najwa@1234' },
+  { username: 'yasmine', role: 'admin', password: 'yasmine@092' },
+  { username: 'souhaila', role: 'admin', password: 'souhaila@192' }
+];
+
+const DEFAULT_CLIENT_NAMES = [
+  'Eqdom',
+  'Salafin',
+  'Sanlam',
+  'Saham Assurance',
+  'SOFAC'
+];
 
 function log(message) {
   console.log(`[fixture] ${message}`);
+}
+
+function resolveBenchClientNames() {
+  const raw = String(process.env.BENCH_CLIENT_NAMES || '').trim();
+  if (!raw) return DEFAULT_CLIENT_NAMES;
+  const names = raw
+    .split(/[|,;]/)
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return names.length ? names : DEFAULT_CLIENT_NAMES;
 }
 
 function parseProcedureToken(token) {
@@ -53,11 +85,11 @@ function isDiligenceProcedure(procName) {
 function buildUsers(clientIds) {
   const users = [];
   let nextId = 1;
-  const pushUser = (username, role, assignedClientIds = []) => {
+  const pushUser = (username, role, password, assignedClientIds = []) => {
     users.push({
       id: nextId++,
       username,
-      password: '1234',
+      password,
       passwordHash: '',
       passwordSalt: '',
       passwordVersion: 0,
@@ -68,21 +100,37 @@ function buildUsers(clientIds) {
     });
   };
 
-  for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
-    pushUser(index === 0 ? 'manager' : `manager${index + 1}`, 'manager', []);
-  }
-  for (let index = 0; index < TOTAL_ADMINS; index += 1) {
-    pushUser(`admin${index + 1}`, 'admin', []);
+  if (USE_FIXED_APP_USERS) {
+    FIXED_MANAGER_USERS.slice(0, TOTAL_MANAGERS).forEach((user) => {
+      pushUser(user.username, user.role, user.password, []);
+    });
+    FIXED_ADMIN_USERS.slice(0, TOTAL_ADMINS).forEach((user) => {
+      pushUser(user.username, user.role, user.password, []);
+    });
+    for (let index = FIXED_MANAGER_USERS.length; index < TOTAL_MANAGERS; index += 1) {
+      pushUser(`manager${index + 1}`, 'manager', '1234', []);
+    }
+    for (let index = FIXED_ADMIN_USERS.length; index < TOTAL_ADMINS; index += 1) {
+      pushUser(`admin${index + 1}`, 'admin', '1234', []);
+    }
+  } else {
+    for (let index = 0; index < TOTAL_MANAGERS; index += 1) {
+      pushUser(index === 0 ? 'manager' : `manager${index + 1}`, 'manager', '1234', []);
+    }
+    for (let index = 0; index < TOTAL_ADMINS; index += 1) {
+      pushUser(`admin${index + 1}`, 'admin', '1234', []);
+    }
   }
   for (let index = 0; index < TOTAL_CLIENT_USERS; index += 1) {
     const targetClientId = clientIds[index % Math.max(1, clientIds.length)] || null;
-    pushUser(`client${index + 1}`, 'client', targetClientId ? [targetClientId] : []);
+    pushUser(`client${index + 1}`, 'client', '1234', targetClientId ? [targetClientId] : []);
   }
 
   return users;
 }
 
 function generateFixture() {
+  const benchClientNames = resolveBenchClientNames();
   const diligenceProcedures = ['ASS', 'Commandement', 'SFDC', 'S/bien', 'Injonction'];
   const tribunals = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Agadir', 'Oujda', 'Meknès'];
   const villes = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Kenitra', 'Tétouan', 'Safi'];
@@ -163,7 +211,7 @@ function generateFixture() {
 
     clients.push({
       id: clientId,
-      name: `Client Bench ${String(clientId).padStart(2, '0')}`,
+      name: benchClientNames[clientIndex] || `Client Bench ${String(clientId).padStart(2, '0')}`,
       dossiers
     });
   }

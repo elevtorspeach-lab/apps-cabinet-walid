@@ -38,7 +38,7 @@ function EquipeSection() {
             <div className="form-group full" style={{ display: 'flex', gap: '8px', flexDirection: 'row' }}>
               <button id="teamSaveBtn" className="btn-success"><i className="fa-solid fa-floppy-disk"></i> Enregistrer</button>
               <button id="teamResetBtn" className="btn-primary" type="button"><i className="fa-solid fa-rotate-left"></i> Réinitialiser</button>
-              <button id="teamProvisionStructureBtn" className="btn-primary" type="button"><i className="fa-solid fa-users-gear"></i> Structure 2G / 10A / 9C</button>
+              <button id="teamProvisionStructureBtn" className="btn-primary" type="button"><i className="fa-solid fa-users-gear"></i> Structure 2G / 5A / 0C</button>
             </div>
           </div>
         </div>

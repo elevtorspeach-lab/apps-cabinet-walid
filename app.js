@@ -4588,6 +4588,75 @@ function canManageTeam(){
   return isManager();
 }
 
+let viewerReadonlyUiObserver = null;
+
+function setViewerLockedControlState(el, disabled = true){
+  if(!el) return;
+  if(disabled){
+    el.disabled = true;
+    if('readOnly' in el) el.readOnly = true;
+    if(el.dataset.viewerLockHide === '1'){
+      el.style.display = 'none';
+    }
+    return;
+  }
+  el.disabled = false;
+  if('readOnly' in el) el.readOnly = false;
+  if(el.dataset.viewerLockHide === '1'){
+    el.style.display = '';
+  }
+}
+
+function applyViewerReadOnlyUi(root = document){
+  if(!root || !currentUser) return;
+  const targets = [
+    '#audienceSection .color-btn',
+    '#filterAudienceColor',
+    '#audienceErrorsBtn',
+    '#undoAudienceColorBtn',
+    '#saveAudienceBtn',
+    '#audienceTableContainer .audience-inline-input',
+    '#audienceTableContainer .audience-inline-select',
+    '#audienceTableContainer input[data-field]',
+    '#audienceTableContainer select[data-field]',
+    '#diligenceTableContainer .diligence-inline-input',
+    '#diligenceTableContainer .diligence-inline-select',
+    '#suiviBody button[data-action="edit"]',
+    '#suiviBody button[data-action="delete"]',
+    '#dossierModal button[onclick*="deleteDossier("]',
+    '#dossierModal button[onclick*="editDossier("]'
+  ];
+  targets.forEach((selector)=>{
+    root.querySelectorAll(selector).forEach((el)=>{
+      if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
+        el.dataset.viewerLockHide = '1';
+      }
+      if(el.matches('#suiviBody button[data-action="edit"], #suiviBody button[data-action="delete"], #dossierModal button[onclick*="deleteDossier("], #dossierModal button[onclick*="editDossier("]')){
+        el.dataset.viewerLockHide = '1';
+      }
+      setViewerLockedControlState(el, isViewer());
+    });
+  });
+}
+
+function syncViewerReadOnlyUiObserver(){
+  if(viewerReadonlyUiObserver){
+    viewerReadonlyUiObserver.disconnect();
+    viewerReadonlyUiObserver = null;
+  }
+  if(!isViewer()) return;
+  const root = $('appContent') || document.body;
+  if(!root || typeof MutationObserver === 'undefined') return;
+  viewerReadonlyUiObserver = new MutationObserver(()=>{
+    applyViewerReadOnlyUi(document);
+  });
+  viewerReadonlyUiObserver.observe(root, {
+    childList: true,
+    subtree: true
+  });
+  applyViewerReadOnlyUi(document);
+}
+
 function getAccessibleViewsForCurrentUser(){
   if(!currentUser){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'equipe', 'recycle']);
@@ -4598,7 +4667,7 @@ function getAccessibleViewsForCurrentUser(){
   if(isAdmin()){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle']);
   }
-  return new Set(['dashboard', 'suivi']);
+  return new Set(['dashboard', 'suivi', 'audience', 'diligence']);
 }
 
 function getFallbackViewForCurrentUser(){
@@ -8273,6 +8342,7 @@ function deleteGlobalImportBatch(batchId){
   const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import global introuvable.');
   if(!window.confirm(`Supprimer l'import global "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
+  forceDeletionSafetyBackup('delete-global-import');
 
   const createdClientIds = new Set((batch.createdClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
   let removedDossiers = 0;
@@ -8305,6 +8375,7 @@ function deleteAudienceImportBatch(batchId){
   const batch = getImportHistoryEntriesByType('audience').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import audience introuvable.');
   if(!window.confirm(`Supprimer l'import audience "${batch.fileName}" ?\nLes données audience importées par ce fichier seront retirées.`)) return;
+  forceDeletionSafetyBackup('delete-audience-import');
 
   const operationMap = new Map((batch.operations || []).map(op=>[`${op.dossierUid}::${op.procKey}`, op]));
   const orphanClientIds = new Set((batch.createdOrphanClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
@@ -8980,6 +9051,7 @@ function clearRecycleBinToBackup(){
   const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
   if(!items.length) return alert('Corbeille vide');
   if(!window.confirm(`Vider la corbeille (${items.length} élément(s)) ?\nLes éléments seront gardés dans le backup interne.`)) return;
+  forceDeletionSafetyBackup('clear-recycle-bin');
   pushRecycleArchiveEntries(items);
   AppState.recycleBin = [];
   queuePersistAppState();
@@ -9605,7 +9677,9 @@ function ensureManagerUser(users){
       .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username])=>username)
   );
-  return buildSeedUsers().map((seedUser)=>{
+  const seedUsers = buildSeedUsers();
+  const fixedUsernames = new Set(seedUsers.map((user)=>String(user?.username || '').trim().toLowerCase()).filter(Boolean));
+  const mergedFixedUsers = seedUsers.map((seedUser)=>{
     const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
     const bootstrapUser = {
       ...seedUser,
@@ -9643,6 +9717,49 @@ function ensureManagerUser(users){
     mergedUser.passwordSalt = '';
     return mergedUser;
   });
+  let nextId = mergedFixedUsers.reduce((max, user)=>Math.max(max, Number(user?.id) || 0), 0) + 1;
+  const usedIds = new Set(mergedFixedUsers.map((user)=>Number(user?.id)).filter((id)=>Number.isFinite(id)));
+  const extraUsers = (Array.isArray(users) ? users : [])
+    .filter((user)=>user && typeof user === 'object')
+    .map((user)=>({ ...user }))
+    .filter((user)=>{
+      const username = String(user?.username || '').trim().toLowerCase();
+      return username && !fixedUsernames.has(username);
+    })
+    .map((user)=>{
+      const role = String(user?.role || '').trim().toLowerCase() || 'client';
+      const normalizedClientIds = role === 'client'
+        ? [...new Set((Array.isArray(user?.clientIds) ? user.clientIds : [])
+          .map((value)=>Number(value))
+          .filter((value)=>Number.isFinite(value)))]
+        : [];
+      let userId = Number(user?.id);
+      if(!Number.isFinite(userId) || usedIds.has(userId)){
+        userId = nextId++;
+      }
+      usedIds.add(userId);
+      const normalizedUser = {
+        ...user,
+        id: userId,
+        username: String(user?.username || '').trim(),
+        role,
+        clientIds: normalizedClientIds
+      };
+      if(hasStoredPasswordHash(user)){
+        normalizedUser.password = '';
+        return normalizedUser;
+      }
+      normalizedUser.password = normalizeLoginPassword(user?.password || '')
+        ? String(user.password || '')
+        : STANDARD_TEAM_DEFAULT_PASSWORD;
+      normalizedUser.passwordHash = '';
+      normalizedUser.passwordSalt = '';
+      normalizedUser.passwordVersion = Number(user?.passwordVersion) || 0;
+      normalizedUser.passwordUpdatedAt = String(user?.passwordUpdatedAt || '');
+      normalizedUser.requirePasswordChange = user?.requirePasswordChange === true;
+      return normalizedUser;
+    });
+  return [...mergedFixedUsers, ...extraUsers];
 }
 
 function buildStateSignature(clients, salleAssignments, users, draft, recycleBin, recycleArchive, importHistory){
@@ -10706,6 +10823,22 @@ async function createAutoBackupSnapshot(payload, options = {}){
   return true;
 }
 
+function forceDeletionSafetyBackup(source = 'delete'){
+  const snapshot = buildAppStatePayload();
+  createAutoBackupSnapshot(snapshot, {
+    source,
+    force: true,
+    signature: ''
+  }).catch((err)=>{
+    console.warn('Impossible de creer le backup de securite avant suppression', err);
+  });
+  queueDesktopStateFilePersist(snapshot, {
+    signature: '',
+    force: true
+  });
+  return snapshot;
+}
+
 function writeStateToLocalStorage(payload){
   if(typeof localStorage === 'undefined') return false;
   try{
@@ -11093,7 +11226,6 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
   const payload = buildAppStatePayload();
   const routeBySlice = {
     audienceDraft: '/state/audience-draft',
-    users: '/state/users',
     salleAssignments: '/state/salle-assignments'
   };
   const pathname = routeBySlice[sliceKey];
@@ -15855,6 +15987,8 @@ function applyRoleUI(options = {}){
   const audienceEditable = canEditData();
   document.querySelectorAll('.color-btn').forEach(btn=> btn.disabled = !audienceEditable);
   if($('saveAudienceBtn')) $('saveAudienceBtn').style.display = audienceEditable ? '' : 'none';
+  syncViewerReadOnlyUiObserver();
+  applyViewerReadOnlyUi(document);
 
   if(skipNavigation) return;
   if(!getAccessibleViewsForCurrentUser().has(String(currentView || '').trim())){
@@ -16065,6 +16199,7 @@ function deleteClient(clientId){
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
   if(!window.confirm(warning)) return;
+  forceDeletionSafetyBackup('delete-client');
 
   pushRecycleBinEntry('client_delete', {
     client: JSON.parse(JSON.stringify(client || {})),
@@ -16103,6 +16238,7 @@ function deleteAllClients(){
     `Supprimer TOUS les clients (${totalClients}) et TOUS les dossiers (${totalDossiers}) ?\n\n`
     + 'Cette action est irréversible.';
   if(!window.confirm(warning)) return;
+  forceDeletionSafetyBackup('delete-all-clients');
 
   pushRecycleBinEntry('all_clients_delete', {
     clients: JSON.parse(JSON.stringify(AppState.clients || [])),
@@ -16932,6 +17068,7 @@ function deleteDossier(clientId, index){
   if(!dossier) return;
   const ref = dossier.referenceClient || dossier.debiteur || `#${index + 1}`;
   if(!window.confirm(`Supprimer définitivement le dossier "${ref}" ?`)) return;
+  forceDeletionSafetyBackup('delete-dossier');
   pushRecycleBinEntry('dossier_delete', {
     clientId: client.id,
     clientName: client.name || '',
@@ -19310,7 +19447,7 @@ function filterTeamClientList(){
   let visibleCount = 0;
   items.forEach(item=>{
     const name = String(item.dataset.clientName || '');
-    const visible = q ? name.includes(q) : false;
+    const visible = q ? name.includes(q) : true;
     item.style.display = visible ? '' : 'none';
     if(visible) visibleCount += 1;
   });
@@ -19484,11 +19621,14 @@ async function provisionStandardTeamStructure(){
 async function saveTeamUser(){
   if(!canManageTeam()) return alert('Accès refusé');
   const username = $('teamUsername')?.value?.trim() || '';
-  const password = normalizeLoginPassword($('teamPassword')?.value?.trim() || '');
   const role = normalizeUserRole($('teamRole')?.value || 'client');
+  const rawPassword = normalizeLoginPassword($('teamPassword')?.value?.trim() || '');
+  const password = role === 'client'
+    ? (rawPassword || STANDARD_TEAM_DEFAULT_PASSWORD)
+    : rawPassword;
   if(!username) return alert('Username obligatoire');
   if(!editingTeamUserId && !password) return alert('Mot de passe obligatoire');
-  if(password){
+  if(password && role !== 'client'){
     const passwordPolicyError = getPasswordPolicyError(password);
     if(passwordPolicyError) return alert(passwordPolicyError);
   }
@@ -19505,6 +19645,8 @@ async function saveTeamUser(){
   );
   if(usernameTaken) return alert('Username déjà utilisé');
 
+  const previousUsersSnapshot = JSON.parse(JSON.stringify(USERS));
+  const isEditing = !!editingTeamUserId;
   if(editingTeamUserId){
     const userIndex = USERS.findIndex(u=>u.id === editingTeamUserId);
     if(userIndex === -1) return;
@@ -19540,10 +19682,19 @@ async function saveTeamUser(){
     USERS.push(nextUser);
   }
   USERS = ensureManagerUser(USERS);
-  await persistStateSliceNow('users', USERS, { source: 'team' });
+  try{
+    await persistStateSliceNow('users', USERS, { source: 'team' });
+  }catch(err){
+    USERS = previousUsersSnapshot;
+    syncCurrentUserFromUsers();
+    renderEquipe();
+    console.error('Impossible d’enregistrer le compte équipe', err);
+    return alert('Impossible d’enregistrer le compte. Vérifie le client sélectionné puis réessaie.');
+  }
   syncCurrentUserFromUsers();
   renderEquipe();
   resetTeamForm();
+  alert(isEditing ? 'Compte mis Ã  jour avec succÃ¨s.' : 'Compte crÃ©Ã© avec succÃ¨s.');
 }
 
 function editTeamUser(userId){
@@ -19576,6 +19727,7 @@ function deleteTeamUser(userId){
   if(currentUser?.id === userId){
     return alert('Impossible de supprimer l’utilisateur connecté');
   }
+  forceDeletionSafetyBackup('delete-team-user');
   USERS = USERS.filter(u=>u.id !== userId);
   persistStateSliceNow('users', USERS, { source: 'team' }).catch(()=>{});
   renderEquipe();
@@ -19671,6 +19823,7 @@ function addSalleJudge(){
 
 function deleteSalleJudge(id){
   if(!canEditData()) return alert('Accès refusé');
+  forceDeletionSafetyBackup('delete-salle-judge');
   AppState.salleAssignments = AppState.salleAssignments.filter(row=>Number(row.id) !== Number(id));
   invalidateSalleAssignmentsCaches();
   persistStateSliceNow('salleAssignments', AppState.salleAssignments, { source: 'salle' }).catch(()=>{});
@@ -21495,6 +21648,9 @@ function hasAudienceProcedureData(procData, draftData, dossier){
   if(isProtectedManualDossier(dossier)) return true;
   if(getAudiencePurpleStatusSnapshot(dossier)) return true;
   const fields = [
+    d.refDossier,
+    p.referenceClient,
+    dossier?.referenceClient,
     d.dateAudience,
     p.audience,
     d.juge,
@@ -21523,7 +21679,7 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
       const key = makeAudienceDraftKey(clientIndex, dossierIndex, procKey);
       const draft = audienceDraft[key] || {};
       if(!hasAudienceProcedureData(p, draft, dossier)) return;
-      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || '').trim();
+      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || dossier?.referenceClient || '').trim();
       const refDossier = normalizeAudienceDossierLookupKey(draftReferenceValue);
       if(!refDossier) return;
       const procedureNorm = String(procKey || '').trim().toLowerCase();

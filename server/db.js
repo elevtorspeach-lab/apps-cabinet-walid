@@ -624,6 +624,48 @@ async function saveUsersState(users, meta = {}) {
   }
 }
 
+async function upsertUserState(user, meta = {}) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const userId = normalizeDatabaseId(user?.id);
+    if (userId === null) {
+      throw new Error('Invalid user ID.');
+    }
+    const { id, username, passwordHash, passwordSalt, role, ...rest } = user || {};
+    await runQuery(
+      connection,
+      `
+        INSERT INTO users (id, username, passwordHash, passwordSalt, role, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          username = VALUES(username),
+          passwordHash = VALUES(passwordHash),
+          passwordSalt = VALUES(passwordSalt),
+          role = VALUES(role),
+          data = VALUES(data)
+      `,
+      [
+        String(userId),
+        String(username || '').trim(),
+        String(passwordHash || ''),
+        String(passwordSalt || ''),
+        String(role || ''),
+        serializeJsonValue(rest, {})
+      ],
+      `Upsert user ${String(username || userId)}`
+    );
+    await saveStateMetadata(connection, meta);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    logDatabaseError('User upsert failed', error, { username: user?.username || '', id: user?.id || null });
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 async function applyDossierMutation(patch, meta = {}) {
   const connection = await pool.getConnection();
   const action = String(patch?.action || '').trim().toLowerCase();
@@ -790,6 +832,7 @@ module.exports = {
   loadFullState,
   saveFullState,
   saveUsersState,
+  upsertUserState,
   applyDossierMutation,
   batchUpdateDossiers
 };

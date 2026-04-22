@@ -4677,6 +4677,75 @@ function canManageTeam(){
   return isManager();
 }
 
+let viewerReadonlyUiObserver = null;
+
+function setViewerLockedControlState(el, disabled = true){
+  if(!el) return;
+  if(disabled){
+    el.disabled = true;
+    if('readOnly' in el) el.readOnly = true;
+    if(el.dataset.viewerLockHide === '1'){
+      el.style.display = 'none';
+    }
+    return;
+  }
+  el.disabled = false;
+  if('readOnly' in el) el.readOnly = false;
+  if(el.dataset.viewerLockHide === '1'){
+    el.style.display = '';
+  }
+}
+
+function applyViewerReadOnlyUi(root = document){
+  if(!root || !currentUser) return;
+  const targets = [
+    '#audienceSection .color-btn',
+    '#filterAudienceColor',
+    '#audienceErrorsBtn',
+    '#undoAudienceColorBtn',
+    '#saveAudienceBtn',
+    '#audienceTableContainer .audience-inline-input',
+    '#audienceTableContainer .audience-inline-select',
+    '#audienceTableContainer input[data-field]',
+    '#audienceTableContainer select[data-field]',
+    '#diligenceTableContainer .diligence-inline-input',
+    '#diligenceTableContainer .diligence-inline-select',
+    '#suiviBody button[data-action="edit"]',
+    '#suiviBody button[data-action="delete"]',
+    '#dossierModal button[onclick*="deleteDossier("]',
+    '#dossierModal button[onclick*="editDossier("]'
+  ];
+  targets.forEach((selector)=>{
+    root.querySelectorAll(selector).forEach((el)=>{
+      if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
+        el.dataset.viewerLockHide = '1';
+      }
+      if(el.matches('#suiviBody button[data-action="edit"], #suiviBody button[data-action="delete"], #dossierModal button[onclick*="deleteDossier("], #dossierModal button[onclick*="editDossier("]')){
+        el.dataset.viewerLockHide = '1';
+      }
+      setViewerLockedControlState(el, isViewer());
+    });
+  });
+}
+
+function syncViewerReadOnlyUiObserver(){
+  if(viewerReadonlyUiObserver){
+    viewerReadonlyUiObserver.disconnect();
+    viewerReadonlyUiObserver = null;
+  }
+  if(!isViewer()) return;
+  const root = $('appContent') || document.body;
+  if(!root || typeof MutationObserver === 'undefined') return;
+  viewerReadonlyUiObserver = new MutationObserver(()=>{
+    applyViewerReadOnlyUi(document);
+  });
+  viewerReadonlyUiObserver.observe(root, {
+    childList: true,
+    subtree: true
+  });
+  applyViewerReadOnlyUi(document);
+}
+
 function getAccessibleViewsForCurrentUser(){
   if(!currentUser){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'equipe', 'recycle']);
@@ -4687,7 +4756,7 @@ function getAccessibleViewsForCurrentUser(){
   if(isAdmin()){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle']);
   }
-  return new Set(['dashboard', 'suivi']);
+  return new Set(['dashboard', 'suivi', 'audience', 'diligence']);
 }
 
 function getFallbackViewForCurrentUser(){
@@ -9692,7 +9761,9 @@ function ensureManagerUser(users){
       .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username])=>username)
   );
-  return buildSeedUsers().map((seedUser)=>{
+  const seedUsers = buildSeedUsers();
+  const fixedUsernames = new Set(seedUsers.map((user)=>String(user?.username || '').trim().toLowerCase()).filter(Boolean));
+  const mergedFixedUsers = seedUsers.map((seedUser)=>{
     const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
     const bootstrapUser = {
       ...seedUser,
@@ -9730,6 +9801,49 @@ function ensureManagerUser(users){
     mergedUser.passwordSalt = '';
     return mergedUser;
   });
+  let nextId = mergedFixedUsers.reduce((max, user)=>Math.max(max, Number(user?.id) || 0), 0) + 1;
+  const usedIds = new Set(mergedFixedUsers.map((user)=>Number(user?.id)).filter((id)=>Number.isFinite(id)));
+  const extraUsers = (Array.isArray(users) ? users : [])
+    .filter((user)=>user && typeof user === 'object')
+    .map((user)=>({ ...user }))
+    .filter((user)=>{
+      const username = String(user?.username || '').trim().toLowerCase();
+      return username && !fixedUsernames.has(username);
+    })
+    .map((user)=>{
+      const role = String(user?.role || '').trim().toLowerCase() || 'client';
+      const normalizedClientIds = role === 'client'
+        ? [...new Set((Array.isArray(user?.clientIds) ? user.clientIds : [])
+          .map((value)=>Number(value))
+          .filter((value)=>Number.isFinite(value)))]
+        : [];
+      let userId = Number(user?.id);
+      if(!Number.isFinite(userId) || usedIds.has(userId)){
+        userId = nextId++;
+      }
+      usedIds.add(userId);
+      const normalizedUser = {
+        ...user,
+        id: userId,
+        username: String(user?.username || '').trim(),
+        role,
+        clientIds: normalizedClientIds
+      };
+      if(hasStoredPasswordHash(user)){
+        normalizedUser.password = '';
+        return normalizedUser;
+      }
+      normalizedUser.password = normalizeLoginPassword(user?.password || '')
+        ? String(user.password || '')
+        : STANDARD_TEAM_DEFAULT_PASSWORD;
+      normalizedUser.passwordHash = '';
+      normalizedUser.passwordSalt = '';
+      normalizedUser.passwordVersion = Number(user?.passwordVersion) || 0;
+      normalizedUser.passwordUpdatedAt = String(user?.passwordUpdatedAt || '');
+      normalizedUser.requirePasswordChange = user?.requirePasswordChange === true;
+      return normalizedUser;
+    });
+  return [...mergedFixedUsers, ...extraUsers];
 }
 
 function buildStateSignature(clients, salleAssignments, users, draft, recycleBin, recycleArchive, importHistory){
@@ -11126,7 +11240,6 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
   const payload = buildAppStatePayload();
   const routeBySlice = {
     audienceDraft: '/state/audience-draft',
-    users: '/state/users',
     salleAssignments: '/state/salle-assignments'
   };
   const pathname = routeBySlice[sliceKey];
@@ -15762,6 +15875,8 @@ function applyRoleUI(options = {}){
   const audienceEditable = canEditData();
   document.querySelectorAll('.color-btn').forEach(btn=> btn.disabled = !audienceEditable);
   if($('saveAudienceBtn')) $('saveAudienceBtn').style.display = audienceEditable ? '' : 'none';
+  syncViewerReadOnlyUiObserver();
+  applyViewerReadOnlyUi(document);
 
   if(skipNavigation) return;
   if(!getAccessibleViewsForCurrentUser().has(String(currentView || '').trim())){
@@ -19327,7 +19442,7 @@ function filterTeamClientList(){
   let visibleCount = 0;
   items.forEach(item=>{
     const name = String(item.dataset.clientName || '');
-    const visible = q ? name.includes(q) : false;
+    const visible = q ? name.includes(q) : true;
     item.style.display = visible ? '' : 'none';
     if(visible) visibleCount += 1;
   });
@@ -19501,11 +19616,14 @@ async function provisionStandardTeamStructure(){
 async function saveTeamUser(){
   if(!canManageTeam()) return alert('Accès refusé');
   const username = $('teamUsername')?.value?.trim() || '';
-  const password = normalizeLoginPassword($('teamPassword')?.value?.trim() || '');
   const role = normalizeUserRole($('teamRole')?.value || 'client');
+  const rawPassword = normalizeLoginPassword($('teamPassword')?.value?.trim() || '');
+  const password = role === 'client'
+    ? (rawPassword || STANDARD_TEAM_DEFAULT_PASSWORD)
+    : rawPassword;
   if(!username) return alert('Username obligatoire');
   if(!editingTeamUserId && !password) return alert('Mot de passe obligatoire');
-  if(password){
+  if(password && role !== 'client'){
     const passwordPolicyError = getPasswordPolicyError(password);
     if(passwordPolicyError) return alert(passwordPolicyError);
   }
@@ -19522,45 +19640,38 @@ async function saveTeamUser(){
   );
   if(usernameTaken) return alert('Username déjà utilisé');
 
-  if(editingTeamUserId){
-    const userIndex = USERS.findIndex(u=>u.id === editingTeamUserId);
-    if(userIndex === -1) return;
-    const user = USERS[userIndex];
-    let nextUser = { ...user };
-    if(isDefaultManagerUser(user)){
-      nextUser.username = DEFAULT_MANAGER_USERNAME;
-      nextUser.role = 'manager';
-      nextUser.clientIds = [];
-    }else{
-      nextUser.username = username;
-      nextUser.role = role;
-      nextUser.clientIds = finalClientIds;
+  const isEditing = !!editingTeamUserId;
+  
+  try{
+    const res = await fetchWithTimeout(`${API_BASE}/team/users/upsert`, {
+      method: 'POST',
+      headers: buildRemoteAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        id: editingTeamUserId || undefined,
+        username,
+        password,
+        role,
+        clientIds: finalClientIds
+      })
+    });
+    if(res.status === 401){
+      handleUnauthorizedRemoteSession();
+      return;
     }
-    if(password){
-      nextUser = await secureUserPassword(nextUser, password, { requirePasswordChange: false });
+    const payload = await res.json().catch(()=>({}));
+    if(!res.ok){
+      return alert(payload?.message || 'Impossible dâ€™enregistrer le compte.');
     }
-    USERS[userIndex] = nextUser;
-  }else{
-    let nextUser = {
-      id: Date.now(),
-      username,
-      password: '',
-      passwordHash: '',
-      passwordSalt: '',
-      passwordVersion: 0,
-      passwordUpdatedAt: '',
-      requirePasswordChange: false,
-      role,
-      clientIds: finalClientIds
-    };
-    nextUser = await secureUserPassword(nextUser, password, { requirePasswordChange: false });
-    USERS.push(nextUser);
+    await loadPersistedState();
+    USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+  }catch(err){
+    console.error('Impossible d’enregistrer le compte équipe', err);
+    return alert('Impossible d’enregistrer le compte. Vérifie le client sélectionné puis réessaie.');
   }
-  USERS = ensureManagerUser(USERS);
-  await persistStateSliceNow('users', USERS, { source: 'team' });
   syncCurrentUserFromUsers();
   renderEquipe();
   resetTeamForm();
+  alert(isEditing ? 'Compte mis Ã  jour avec succÃ¨s.' : 'Compte crÃ©Ã© avec succÃ¨s.');
 }
 
 function editTeamUser(userId){
@@ -21525,6 +21636,9 @@ function hasAudienceProcedureData(procData, draftData, dossier){
   if(isProtectedManualDossier(dossier)) return true;
   if(getAudiencePurpleStatusSnapshot(dossier)) return true;
   const fields = [
+    d.refDossier,
+    p.referenceClient,
+    dossier?.referenceClient,
     d.dateAudience,
     p.audience,
     d.juge,
@@ -21553,7 +21667,7 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
       const key = makeAudienceDraftKey(clientIndex, dossierIndex, procKey);
       const draft = audienceDraft[key] || {};
       if(!hasAudienceProcedureData(p, draft, dossier)) return;
-      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || '').trim();
+      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || dossier?.referenceClient || '').trim();
       const refDossier = normalizeAudienceDossierLookupKey(draftReferenceValue);
       if(!refDossier) return;
       const procedureNorm = String(procKey || '').trim().toLowerCase();
