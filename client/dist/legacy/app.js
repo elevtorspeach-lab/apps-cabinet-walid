@@ -9761,9 +9761,7 @@ function ensureManagerUser(users){
       .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username])=>username)
   );
-  const seedUsers = buildSeedUsers();
-  const fixedUsernames = new Set(seedUsers.map((user)=>String(user?.username || '').trim().toLowerCase()).filter(Boolean));
-  const mergedFixedUsers = seedUsers.map((seedUser)=>{
+  return buildSeedUsers().map((seedUser)=>{
     const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
     const bootstrapUser = {
       ...seedUser,
@@ -9801,49 +9799,6 @@ function ensureManagerUser(users){
     mergedUser.passwordSalt = '';
     return mergedUser;
   });
-  let nextId = mergedFixedUsers.reduce((max, user)=>Math.max(max, Number(user?.id) || 0), 0) + 1;
-  const usedIds = new Set(mergedFixedUsers.map((user)=>Number(user?.id)).filter((id)=>Number.isFinite(id)));
-  const extraUsers = (Array.isArray(users) ? users : [])
-    .filter((user)=>user && typeof user === 'object')
-    .map((user)=>({ ...user }))
-    .filter((user)=>{
-      const username = String(user?.username || '').trim().toLowerCase();
-      return username && !fixedUsernames.has(username);
-    })
-    .map((user)=>{
-      const role = String(user?.role || '').trim().toLowerCase() || 'client';
-      const normalizedClientIds = role === 'client'
-        ? [...new Set((Array.isArray(user?.clientIds) ? user.clientIds : [])
-          .map((value)=>Number(value))
-          .filter((value)=>Number.isFinite(value)))]
-        : [];
-      let userId = Number(user?.id);
-      if(!Number.isFinite(userId) || usedIds.has(userId)){
-        userId = nextId++;
-      }
-      usedIds.add(userId);
-      const normalizedUser = {
-        ...user,
-        id: userId,
-        username: String(user?.username || '').trim(),
-        role,
-        clientIds: normalizedClientIds
-      };
-      if(hasStoredPasswordHash(user)){
-        normalizedUser.password = '';
-        return normalizedUser;
-      }
-      normalizedUser.password = normalizeLoginPassword(user?.password || '')
-        ? String(user.password || '')
-        : STANDARD_TEAM_DEFAULT_PASSWORD;
-      normalizedUser.passwordHash = '';
-      normalizedUser.passwordSalt = '';
-      normalizedUser.passwordVersion = Number(user?.passwordVersion) || 0;
-      normalizedUser.passwordUpdatedAt = String(user?.passwordUpdatedAt || '');
-      normalizedUser.requirePasswordChange = user?.requirePasswordChange === true;
-      return normalizedUser;
-    });
-  return [...mergedFixedUsers, ...extraUsers];
 }
 
 function buildStateSignature(clients, salleAssignments, users, draft, recycleBin, recycleArchive, importHistory){
@@ -19640,31 +19595,49 @@ async function saveTeamUser(){
   );
   if(usernameTaken) return alert('Username déjà utilisé');
 
+  const previousUsersSnapshot = JSON.parse(JSON.stringify(USERS));
   const isEditing = !!editingTeamUserId;
-  
+  if(editingTeamUserId){
+    const userIndex = USERS.findIndex(u=>u.id === editingTeamUserId);
+    if(userIndex === -1) return;
+    const user = USERS[userIndex];
+    let nextUser = { ...user };
+    if(isDefaultManagerUser(user)){
+      nextUser.username = DEFAULT_MANAGER_USERNAME;
+      nextUser.role = 'manager';
+      nextUser.clientIds = [];
+    }else{
+      nextUser.username = username;
+      nextUser.role = role;
+      nextUser.clientIds = finalClientIds;
+    }
+    if(password){
+      nextUser = await secureUserPassword(nextUser, password, { requirePasswordChange: false });
+    }
+    USERS[userIndex] = nextUser;
+  }else{
+    let nextUser = {
+      id: Date.now(),
+      username,
+      password: '',
+      passwordHash: '',
+      passwordSalt: '',
+      passwordVersion: 0,
+      passwordUpdatedAt: '',
+      requirePasswordChange: false,
+      role,
+      clientIds: finalClientIds
+    };
+    nextUser = await secureUserPassword(nextUser, password, { requirePasswordChange: false });
+    USERS.push(nextUser);
+  }
+  USERS = ensureManagerUser(USERS);
   try{
-    const res = await fetchWithTimeout(`${API_BASE}/team/users/upsert`, {
-      method: 'POST',
-      headers: buildRemoteAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        id: editingTeamUserId || undefined,
-        username,
-        password,
-        role,
-        clientIds: finalClientIds
-      })
-    });
-    if(res.status === 401){
-      handleUnauthorizedRemoteSession();
-      return;
-    }
-    const payload = await res.json().catch(()=>({}));
-    if(!res.ok){
-      return alert(payload?.message || 'Impossible dâ€™enregistrer le compte.');
-    }
-    await loadPersistedState();
-    USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
+    await persistStateSliceNow('users', USERS, { source: 'team' });
   }catch(err){
+    USERS = previousUsersSnapshot;
+    syncCurrentUserFromUsers();
+    renderEquipe();
     console.error('Impossible d’enregistrer le compte équipe', err);
     return alert('Impossible d’enregistrer le compte. Vérifie le client sélectionné puis réessaie.');
   }
