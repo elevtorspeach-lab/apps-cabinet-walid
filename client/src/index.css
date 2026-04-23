@@ -142,6 +142,28 @@ body{
   color:#87a0c7;
   font-size:14px;
 }
+.password-toggle-btn{
+  border:none;
+  background:transparent;
+  color:#87a0c7;
+  width:32px;
+  height:32px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  flex:0 0 auto;
+  transition:background .2s ease, color .2s ease;
+}
+.password-toggle-btn:hover{
+  background:rgba(79,140,255,.14);
+  color:#dbeafe;
+}
+.password-toggle-btn:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(79,140,255,.24);
+}
 .login-input-wrap:focus-within{
   border-color:#4f8cff;
   background:linear-gradient(180deg,#10224c,#0f1e44);

@@ -22,6 +22,9 @@ function LoginScreen() {
         <div className="login-input-wrap">
           <i className="fa-solid fa-key"></i>
           <input type="password" id="password" placeholder="Entrer votre mot de passe" />
+          <button id="togglePasswordVisibilityBtn" className="password-toggle-btn" type="button" aria-label="Afficher le mot de passe" title="Afficher le mot de passe">
+            <i id="togglePasswordVisibilityIcon" className="fa-regular fa-eye"></i>
+          </button>
         </div>
 
         <button id="loginBtn" className="btn-success login-submit">Se connecter</button>
