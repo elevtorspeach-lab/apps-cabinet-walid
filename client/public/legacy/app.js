@@ -19994,7 +19994,7 @@ function filterTeamClientList(){
   let visibleCount = 0;
   items.forEach(item=>{
     const name = String(item.dataset.clientName || '');
-    const visible = q ? name.includes(q) : true;
+    const visible = q ? name.includes(q) : false;
     item.style.display = visible ? '' : 'none';
     if(visible) visibleCount += 1;
   });
