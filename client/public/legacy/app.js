@@ -5204,6 +5204,12 @@ function applyViewerReadOnlyUi(root = document){
   ];
   targets.forEach((selector)=>{
     root.querySelectorAll(selector).forEach((el)=>{
+      if(isViewer() && el.id === 'filterAudienceColor'){
+        el.dataset.viewerLockHide = '0';
+        el.style.display = '';
+        setViewerLockedControlState(el, false);
+        return;
+      }
       if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
         el.dataset.viewerLockHide = '1';
       }
@@ -15823,6 +15829,13 @@ function setupEvents(){
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
     const previousColor = normalizeAudienceFilterColorValue(filterAudienceColor);
     const nextColor = normalizeAudienceFilterColorValue(e.target.value);
+    if(isViewer()){
+      filterAudienceColor = nextColor;
+      clearAudiencePrintSelection({ immediate: true });
+      syncAudienceColorFilterSelectAppearance();
+      renderAudience();
+      return;
+    }
     const previousIsOrdonnanceColor = previousColor === 'green' || previousColor === 'yellow';
     const nextIsOrdonnanceColor = nextColor === 'green' || nextColor === 'yellow';
     filterAudienceColor = nextColor;
