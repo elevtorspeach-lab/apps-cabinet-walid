@@ -871,6 +871,7 @@ async function maybeWriteBackupSnapshot(state) {
     savedAt: new Date(now).toISOString(),
     ...state
   };
+  await fsp.mkdir(BACKUP_DIR, { recursive: true });
   const backupPath = path.join(BACKUP_DIR, buildBackupFileName(new Date(now)));
   await fsp.writeFile(backupPath, JSON.stringify(snapshot, null, 2), 'utf8');
   lastBackupAt = now;

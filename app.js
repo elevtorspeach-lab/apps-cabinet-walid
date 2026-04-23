@@ -4810,6 +4810,7 @@ function canManageTeam(){
 }
 
 let viewerReadonlyUiObserver = null;
+const VIEWER_AUDIENCE_FILTER_COLORS = new Set(['all', 'white']);
 
 function setViewerLockedControlState(el, disabled = true){
   if(!el) return;
@@ -4849,7 +4850,25 @@ function applyViewerReadOnlyUi(root = document){
   ];
   targets.forEach((selector)=>{
     root.querySelectorAll(selector).forEach((el)=>{
-      if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
+      if(isViewer() && el.matches('#audienceSection .color-btn')){
+        const color = String(el.dataset?.color || '').trim();
+        if(VIEWER_AUDIENCE_FILTER_COLORS.has(color)){
+          el.dataset.viewerLockHide = '0';
+          el.style.display = '';
+          setViewerLockedControlState(el, false);
+          return;
+        }
+        el.dataset.viewerLockHide = '1';
+        setViewerLockedControlState(el, true);
+        return;
+      }
+      if(isViewer() && el.id === 'audienceErrorsBtn'){
+        el.dataset.viewerLockHide = '0';
+        el.style.display = '';
+        setViewerLockedControlState(el, false);
+        return;
+      }
+      if(el.id === 'saveAudienceBtn' || el.id === 'undoAudienceColorBtn'){
         el.dataset.viewerLockHide = '1';
       }
       if(el.matches('#suiviBody button[data-action="edit"], #suiviBody button[data-action="delete"], #dossierModal button[onclick*="deleteDossier("], #dossierModal button[onclick*="editDossier("]')){
@@ -13351,7 +13370,7 @@ function showExcelImportResult(summary, issuesText){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
+  const allowed = ['all', 'white', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
@@ -13363,7 +13382,7 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  const allowed = new Set(['all', 'white', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
@@ -13416,6 +13435,19 @@ function syncAudienceColorActionAvailability(){
   }
   buttons.forEach((btn)=>{
     const color = String(btn?.dataset?.color || '').trim();
+    if(isViewer()){
+      const allowedViewerFilter = VIEWER_AUDIENCE_FILTER_COLORS.has(color);
+      btn.disabled = !allowedViewerFilter;
+      btn.classList.toggle('is-disabled', !allowedViewerFilter);
+      btn.style.display = allowedViewerFilter ? '' : 'none';
+      if(allowedViewerFilter){
+        btn.removeAttribute('aria-disabled');
+        btn.removeAttribute('title');
+      }else{
+        btn.setAttribute('aria-disabled', 'true');
+      }
+      return;
+    }
     const shouldDisable = !hasSelection && color !== 'all';
     btn.disabled = shouldDisable;
     btn.classList.toggle('is-disabled', shouldDisable);
@@ -15738,6 +15770,22 @@ function setupEvents(){
   audienceColorButtons.forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const color = btn.dataset.color;
+      if(isViewer()){
+        if(!VIEWER_AUDIENCE_FILTER_COLORS.has(color)) return;
+        filterAudienceErrorsOnly = false;
+        const errBtn = $('audienceErrorsBtn');
+        if(errBtn) errBtn.classList.remove('active');
+        clearAudiencePrintSelection({ immediate: true });
+        filterAudienceCheckedFirst = false;
+        if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
+        filterAudienceColor = color;
+        const colorSel = $('filterAudienceColor');
+        if(colorSel) colorSel.value = color;
+        setSelectedAudienceColor(color, false);
+        syncAudienceColorFilterSelectAppearance();
+        renderAudience();
+        return;
+      }
       if(color === 'all'){
         filterAudienceErrorsOnly = false;
         const errBtn = $('audienceErrorsBtn');
