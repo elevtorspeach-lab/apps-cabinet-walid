@@ -14,8 +14,6 @@ const DEFAULT_SERVER_HOST = '192.168.1.11';
 const SERVER_RETRY_INTERVAL_MS = 4000;
 
 const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
-const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '0').trim();
-const DESKTOP_LOAD_MODE = String(process.env.CABINET_DESKTOP_LOAD_MODE || 'server').trim().toLowerCase();
 let desktopServerStartPromise = null;
 
 function escapeHtml(value) {
@@ -365,18 +363,7 @@ async function createWindow() {
     }
   });
 
-  const loadLocalDesktopApp = async (apiBase = 'http://127.0.0.1:3000/api') => {
-    const appIndexPath = await resolveAppIndexPath();
-    return win.loadFile(appIndexPath, {
-      query: {
-        apiBase,
-        localOnly: DESKTOP_REMOTE_LOCAL_ONLY,
-        desktop: '1'
-      }
-    });
-  };
-
-  if (DESKTOP_LOAD_MODE === 'server') {
+  {
     const resolvedHost = readConfiguredServerHost() || DEFAULT_SERVER_HOST;
     const appUrl = `http://${resolvedHost}:3000`;
     let retryTimer = null;
@@ -423,21 +410,7 @@ async function createWindow() {
     });
 
     win.on('closed', clearRetryTimer);
-    const remoteApiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost(resolvedHost)).trim();
-
-    win.webContents.once('desktop-disabled-did-fail-load', (_event, errorCode, errorDescription) => {
-      const message = encodeURIComponent(
-        `Serveur introuvable: ${appUrl}\n${errorCode} - ${errorDescription}\nVérifiez que le serveur Cabinet est démarré sur ${resolvedHost}:3000.`
-      );
-      win.loadURL(`data:text/plain;charset=utf-8,${message}`).catch(() => {});
-    });
-
     await tryLoadServer();
-  } else {
-    const apiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost('127.0.0.1')).trim();
-    await loadLocalDesktopApp(apiBase).catch((err) => {
-      console.error('Unable to load local desktop app.', err);
-    });
   }
 
   win.once('ready-to-show', () => {
