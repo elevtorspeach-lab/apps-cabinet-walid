@@ -4810,6 +4810,11 @@ function canManageTeam(){
 }
 
 let viewerReadonlyUiObserver = null;
+const VIEWER_AUDIENCE_SORT_FILTER_OPTIONS = [
+  ['all', 'Tous'],
+  ['white', 'Blanc'],
+  ['error', 'Erreur']
+];
 
 function setViewerLockedControlState(el, disabled = true){
   if(!el) return;
@@ -4849,6 +4854,13 @@ function applyViewerReadOnlyUi(root = document){
   ];
   targets.forEach((selector)=>{
     root.querySelectorAll(selector).forEach((el)=>{
+      if(isViewer() && el.id === 'filterAudienceColor'){
+        el.dataset.viewerLockHide = '0';
+        el.style.display = '';
+        setViewerLockedControlState(el, false);
+        syncAudienceColorFilterSelectAppearance();
+        return;
+      }
       if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
         el.dataset.viewerLockHide = '1';
       }
@@ -13351,9 +13363,38 @@ function showExcelImportResult(summary, issuesText){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
+  if(isViewer()){
+    const normalizedViewerValue = normalizeAudienceFilterColorValue(filterAudienceColor);
+    const selected = VIEWER_AUDIENCE_SORT_FILTER_OPTIONS.some(([value])=>value === normalizedViewerValue)
+      ? normalizedViewerValue
+      : 'all';
+    if(filterAudienceColor !== selected) filterAudienceColor = selected;
+    const nextHtml = VIEWER_AUDIENCE_SORT_FILTER_OPTIONS
+      .map(([value, label])=>`<option value="${value}">${label}</option>`)
+      .join('');
+    if(select.dataset.viewerOptions !== '1' || select.innerHTML !== nextHtml){
+      select.innerHTML = nextHtml;
+      select.dataset.viewerOptions = '1';
+    }
+    select.value = selected;
+    return;
+  }
+  if(select.dataset.viewerOptions === '1'){
+    select.innerHTML = [
+      '<option value="all">Toutes</option>',
+      '<option value="blue">Att sort</option>',
+      '<option value="green">ATT ORD</option>',
+      '<option value="yellow">ORD OK</option>',
+      '<option value="document-ok">Document OK</option>',
+      '<option value="closed">Soldé / Arrêt définitif</option>'
+    ].join('');
+    delete select.dataset.viewerOptions;
+  }
   const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
-  const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
+  const normalizedValue = ['white', 'error'].includes(normalizeAudienceFilterColorValue(filterAudienceColor))
+    ? 'all'
+    : normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
   select.value = normalizedValue;
 }
@@ -13363,7 +13404,7 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  const allowed = new Set(['all', 'white', 'error', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
@@ -15653,6 +15694,16 @@ function setupEvents(){
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
     const previousColor = normalizeAudienceFilterColorValue(filterAudienceColor);
     const nextColor = normalizeAudienceFilterColorValue(e.target.value);
+    if(isViewer()){
+      filterAudienceColor = nextColor;
+      filterAudienceErrorsOnly = nextColor === 'error';
+      const errBtn = $('audienceErrorsBtn');
+      if(errBtn) errBtn.classList.toggle('active', filterAudienceErrorsOnly);
+      clearAudiencePrintSelection({ immediate: true });
+      syncAudienceColorFilterSelectAppearance();
+      renderAudience();
+      return;
+    }
     const previousIsOrdonnanceColor = previousColor === 'green' || previousColor === 'yellow';
     const nextIsOrdonnanceColor = nextColor === 'green' || nextColor === 'yellow';
     filterAudienceColor = nextColor;
@@ -22064,7 +22115,7 @@ function getAudienceRows(options = {}){
   const ignoreColor = !!opts.ignoreColor;
   const q = ignoreSearch ? '' : normalizeCaseInsensitiveSearchText($('filterAudience')?.value || '');
   const baseRows = getAudienceRowsDedupedCached();
-  const noColorFilter = ignoreColor || filterAudienceColor === 'all';
+  const noColorFilter = ignoreColor || filterAudienceColor === 'all' || filterAudienceColor === 'error';
   const noSearchFilter = ignoreSearch || !q;
   const viewKey = [
     ignoreSearch ? '1' : '0',
@@ -22086,7 +22137,7 @@ function getAudienceRows(options = {}){
     : null;
   if(exactMatchedRows){
     const out = exactMatchedRows.filter(row=>{
-      if(!ignoreColor && filterAudienceColor !== 'all' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
+      if(!ignoreColor && filterAudienceColor !== 'all' && filterAudienceColor !== 'error' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
       return true;
     });
     audienceRowsViewCacheSource = baseRows;
@@ -22095,7 +22146,7 @@ function getAudienceRows(options = {}){
     return out;
   }
   const out = baseRows.filter(row=>{
-    if(!ignoreColor && filterAudienceColor !== 'all' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
+    if(!ignoreColor && filterAudienceColor !== 'all' && filterAudienceColor !== 'error' && !audienceRowMatchesColorFilter(row, filterAudienceColor)) return false;
     if(!ignoreSearch && q){
       const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft, row));
       if(!haystack.includes(q)) return false;
@@ -22144,7 +22195,7 @@ function getAudienceAutocompleteSuggestions(query){
   const normalizedQuery = normalizeCaseInsensitiveSearchText(rawQuery);
   if(!normalizedQuery) return [];
   const baseRows = getAudienceRowsDedupedCached();
-  const colorFilteredRows = filterAudienceColor === 'all'
+  const colorFilteredRows = (filterAudienceColor === 'all' || filterAudienceColor === 'error')
     ? baseRows
     : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
   const scopedRows = getFilteredAudienceRows(colorFilteredRows);

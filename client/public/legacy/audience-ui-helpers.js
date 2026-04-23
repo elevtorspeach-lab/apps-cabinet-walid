@@ -96,6 +96,9 @@ function audienceRowMatchesColorFilter(row, color){
   if(targetColor === 'closed'){
     return !!getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   }
+  if(targetColor === 'white'){
+    return !getAudienceRowEffectiveColor(row);
+  }
   if(targetColor === 'green' || targetColor === 'yellow'){
     if(isAudienceRowOrdonnanceColorSuppressed(row)){
       return getAudienceRowEffectiveColor(row) === targetColor;
