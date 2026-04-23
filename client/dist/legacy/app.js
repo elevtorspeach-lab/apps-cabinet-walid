@@ -5098,7 +5098,7 @@ async function refreshServerConnectionStatus(options = {}){
     setPingMetric(null);
     lastLiveDelayMs = null;
     renderSyncMetrics();
-    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible');
+    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible - reconnexion automatique');
     return false;
   }finally{
     remoteSyncHealthCheckInFlight = false;
@@ -5117,7 +5117,7 @@ async function refreshPreLoginServerStatus(){
   }
   setSyncStatus(
     remoteBootstrapSetupRequired ? 'pending' : 'error',
-    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Serveur indisponible'
+    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Serveur indisponible - reconnexion automatique'
   );
   return false;
 }
@@ -11597,7 +11597,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
     }
   }
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     return preserveQueuedRequest ? false : true;
   }
   setSyncStatus('syncing');
@@ -11664,7 +11664,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
     }
 
     remoteServerReachable = false;
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     console.warn('Impossible de sauvegarder sur le serveur', err);
     return preserveQueuedRequest ? false : true;
   }
@@ -11823,7 +11823,7 @@ async function flushSyncQueueNow(){
 
 function updateSyncStatusLabel(){
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     return;
   }
   if(!hasRemoteAuthSession()){
@@ -12286,21 +12286,28 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 }
 
 function startRemoteSync(){
-  if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
-    return;
-  }
   if(!hasRemoteAuthSession()){
     setSyncStatus('pending', 'Connexion serveur en attente');
     return;
   }
   if(remoteSyncTimer) return;
-  startRemoteSyncStream();
+  if(remoteServerReachable){
+    startRemoteSyncStream();
+  }else{
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
+  }
   refreshServerConnectionStatus({ force: true }).catch(()=>{});
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     if(remoteSyncHealthTick === 0){
-      refreshServerConnectionStatus().catch(()=>{});
+      refreshServerConnectionStatus({ force: !remoteServerReachable }).then((connected)=>{
+        if(connected && !remoteSyncStream){
+          startRemoteSyncStream();
+        }
+      }).catch(()=>{});
+    }
+    if(remoteServerReachable && !remoteSyncStream){
+      startRemoteSyncStream();
     }
     if(remoteRefreshPending){
       queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
@@ -15342,7 +15349,7 @@ async function initApplication(){
     console.warn('Résolution API impossible', err);
   }
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
@@ -15400,16 +15407,23 @@ async function bootstrapApplication(){
         await refreshPreLoginServerStatus();
       }catch(err){
         console.warn('Vérification serveur pré-connexion impossible', err);
-        setSyncStatus('error', 'Serveur indisponible');
+        setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
       }
     }
   }catch(err){
     applicationBootFailed = false;
     console.error('Initialisation application impossible', err);
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
   updateSyncStatusLabel();
   setInterval(flushSyncQueueNow, 30000);
+  setInterval(()=>{
+    if(hasRemoteAuthSession()){
+      if(!remoteSyncTimer) startRemoteSync();
+      return;
+    }
+    refreshPreLoginServerStatus().catch(()=>{});
+  }, 5000);
 }
 
 // ================== EVENTS ==================
@@ -16314,7 +16328,7 @@ async function login(){
         refreshRemoteState().catch(()=>{});
       }, 80);
     }else if(remoteLoginState === 'unavailable'){
-      setSyncStatus('error', 'Serveur indisponible');
+      setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     }
 
     const hasVisibleSection = [
