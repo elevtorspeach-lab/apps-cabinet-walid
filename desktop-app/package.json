@@ -7,8 +7,10 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "start:fast": "electron .",
+    "start:server-mode": "electron .",
     "set:server-ip": "node set-server-ip.js",
-    "sync:web-assets": "node scripts/sync-offline-web.mjs",
+    "sync:web-assets": "npm --prefix ../client run build && node scripts/sync-offline-web.mjs",
     "verify:web-assets": "node scripts/validate-offline-sync.mjs",
     "build:mac": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --mac --x64",
     "build:win": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --win portable --x64",

@@ -3934,6 +3934,233 @@ function openSuiviExcelFilePreviewWindow(){
   });
 }
 
+function ensureClientExcelFillControls(){
+  const toolbar = document.querySelector('#suiviSection .suivi-toolbar');
+  if(!toolbar || $('fillClientExcelBtn')) return;
+  const button = document.createElement('button');
+  button.id = 'fillClientExcelBtn';
+  button.className = 'btn-primary';
+  button.type = 'button';
+  button.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client';
+
+  const input = document.createElement('input');
+  input.id = 'fillClientExcelInput';
+  input.type = 'file';
+  input.accept = '.xlsx,.xls';
+  input.style.display = 'none';
+
+  button.addEventListener('click', ()=>input.click());
+  input.addEventListener('change', (event)=>{
+    const file = event.target?.files?.[0];
+    if(file) fillClientExcelFile(file).catch((err)=>{
+      console.error('Remplissage Excel client impossible', err);
+      alert(`Remplissage Excel client impossible.\nDetail: ${String(err?.message || err || 'Erreur inconnue')}`);
+    });
+    input.value = '';
+  });
+
+  const anchor = $('previewSuiviBtn');
+  if(anchor && anchor.parentNode === toolbar){
+    toolbar.insertBefore(button, anchor.nextSibling);
+    toolbar.insertBefore(input, button.nextSibling);
+  }else{
+    toolbar.appendChild(button);
+    toolbar.appendChild(input);
+  }
+}
+
+function normalizeClientFillHeader(value){
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function getClientFillColumnIndex(headers, aliases){
+  const normalizedAliases = new Set((aliases || []).map(normalizeClientFillHeader).filter(Boolean));
+  return (headers || []).findIndex((header)=>normalizedAliases.has(normalizeClientFillHeader(header)));
+}
+
+function normalizeClientFillDebiteur(value){
+  return normalizeCaseInsensitiveSearchText(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function buildClientFillDossierIndex(){
+  const rows = getAllSuiviRows();
+  const refMap = new Map();
+  const all = [];
+  rows.forEach((row)=>{
+    const dossier = row?.d;
+    if(!dossier) return;
+    const entry = {
+      row,
+      client: row.c,
+      dossier,
+      ref: normalizeReferenceValue(dossier.referenceClient || ''),
+      debiteur: normalizeClientFillDebiteur(dossier.debiteur || '')
+    };
+    all.push(entry);
+    if(entry.ref){
+      if(!refMap.has(entry.ref)) refMap.set(entry.ref, []);
+      refMap.get(entry.ref).push(entry);
+    }
+  });
+  return { refMap, all };
+}
+
+function findClientFillMatch(refValue, debiteurValue, index){
+  const safeIndex = index || { refMap: new Map(), all: [] };
+  const ref = normalizeReferenceValue(refValue || '');
+  const debiteur = normalizeClientFillDebiteur(debiteurValue || '');
+  const candidates = ref ? (safeIndex.refMap.get(ref) || []) : safeIndex.all;
+  let best = null;
+  let bestScore = -1;
+  candidates.forEach((entry)=>{
+    let score = 0;
+    if(ref && entry.ref === ref) score += 100;
+    if(debiteur && entry.debiteur === debiteur) score += 60;
+    else if(debiteur && entry.debiteur && (entry.debiteur.includes(debiteur) || debiteur.includes(entry.debiteur))) score += 25;
+    if(score > bestScore){
+      bestScore = score;
+      best = entry;
+    }
+  });
+  return bestScore >= (ref ? 100 : 60) ? best : null;
+}
+
+function collectClientFillProcedureValues(dossier, getter){
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  return Object.entries(details)
+    .map(([procName, procDetails])=>{
+      const value = getter(procDetails || {}, procName);
+      const text = String(value || '').trim();
+      return text ? `${procName}: ${text}` : '';
+    })
+    .filter(Boolean)
+    .join(' | ');
+}
+
+function getClientFillHeaders(){
+  return [
+    'Resultat matching',
+    'Client systeme',
+    'Type',
+    'Reference client systeme',
+    'Debiteur systeme',
+    'Date affectation',
+    'Procedures',
+    'Statut dossier',
+    'Montant',
+    'Ville',
+    'Adresse',
+    'Boite No',
+    'Tribunal',
+    'References procedures',
+    'Audience',
+    'Juge',
+    'Sort',
+    'Ordonnance',
+    'Notification No',
+    'Sort notification',
+    'Certificat non appel',
+    'Execution No',
+    'Delegation',
+    'Huissier',
+    'Sort execution',
+    'Note / Avancement'
+  ];
+}
+
+function buildClientFillOutput(entry){
+  const fillHeaders = getClientFillHeaders();
+  if(!entry) return ['NON TROUVE', ...new Array(Math.max(fillHeaders.length - 1, 0)).fill('')];
+  const { client, dossier } = entry;
+  const procedures = normalizeProcedures(dossier);
+  return [
+    'TROUVE',
+    client?.name || '',
+    dossier?.type || '',
+    dossier?.referenceClient || '',
+    dossier?.debiteur || '',
+    normalizeDateDDMMYYYY(dossier?.dateAffectation || '') || dossier?.dateAffectation || '',
+    procedures.join(', '),
+    dossier?.statut || '',
+    dossier?.montant || '',
+    dossier?.ville || '',
+    dossier?.adresse || '',
+    dossier?.boiteNo || '',
+    collectClientFillProcedureValues(dossier, (p)=>p.tribunal || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.referenceClient || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.audience || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.juge || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.sort || ''),
+    collectClientFillProcedureValues(dossier, (p)=>getDiligenceOrdonnanceLabelFromDetails(p) || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.notificationNo || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.notificationSort || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.certificatNonAppelStatus || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.executionNo || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.attDelegationOuDelegat || p.delegation || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.huissier || p.nomHuissier || ''),
+    collectClientFillProcedureValues(dossier, (p)=>p.sort || ''),
+    [dossier?.note || '', dossier?.avancement || ''].filter(Boolean).join(' | ')
+  ];
+}
+
+async function fillClientExcelFile(file){
+  if(!canExportData()){
+    alert('Acces refuse');
+    return;
+  }
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: false });
+  if(!excelReady) return;
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames?.[0];
+  if(!firstSheetName) return alert('Fichier Excel vide.');
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+  if(!rows.length) return alert('Fichier Excel vide.');
+
+  const headerRowIndex = rows.findIndex((row)=>{
+    const refIdx = getClientFillColumnIndex(row, ['ref client', 'reference client']);
+    const debiteurIdx = getClientFillColumnIndex(row, ['debiteur']);
+    return refIdx !== -1 && debiteurIdx !== -1;
+  });
+  if(headerRowIndex === -1){
+    return alert('Colonnes obligatoires introuvables: Reference client et Debiteur.');
+  }
+
+  const inputHeaders = rows[headerRowIndex].map((value)=>String(value || '').trim());
+  const refIdx = getClientFillColumnIndex(inputHeaders, ['ref client', 'reference client']);
+  const debiteurIdx = getClientFillColumnIndex(inputHeaders, ['debiteur']);
+  const fillHeaders = getClientFillHeaders();
+  const index = buildClientFillDossierIndex();
+  const outputRows = rows.map((row, rowIndex)=>{
+    const base = Array.isArray(row) ? row.slice() : [];
+    if(rowIndex < headerRowIndex) return base;
+    if(rowIndex === headerRowIndex) return [...base, ...fillHeaders];
+    const ref = base[refIdx] || '';
+    const debiteur = base[debiteurIdx] || '';
+    if(!String(ref || '').trim() && !String(debiteur || '').trim()) return base;
+    return [...base, ...buildClientFillOutput(findClientFillMatch(ref, debiteur, index))];
+  });
+
+  const outSheet = XLSX.utils.aoa_to_sheet(outputRows);
+  outSheet['!cols'] = [
+    ...new Array(inputHeaders.length).fill({ wch: 18 }),
+    ...fillHeaders.map(()=>({ wch: 24 }))
+  ];
+  const outWorkbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(outWorkbook, outSheet, 'Excel client rempli');
+  const blob = createXlsxBlobFromWorkbook(outWorkbook);
+  const safeName = String(file?.name || 'excel_client.xlsx').replace(/\.(xlsx|xls)$/i, '');
+  await saveBlobDirectOrDownload(blob, `${safeName}_rempli.xlsx`);
+}
+
 async function exportSuiviSelectedXLS(options = {}){
   if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
@@ -13481,11 +13708,14 @@ async function applyExcelImport(payload, options = {}){
   const importWarningRows = [];
   const importInfoRows = [];
   const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'Sanlam']);
-  const defaultDossierProceduresWhenMissing = ['ASS', 'Restitution', 'SFDC'];
+  const defaultDossierProceduresWhenMissing = diligenceMode
+    ? ['Injonction']
+    : ['ASS', 'Restitution', 'SFDC'];
   let importedDossiersCount = 0;
   let skippedDossiersCount = 0;
   let linkedAudiencesCount = 0;
   let skippedAudiencesCount = 0;
+  let unmatchedAudienceCount = 0;
   const audienceImportSlotMap = new Map();
   const addSkippedImportIssue = (message)=>{
     const text = String(message || '').trim();
@@ -13906,6 +14136,9 @@ async function applyExcelImport(payload, options = {}){
     const procedures = allowedDossierProcedureSet
       ? parsedProcedures.filter(proc=>allowedDossierProcedureSet.has(proc))
       : parsedProcedures;
+    const isStrictInjonctionDiligenceRow = diligenceMode
+      && procedures.length === 1
+      && procedures[0] === 'Injonction';
     if(!procedures.length){
       skippedDossiersCount += 1;
       addSkippedImportIssue(`${rowNumberLabel}: dossier ignoré (aucune procédure valide) - Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${dossierContext}`);
@@ -13974,6 +14207,11 @@ async function applyExcelImport(payload, options = {}){
       const rowRefClientKeys = getClientReferenceMatchKeys(row.refClient || '');
       const rowRefClientKey = rowRefClientKeys[0] || normalizeReferenceValue(row.refClient || '');
       const rowDebiteur = String(row.debiteur || '').trim().toLowerCase();
+      if(isStrictInjonctionDiligenceRow && !rowRefDossierKey){
+        skippedDossiersCount += 1;
+        addSkippedImportIssue(`${rowNumberLabel}: ligne diligence Injonction ignorée (référence dossier vide)`);
+        return;
+      }
 
       let targetCandidates = [];
       if(rowRefDossierKey){
@@ -13999,6 +14237,11 @@ async function applyExcelImport(payload, options = {}){
         if(bestScore >= 60){ // Require at least debiteur match if no ref match
           existingDossierToUpdate = bestCandidate;
         }
+      }
+      if(isStrictInjonctionDiligenceRow && !existingDossierToUpdate){
+        skippedDossiersCount += 1;
+        addSkippedImportIssue(`${rowNumberLabel}: ligne diligence Injonction ignorée (${rowRefDossier || '-'} introuvable dans dossier global)`);
+        return;
       }
     }
 
@@ -14049,7 +14292,11 @@ async function applyExcelImport(payload, options = {}){
 
     const resolveProcedureReference = (proc, explicitRefValue)=>{
       const explicitRef = String(explicitRefValue || '').trim();
-      return explicitRef;
+      if(explicitRef) return explicitRef;
+      if(diligenceMode && proc === 'Injonction'){
+        return String(row.refDossier || '').trim();
+      }
+      return '';
     };
 
     const assReference = resolveProcedureReference('ASS', row.refAssignation);
@@ -14227,7 +14474,10 @@ async function applyExcelImport(payload, options = {}){
       return;
     }
     if(!refKey){
-      // Ignore rows without dossier reference during audience import.
+      skippedAudiencesCount += 1;
+      addSkippedImportIssue(
+        `${rowNumberLabel}: audience non importée (référence dossier vide) - Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${audienceBaseContext}`
+      );
       return;
     }
     const normalizedAudienceDate = normalizeDateDDMMYYYY(row.audience || '');
@@ -14260,7 +14510,11 @@ async function applyExcelImport(payload, options = {}){
       candidates.push(candidate);
     });
     if(!candidates.length){
-      addWarningImportIssue(`${rowNumberLabel}: ${ref || '-'} introuvable dans dossier global${missingRefContext}`);
+      skippedAudiencesCount += 1;
+      unmatchedAudienceCount += 1;
+      addSkippedImportIssue(
+        `${rowNumberLabel}: Matching non trouvé - Réf dossier "${ref || '-'}" introuvable dans dossier global, Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${missingRefContext}`
+      );
       return;
       const fallback = [];
       const fallbackSeen = new Set();
@@ -14326,6 +14580,7 @@ async function applyExcelImport(payload, options = {}){
       match = bestCandidate || activeCandidates[0];
     }
     if(!match){
+      unmatchedAudienceCount += 1;
       const issueMessage = `Aucun dossier correspondant trouvé pour Réf dossier "${ref || '-'}"`;
       importAudienceIssueAsOrphanRow(row, preferredIssueProc, issueMessage);
       linkedAudiencesCount += 1;
@@ -14488,6 +14743,7 @@ async function applyExcelImport(payload, options = {}){
     `Audiences détectées: ${audiences.length}`,
     `Audiences importées: ${linkedAudiencesCount}`,
     `Audiences non importées: ${skippedAudiencesCount}`,
+    `Matching non trouvé: ${unmatchedAudienceCount}`,
     `Avertissements sur lignes importées: ${importDisplayWarnings.length}`
   ];
   const summary = summaryLines.join('\n');
@@ -15239,6 +15495,7 @@ function setupEvents(){
   $('suiviPageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredSuiviRowsForPrint(!!e.target?.checked));
   $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('previewSuiviBtn')?.addEventListener('click', previewSuiviSelectedRows);
+  ensureClientExcelFillControls();
   $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
   $('audienceErrorsBtn')?.addEventListener('click', ()=>{
     filterAudienceErrorsOnly = !filterAudienceErrorsOnly;
@@ -19645,8 +19902,43 @@ async function saveTeamUser(){
   );
   if(usernameTaken) return alert('Username déjà utilisé');
 
-  const previousUsersSnapshot = JSON.parse(JSON.stringify(USERS));
   const isEditing = !!editingTeamUserId;
+  try{
+    await resolveApiBase();
+    const response = await fetchWithTimeout(`${API_BASE}/team/users/upsert`, {
+      method: 'POST',
+      headers: buildRemoteAuthHeaders({
+        'Content-Type': 'application/json'
+      }),
+      body: JSON.stringify({
+        id: editingTeamUserId || undefined,
+        username,
+        password,
+        role,
+        clientIds: finalClientIds
+      })
+    }, 10000);
+    if(response.ok){
+      const payload = await response.json().catch(()=>null);
+      if(payload?.user){
+        const savedUser = normalizeUser(payload.user);
+        const existingIndex = USERS.findIndex(u=>Number(u?.id) === Number(savedUser?.id));
+        if(existingIndex >= 0) USERS[existingIndex] = savedUser;
+        else USERS.push(savedUser);
+        USERS = ensureManagerUser(USERS);
+      }else{
+        await loadPersistedState();
+      }
+      syncCurrentUserFromUsers();
+      renderEquipe({ force: true });
+      resetTeamForm();
+      alert(isEditing ? 'Compte mis ÃƒÆ’Ã‚Â  jour avec succÃƒÆ’Ã‚Â¨s.' : 'Compte crÃƒÆ’Ã‚Â©ÃƒÆ’Ã‚Â© avec succÃƒÆ’Ã‚Â¨s.');
+      return;
+    }
+  }catch(err){
+    console.warn('Team user upsert API indisponible, fallback local', err);
+  }
+  const previousUsersSnapshot = JSON.parse(JSON.stringify(USERS));
   if(editingTeamUserId){
     const userIndex = USERS.findIndex(u=>u.id === editingTeamUserId);
     if(userIndex === -1) return;

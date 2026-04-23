@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -10,10 +10,54 @@ const STATE_FILE_NAME = 'Cabinet Walid Araqi.json';
 const EXPORTS_DIR_NAME = 'Cabinet Walid Araqi Exports';
 const API_PORT = 3000;
 const SERVER_START_TIMEOUT_MS = 20000;
+const DEFAULT_SERVER_HOST = '192.168.1.11';
+const SERVER_RETRY_INTERVAL_MS = 4000;
 
 const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
-const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '1').trim();
+const DESKTOP_REMOTE_LOCAL_ONLY = String(process.env.CABINET_DESKTOP_LOCAL_ONLY || '0').trim();
+const DESKTOP_LOAD_MODE = String(process.env.CABINET_DESKTOP_LOAD_MODE || 'server').trim().toLowerCase();
 let desktopServerStartPromise = null;
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildServerWaitingHtml(appUrl, detail = '') {
+  const safeAppUrl = escapeHtml(appUrl);
+  const safeDetail = escapeHtml(detail);
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cabinet Walid Araqi - Connexion serveur</title>
+  <style>
+    body{margin:0;font-family:Arial,sans-serif;background:#f3f4f6;color:#111827;display:grid;place-items:center;min-height:100vh}
+    main{width:min(560px,calc(100vw - 40px));background:#fff;border:1px solid #dbe3ef;border-radius:10px;padding:28px;box-shadow:0 18px 50px rgba(15,23,42,.12)}
+    h1{font-size:22px;margin:0 0 12px;color:#123b8c}
+    p{font-size:15px;line-height:1.5;margin:8px 0;color:#374151}
+    code{display:block;margin-top:14px;padding:12px;background:#eef2ff;color:#1e3a8a;border-radius:8px;word-break:break-all}
+    .status{margin-top:18px;padding:12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-weight:700}
+    button{margin-top:18px;border:0;border-radius:8px;background:#123b8c;color:#fff;padding:11px 16px;font-weight:700;cursor:pointer}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Connexion au serveur...</h1>
+    <p>L'application reste liée au serveur. Elle va réessayer automatiquement jusqu'à ce que le serveur revienne.</p>
+    <code>${safeAppUrl}</code>
+    <div class="status">Nouvelle tentative toutes les 4 secondes.</div>
+    ${safeDetail ? `<p>${safeDetail}</p>` : ''}
+    <button onclick="location.reload()">Réessayer maintenant</button>
+  </main>
+</body>
+</html>`;
+}
 
 function readConfiguredServerHost() {
   try {
@@ -78,6 +122,7 @@ function buildServerHostCandidates() {
   }
 
   add(readConfiguredServerHost());
+  add(DEFAULT_SERVER_HOST);
   add(os.hostname());
   add('localhost');
   add('127.0.0.1');
@@ -302,9 +347,13 @@ async function resolveAppIndexPath() {
 }
 
 async function createWindow() {
+  Menu.setApplicationMenu(null);
+
   const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 1400,
+    height: 900,
+    minWidth: 1100,
+    minHeight: 720,
     title: 'Cabinet Walid Araqi',
     icon: path.join(__dirname, 'build', 'icon.png'),
     backgroundColor: '#f0f2f5',
@@ -316,23 +365,83 @@ async function createWindow() {
     }
   });
 
-  const resolvedHost = await resolveDesktopServerHost();
-  const appUrl = `http://${resolvedHost}:3000`;
-  const remoteApiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost(resolvedHost)).trim();
-
-  win.loadURL(appUrl).catch(() => {
-    console.warn('Live server not reachable, falling back to local files.');
-    resolveAppIndexPath().then(appIndexPath => {
-      win.loadFile(appIndexPath, {
-        query: {
-          apiBase: remoteApiBase,
-          localOnly: DESKTOP_REMOTE_LOCAL_ONLY
-        }
-      });
+  const loadLocalDesktopApp = async (apiBase = 'http://127.0.0.1:3000/api') => {
+    const appIndexPath = await resolveAppIndexPath();
+    return win.loadFile(appIndexPath, {
+      query: {
+        apiBase,
+        localOnly: DESKTOP_REMOTE_LOCAL_ONLY,
+        desktop: '1'
+      }
     });
-  });
+  };
+
+  if (DESKTOP_LOAD_MODE === 'server') {
+    const resolvedHost = readConfiguredServerHost() || DEFAULT_SERVER_HOST;
+    const appUrl = `http://${resolvedHost}:3000`;
+    let retryTimer = null;
+    let retryInFlight = false;
+
+    const clearRetryTimer = () => {
+      if (!retryTimer) return;
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    };
+
+    const scheduleRetry = (detail = '') => {
+      if (win.isDestroyed()) return;
+      const html = buildServerWaitingHtml(appUrl, detail);
+      win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+      clearRetryTimer();
+      retryTimer = setTimeout(() => {
+        tryLoadServer();
+      }, SERVER_RETRY_INTERVAL_MS);
+    };
+
+    const tryLoadServer = async () => {
+      if (retryInFlight || win.isDestroyed()) return;
+      retryInFlight = true;
+      clearRetryTimer();
+      try {
+        const reachable = await canReachServer(resolvedHost);
+        if (!reachable) {
+          scheduleRetry(`Serveur indisponible sur ${resolvedHost}:3000.`);
+          return;
+        }
+        await win.loadURL(appUrl);
+      } catch (err) {
+        scheduleRetry(String(err?.message || err || 'Erreur de connexion'));
+      } finally {
+        retryInFlight = false;
+      }
+    };
+
+    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
+      const failedUrl = String(validatedUrl || '');
+      if (!failedUrl.startsWith(appUrl)) return;
+      scheduleRetry(`${errorCode} - ${errorDescription}`);
+    });
+
+    win.on('closed', clearRetryTimer);
+    const remoteApiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost(resolvedHost)).trim();
+
+    win.webContents.once('desktop-disabled-did-fail-load', (_event, errorCode, errorDescription) => {
+      const message = encodeURIComponent(
+        `Serveur introuvable: ${appUrl}\n${errorCode} - ${errorDescription}\nVérifiez que le serveur Cabinet est démarré sur ${resolvedHost}:3000.`
+      );
+      win.loadURL(`data:text/plain;charset=utf-8,${message}`).catch(() => {});
+    });
+
+    await tryLoadServer();
+  } else {
+    const apiBase = String(process.env.CABINET_DESKTOP_API_BASE || buildApiBaseForHost('127.0.0.1')).trim();
+    await loadLocalDesktopApp(apiBase).catch((err) => {
+      console.error('Unable to load local desktop app.', err);
+    });
+  }
 
   win.once('ready-to-show', () => {
+    win.maximize();
     win.show();
   });
 
@@ -340,8 +449,30 @@ async function createWindow() {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  win.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = win.webContents.getURL();
+    if (!currentUrl || url === currentUrl || url.startsWith('file://')) return;
+    event.preventDefault();
+    shell.openExternal(url);
+  });
 }
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.setAppUserModelId('com.walidaraqi.cabinet');
+
+  app.on('second-instance', () => {
+    const [win] = BrowserWindow.getAllWindows();
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+}
+
+if (gotSingleInstanceLock) {
 app.whenReady().then(() => {
   ensureDesktopStateFileExists().catch((err) => {
     console.warn('Unable to initialize Cabinet Walid Araqi.json', err);
@@ -382,6 +513,7 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
