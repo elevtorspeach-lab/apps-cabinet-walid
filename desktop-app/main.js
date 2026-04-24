@@ -133,6 +133,10 @@ function buildApiBaseForHost(host) {
   return `http://${host}:${API_PORT}/api`;
 }
 
+function buildAppUrlForHost(host) {
+  return `http://${host}:${API_PORT}`;
+}
+
 async function canReachServer(host) {
   return new Promise((resolve) => {
     const req = http.get(`${buildApiBaseForHost(host)}/health`, { timeout: 1800 }, (res) => {
@@ -364,8 +368,8 @@ async function createWindow() {
   });
 
   {
-    const resolvedHost = readConfiguredServerHost() || DEFAULT_SERVER_HOST;
-    const appUrl = `http://${resolvedHost}:3000`;
+    const preferredHosts = buildServerHostCandidates();
+    let currentHost = preferredHosts[0] || readConfiguredServerHost() || DEFAULT_SERVER_HOST || 'localhost';
     let retryTimer = null;
     let retryInFlight = false;
 
@@ -377,6 +381,7 @@ async function createWindow() {
 
     const scheduleRetry = (detail = '') => {
       if (win.isDestroyed()) return;
+      const appUrl = buildAppUrlForHost(currentHost);
       const html = buildServerWaitingHtml(appUrl, detail);
       win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
       clearRetryTimer();
@@ -390,12 +395,13 @@ async function createWindow() {
       retryInFlight = true;
       clearRetryTimer();
       try {
-        const reachable = await canReachServer(resolvedHost);
-        if (!reachable) {
-          scheduleRetry(`Serveur indisponible sur ${resolvedHost}:3000.`);
+        const reachableHost = await resolveDesktopServerHost();
+        if (!reachableHost) {
+          scheduleRetry(`Serveur indisponible sur ${currentHost}:3000.`);
           return;
         }
-        await win.loadURL(appUrl);
+        currentHost = reachableHost;
+        await win.loadURL(buildAppUrlForHost(currentHost));
       } catch (err) {
         scheduleRetry(String(err?.message || err || 'Erreur de connexion'));
       } finally {
@@ -404,8 +410,12 @@ async function createWindow() {
     };
 
     win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
-      const failedUrl = String(validatedUrl || '');
-      if (!failedUrl.startsWith(appUrl)) return;
+      const failedUrl = String(validatedUrl || '').trim();
+      if (failedUrl) {
+        try {
+          currentHost = new URL(failedUrl).hostname || currentHost;
+        } catch (_error) {}
+      }
       scheduleRetry(`${errorCode} - ${errorDescription}`);
     });
 

@@ -6,10 +6,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $serverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$starterScript = Join-Path $serverDir 'start-server-background.ps1'
+$supervisorScript = Join-Path $serverDir 'server-supervisor.ps1'
 
-if (-not (Test-Path -LiteralPath $starterScript)) {
-  throw "Starter script not found: $starterScript"
+if (-not (Test-Path -LiteralPath $supervisorScript)) {
+  throw "Supervisor script not found: $supervisorScript"
 }
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -19,7 +19,8 @@ if ($existingTask) {
 
 $action = New-ScheduledTaskAction `
   -Execute 'powershell.exe' `
-  -Argument "-ExecutionPolicy Bypass -File `"$starterScript`""
+  -Argument "-ExecutionPolicy Bypass -File `"$supervisorScript`"" `
+  -WorkingDirectory $serverDir
 
 $trigger = New-ScheduledTaskTrigger -AtStartup
 
@@ -45,10 +46,7 @@ Register-ScheduledTask `
   | Out-Null
 
 if ($StartNow) {
-  Start-Process -FilePath 'powershell.exe' `
-    -ArgumentList @('-ExecutionPolicy', 'Bypass', '-File', $starterScript) `
-    -WorkingDirectory $serverDir `
-    -WindowStyle Hidden
+  Start-ScheduledTask -TaskName $TaskName
 }
 
 Write-Output "Scheduled task '$TaskName' installed."
