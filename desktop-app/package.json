@@ -46,6 +46,7 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",
@@ -54,7 +55,7 @@
           ]
         }
       ],
-      "artifactName": "Cabinet Walid Araqi-${version}.${ext}"
+      "artifactName": "Cabinet Walid Araqi.${ext}"
     }
   }
 }

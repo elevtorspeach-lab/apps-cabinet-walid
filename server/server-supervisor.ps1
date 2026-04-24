@@ -17,6 +17,15 @@ function Write-SupervisorLog {
   Add-Content -LiteralPath $supervisorLog -Value "[$timestamp] $Message"
 }
 
+function Test-ServerPortListening {
+  try {
+    $listener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction Stop | Select-Object -First 1
+    return $null -ne $listener
+  } catch {
+    return $false
+  }
+}
+
 function Resolve-NodePath {
   $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
   if ($nodeCommand -and $nodeCommand.Source) {
@@ -42,6 +51,12 @@ Write-SupervisorLog "Supervisor started with Node at $nodePath"
 
 while ($true) {
   try {
+    if (Test-ServerPortListening) {
+      Write-SupervisorLog 'Port 3000 already in use. Waiting before retry.'
+      Start-Sleep -Seconds 10
+      continue
+    }
+
     $process = Start-Process -FilePath $nodePath `
       -ArgumentList 'index.js' `
       -WorkingDirectory $serverDir `

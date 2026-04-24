@@ -215,6 +215,8 @@ let remoteStateVersion = 0;
 let remoteStateUpdatedAt = '';
 let remoteRefreshPending = false;
 let remoteRefreshInFlight = false;
+let lastRemoteRefreshStartedAt = 0;
+let lastRemoteRefreshCompletedAt = 0;
 let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
@@ -535,7 +537,8 @@ const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 18;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
 const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
-const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 15000;
+const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 45000;
+const REMOTE_SYNC_MIN_SNAPSHOT_REFRESH_INTERVAL_MS = 12000;
 const REMOTE_SYNC_STREAM_RETRY_BASE_MS = 2000;
 const REMOTE_SYNC_STREAM_RETRY_MAX_MS = 15000;
 const REMOTE_SYNC_RENDER_DEBOUNCE_MS = 320;
@@ -10068,6 +10071,13 @@ function updateRemoteStateMetadata(source){
   remoteStateUpdatedAt = String(source?.updatedAt || '');
 }
 
+function shouldThrottleRemoteStateRefresh(options = {}){
+  if(options?.force === true) return false;
+  if(remoteRefreshPending) return false;
+  if(!(lastRemoteRefreshCompletedAt > 0)) return false;
+  return (Date.now() - lastRemoteRefreshCompletedAt) < REMOTE_SYNC_MIN_SNAPSHOT_REFRESH_INTERVAL_MS;
+}
+
 function beginHeavyUiOperation(){
   heavyUiOperationCount += 1;
 }
@@ -12076,7 +12086,7 @@ async function loadPersistedState(){
   }
 }
 
-async function refreshRemoteState(){
+async function refreshRemoteState(options = {}){
   if(LOCAL_ONLY_MODE) return;
   if(!currentUser) return;
   if(
@@ -12097,7 +12107,11 @@ async function refreshRemoteState(){
     queueRemoteStateRefresh(REMOTE_SYNC_BLOCKED_RETRY_MS);
     return;
   }
+  if(shouldThrottleRemoteStateRefresh(options)){
+    return false;
+  }
   remoteRefreshInFlight = true;
+  lastRemoteRefreshStartedAt = Date.now();
   try{
     const hasChanged = await loadPersistedState();
     if(hasChanged){
@@ -12117,6 +12131,7 @@ async function refreshRemoteState(){
     }
   }finally{
     remoteRefreshInFlight = false;
+    lastRemoteRefreshCompletedAt = Date.now();
     if(remoteRefreshPending){
       remoteRefreshPending = false;
       queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);

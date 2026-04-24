@@ -217,6 +217,8 @@ let remoteStateVersion = 0;
 let remoteStateUpdatedAt = '';
 let remoteRefreshPending = false;
 let remoteRefreshInFlight = false;
+let lastRemoteRefreshStartedAt = 0;
+let lastRemoteRefreshCompletedAt = 0;
 let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
@@ -537,7 +539,8 @@ const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 18;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
 const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
-const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 15000;
+const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 45000;
+const REMOTE_SYNC_MIN_SNAPSHOT_REFRESH_INTERVAL_MS = 12000;
 const REMOTE_SYNC_STREAM_RETRY_BASE_MS = 2000;
 const REMOTE_SYNC_STREAM_RETRY_MAX_MS = 15000;
 const REMOTE_SYNC_RENDER_DEBOUNCE_MS = 320;
@@ -5098,7 +5101,7 @@ async function refreshServerConnectionStatus(options = {}){
     setPingMetric(null);
     lastLiveDelayMs = null;
     renderSyncMetrics();
-    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible');
+    setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible - reconnexion automatique');
     return false;
   }finally{
     remoteSyncHealthCheckInFlight = false;
@@ -5117,7 +5120,7 @@ async function refreshPreLoginServerStatus(){
   }
   setSyncStatus(
     remoteBootstrapSetupRequired ? 'pending' : 'error',
-    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Serveur indisponible'
+    remoteBootstrapSetupRequired ? 'Initialisation serveur requise' : 'Serveur indisponible - reconnexion automatique'
   );
   return false;
 }
@@ -5208,6 +5211,12 @@ function applyViewerReadOnlyUi(root = document){
   ];
   targets.forEach((selector)=>{
     root.querySelectorAll(selector).forEach((el)=>{
+      if(isViewer() && el.id === 'filterAudienceColor'){
+        el.dataset.viewerLockHide = '0';
+        el.style.display = '';
+        setViewerLockedControlState(el, false);
+        return;
+      }
       if(el.id === 'saveAudienceBtn' || el.id === 'audienceErrorsBtn' || el.id === 'undoAudienceColorBtn'){
         el.dataset.viewerLockHide = '1';
       }
@@ -10412,6 +10421,13 @@ function updateRemoteStateMetadata(source){
   remoteStateUpdatedAt = String(source?.updatedAt || '');
 }
 
+function shouldThrottleRemoteStateRefresh(options = {}){
+  if(options?.force === true) return false;
+  if(remoteRefreshPending) return false;
+  if(!(lastRemoteRefreshCompletedAt > 0)) return false;
+  return (Date.now() - lastRemoteRefreshCompletedAt) < REMOTE_SYNC_MIN_SNAPSHOT_REFRESH_INTERVAL_MS;
+}
+
 function beginHeavyUiOperation(){
   heavyUiOperationCount += 1;
 }
@@ -11601,7 +11617,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
     }
   }
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     return preserveQueuedRequest ? false : true;
   }
   setSyncStatus('syncing');
@@ -11668,7 +11684,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
     }
 
     remoteServerReachable = false;
-    setSyncStatus('error', 'Mode local (serveur indisponible)');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     console.warn('Impossible de sauvegarder sur le serveur', err);
     return preserveQueuedRequest ? false : true;
   }
@@ -11827,7 +11843,7 @@ async function flushSyncQueueNow(){
 
 function updateSyncStatusLabel(){
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     return;
   }
   if(!hasRemoteAuthSession()){
@@ -12228,7 +12244,7 @@ async function loadPersistedState(){
   return false;
 }
 
-async function refreshRemoteState(){
+async function refreshRemoteState(options = {}){
   if(!currentUser) return;
   if(
     !remoteRefreshPending
@@ -12248,7 +12264,11 @@ async function refreshRemoteState(){
     queueRemoteStateRefresh(REMOTE_SYNC_BLOCKED_RETRY_MS);
     return;
   }
+  if(shouldThrottleRemoteStateRefresh(options)){
+    return false;
+  }
   remoteRefreshInFlight = true;
+  lastRemoteRefreshStartedAt = Date.now();
   try{
     const hasChanged = await loadPersistedState();
     if(hasChanged){
@@ -12268,6 +12288,7 @@ async function refreshRemoteState(){
     }
   }finally{
     remoteRefreshInFlight = false;
+    lastRemoteRefreshCompletedAt = Date.now();
     if(remoteRefreshPending){
       remoteRefreshPending = false;
       queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
@@ -12290,21 +12311,28 @@ function queueRemoteStateRefresh(delayMs = REMOTE_SYNC_EVENT_DEBOUNCE_MS){
 }
 
 function startRemoteSync(){
-  if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
-    return;
-  }
   if(!hasRemoteAuthSession()){
     setSyncStatus('pending', 'Connexion serveur en attente');
     return;
   }
   if(remoteSyncTimer) return;
-  startRemoteSyncStream();
+  if(remoteServerReachable){
+    startRemoteSyncStream();
+  }else{
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
+  }
   refreshServerConnectionStatus({ force: true }).catch(()=>{});
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     if(remoteSyncHealthTick === 0){
-      refreshServerConnectionStatus().catch(()=>{});
+      refreshServerConnectionStatus({ force: !remoteServerReachable }).then((connected)=>{
+        if(connected && !remoteSyncStream){
+          startRemoteSyncStream();
+        }
+      }).catch(()=>{});
+    }
+    if(remoteServerReachable && !remoteSyncStream){
+      startRemoteSyncStream();
     }
     if(remoteRefreshPending){
       queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
@@ -15346,7 +15374,7 @@ async function initApplication(){
     console.warn('Résolution API impossible', err);
   }
   if(!remoteServerReachable){
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
   await loadPersistedState();
   await hardenUsersOnBoot();
@@ -15404,16 +15432,23 @@ async function bootstrapApplication(){
         await refreshPreLoginServerStatus();
       }catch(err){
         console.warn('Vérification serveur pré-connexion impossible', err);
-        setSyncStatus('error', 'Serveur indisponible');
+        setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
       }
     }
   }catch(err){
     applicationBootFailed = false;
     console.error('Initialisation application impossible', err);
-    setSyncStatus('error', 'Serveur indisponible');
+    setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
   updateSyncStatusLabel();
   setInterval(flushSyncQueueNow, 30000);
+  setInterval(()=>{
+    if(hasRemoteAuthSession()){
+      if(!remoteSyncTimer) startRemoteSync();
+      return;
+    }
+    refreshPreLoginServerStatus().catch(()=>{});
+  }, 5000);
 }
 
 // ================== EVENTS ==================
@@ -15819,6 +15854,13 @@ function setupEvents(){
   $('filterAudienceColor')?.addEventListener('change', (e)=>{
     const previousColor = normalizeAudienceFilterColorValue(filterAudienceColor);
     const nextColor = normalizeAudienceFilterColorValue(e.target.value);
+    if(isViewer()){
+      filterAudienceColor = nextColor;
+      clearAudiencePrintSelection({ immediate: true });
+      syncAudienceColorFilterSelectAppearance();
+      renderAudience();
+      return;
+    }
     const previousIsOrdonnanceColor = previousColor === 'green' || previousColor === 'yellow';
     const nextIsOrdonnanceColor = nextColor === 'green' || nextColor === 'yellow';
     filterAudienceColor = nextColor;
@@ -16324,7 +16366,7 @@ async function login(){
         refreshRemoteState().catch(()=>{});
       }, 80);
     }else if(remoteLoginState === 'unavailable'){
-      setSyncStatus('error', 'Serveur indisponible');
+      setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     }
 
     const hasVisibleSection = [
@@ -19992,7 +20034,7 @@ function filterTeamClientList(){
   let visibleCount = 0;
   items.forEach(item=>{
     const name = String(item.dataset.clientName || '');
-    const visible = q ? name.includes(q) : true;
+    const visible = q ? name.includes(q) : false;
     item.style.display = visible ? '' : 'none';
     if(visible) visibleCount += 1;
   });
@@ -23955,3 +23997,4 @@ function syncDiligenceMiseAPrixFilterVisibility(){
   const isCommandement = isDiligenceCommandementProcedure(filterDiligenceProcedure);
   container.style.display = isCommandement ? 'inline-block' : 'none';
 }
+

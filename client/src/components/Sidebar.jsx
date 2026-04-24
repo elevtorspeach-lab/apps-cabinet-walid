@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 function humanizeUsername(value) {
   return String(value || '')
@@ -53,30 +53,39 @@ function Sidebar() {
   ));
   const [currentUserLabel, setCurrentUserLabel] = useState('');
 
+  const updateRoles = useCallback(() => {
+    const nextIsClient = typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false;
+    const nextIsAdminOrManager = typeof window !== 'undefined' && (
+      (typeof window.isAdmin === 'function' && window.isAdmin()) ||
+      (typeof window.isManager === 'function' && window.isManager())
+    );
+    const identity = typeof window !== 'undefined' && typeof window.getCurrentUserIdentity === 'function'
+      ? window.getCurrentUserIdentity()
+      : { username: '', role: '' };
+
+    setIsClient((prev) => (prev === nextIsClient ? prev : nextIsClient));
+    setIsAdminOrManager((prev) => (prev === nextIsAdminOrManager ? prev : nextIsAdminOrManager));
+    setCurrentUserLabel((prev) => {
+      const nextLabel = buildSidebarUserLabel(identity, nextIsClient, nextIsAdminOrManager);
+      return prev === nextLabel ? prev : nextLabel;
+    });
+  }, []);
+
   useEffect(() => {
-    const updateRoles = () => {
-      const nextIsClient = typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false;
-      const nextIsAdminOrManager = typeof window !== 'undefined' && (
-        (typeof window.isAdmin === 'function' && window.isAdmin()) ||
-        (typeof window.isManager === 'function' && window.isManager())
-      );
-      const identity = typeof window !== 'undefined' && typeof window.getCurrentUserIdentity === 'function'
-        ? window.getCurrentUserIdentity()
-        : { username: '', role: '' };
-
-      setIsClient(nextIsClient);
-      setIsAdminOrManager(nextIsAdminOrManager);
-      setCurrentUserLabel(buildSidebarUserLabel(identity, nextIsClient, nextIsAdminOrManager));
-    };
-
     updateRoles();
     window.addEventListener('role_changed', updateRoles);
-    const timer = window.setInterval(updateRoles, 1000);
+    window.addEventListener('focus', updateRoles);
+    document.addEventListener('visibilitychange', updateRoles);
+
+    const warmupTimers = [150, 600, 1500].map((delay) => window.setTimeout(updateRoles, delay));
+
     return () => {
       window.removeEventListener('role_changed', updateRoles);
-      window.clearInterval(timer);
+      window.removeEventListener('focus', updateRoles);
+      document.removeEventListener('visibilitychange', updateRoles);
+      warmupTimers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, []);
+  }, [updateRoles]);
 
   return (
     <div className="sidebar">
