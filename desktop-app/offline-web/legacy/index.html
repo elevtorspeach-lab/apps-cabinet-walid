@@ -514,7 +514,7 @@
             <input type="text" id="searchClientInput" placeholder="Rechercher un client..." />
           </div>
         </div>
-        <div class="add-client-form add-client-form--pro">
+        <div id="addClientForm" class="add-client-form add-client-form--pro">
           <label class="add-client-label" for="clientName">
             <span class="add-client-label-main"><i class="fa-solid fa-user-plus"></i> Nouveau client</span>
             <span class="add-client-label-sub">Ajout rapide pour lancer un dossier</span>
@@ -526,13 +526,19 @@
             <i class="fa-solid fa-plus"></i> Ajouter
           </button>
         </div>
-        <div class="import-excel">
+        <div id="clientExcelImportGroup" class="import-excel">
           <input type="file" id="importExcelInput" accept=".xlsx,.xls" style="display:none;">
           <button id="importExcelBtn" class="btn-primary">
             <i class="fa-solid fa-file-import"></i> Importer Excel
           </button>
           <button id="exportBackupExcelBtn" class="btn-primary" type="button">
             <i class="fa-solid fa-file-export"></i> Sauvegarde Excel
+          </button>
+        </div>
+        <div id="clientExcelFillGroup" class="import-excel">
+          <input type="file" id="fillClientExcelClientInput" accept=".xlsx,.xls" style="display:none;">
+          <button id="fillClientExcelClientBtn" class="btn-primary" type="button">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client
           </button>
         </div>
       </div>

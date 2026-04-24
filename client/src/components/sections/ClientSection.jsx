@@ -10,7 +10,7 @@ function ClientSection() {
             <input type="text" id="searchClientInput" placeholder="Rechercher un client..." />
           </div>
         </div>
-        <div className="add-client-form add-client-form--pro">
+        <div id="addClientForm" className="add-client-form add-client-form--pro">
           <label className="add-client-label" htmlFor="clientName">
             <span className="add-client-label-main"><i className="fa-solid fa-user-plus"></i> Nouveau client</span>
             <span className="add-client-label-sub">Ajout rapide pour lancer un dossier</span>
@@ -22,13 +22,19 @@ function ClientSection() {
             <i className="fa-solid fa-plus"></i> Ajouter
           </button>
         </div>
-        <div className="import-excel">
+        <div id="clientExcelImportGroup" className="import-excel">
           <input type="file" id="importExcelInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
           <button id="importExcelBtn" className="btn-primary">
             <i className="fa-solid fa-file-import"></i> Importer Excel
           </button>
           <button id="exportBackupExcelBtn" className="btn-primary" type="button">
             <i className="fa-solid fa-file-export"></i> Sauvegarde Excel
+          </button>
+        </div>
+        <div id="clientExcelFillGroup" className="import-excel">
+          <input type="file" id="fillClientExcelClientInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
+          <button id="fillClientExcelClientBtn" className="btn-primary" type="button">
+            <i className="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client
           </button>
         </div>
       </div>
