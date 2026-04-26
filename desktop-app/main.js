@@ -42,6 +42,32 @@ function resolvePowerShellExecutable() {
   return 'powershell.exe';
 }
 
+function getCmdExecutableCandidates() {
+  const candidates = [];
+  const windowsRootCandidates = [
+    process.env.SystemRoot,
+    process.env.WINDIR,
+    'C:\\Windows'
+  ].filter(Boolean);
+  for (const windowsRoot of windowsRootCandidates) {
+    candidates.push(path.join(windowsRoot, 'System32', 'cmd.exe'));
+    candidates.push(path.join(windowsRoot, 'Sysnative', 'cmd.exe'));
+  }
+  candidates.push(process.env.ComSpec, 'cmd.exe');
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function resolveCmdExecutable() {
+  const candidates = getCmdExecutableCandidates();
+  for (const candidate of candidates) {
+    if (!candidate.includes('\\')) return candidate;
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+  return 'cmd.exe';
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -187,9 +213,13 @@ function getDesktopServerDirCandidates() {
 
 function resolveDesktopServerStarterScript() {
   for (const serverDir of getDesktopServerDirCandidates()) {
+    const starterCommand = path.join(serverDir, 'start-server-background.cmd');
+    if (fs.existsSync(starterCommand)) {
+      return { serverDir, starterScript: starterCommand, useCmdWrapper: true };
+    }
     const starterScript = path.join(serverDir, 'start-server-background.ps1');
     if (fs.existsSync(starterScript)) {
-      return { serverDir, starterScript };
+      return { serverDir, starterScript, useCmdWrapper: false };
     }
   }
   return null;
@@ -225,10 +255,14 @@ async function ensureDesktopBundledServerRunning() {
     }
 
     try {
-      const powerShellExecutable = resolvePowerShellExecutable();
+      const shouldUseCmdWrapper = starter.useCmdWrapper !== false;
+      const executable = shouldUseCmdWrapper ? resolveCmdExecutable() : resolvePowerShellExecutable();
+      const args = shouldUseCmdWrapper
+        ? ['/d', '/s', '/c', starter.starterScript]
+        : ['-ExecutionPolicy', 'Bypass', '-File', starter.starterScript];
       const child = spawn(
-        powerShellExecutable,
-        ['-ExecutionPolicy', 'Bypass', '-File', starter.starterScript],
+        executable,
+        args,
         {
           cwd: starter.serverDir,
           windowsHide: true,
@@ -237,7 +271,7 @@ async function ensureDesktopBundledServerRunning() {
         }
       );
       child.once('error', (err) => {
-        console.warn(`Unable to start bundled server automatically via ${powerShellExecutable}.`, err);
+        console.warn(`Unable to start bundled server automatically via ${executable}.`, err);
       });
       child.unref();
     } catch (err) {
