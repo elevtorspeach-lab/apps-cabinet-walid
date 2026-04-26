@@ -4594,7 +4594,133 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
 .import-result-actions{
   margin-top:10px;
   display:flex;
+  flex-wrap:wrap;
+  gap:10px;
   justify-content:flex-end;
+}
+
+.import-result-actions .btn-secondary[disabled]{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+.import-error-summary{
+  margin-bottom:10px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.import-error-summary-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  border:1px solid #dbeafe;
+  background:#eff6ff;
+  color:#1e3a8a;
+}
+
+.import-error-summary-chip.is-skipped{
+  border-color:#fecaca;
+  background:#fef2f2;
+  color:#b91c1c;
+}
+
+.import-error-summary-chip.is-warning{
+  border-color:#fde68a;
+  background:#fffbeb;
+  color:#92400e;
+}
+
+.import-error-summary-chip.is-info{
+  border-color:#bfdbfe;
+  background:#eff6ff;
+  color:#1d4ed8;
+}
+
+.import-error-card{
+  border:1px solid #dbeafe;
+  border-radius:14px;
+  background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+  padding:12px 12px 10px;
+  margin-bottom:10px;
+  box-shadow:0 10px 22px rgba(37,99,235,.08);
+}
+
+.import-error-card.is-skipped{
+  border-color:#fecaca;
+  background:linear-gradient(180deg,#fff5f5 0%,#ffffff 100%);
+}
+
+.import-error-card.is-warning{
+  border-color:#fde68a;
+  background:linear-gradient(180deg,#fffdf3 0%,#ffffff 100%);
+}
+
+.import-error-card.is-info{
+  border-color:#bfdbfe;
+  background:linear-gradient(180deg,#eff6ff 0%,#ffffff 100%);
+}
+
+.import-error-card-head{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  margin-bottom:8px;
+}
+
+.import-error-card-title{
+  font-weight:900;
+  color:#0f172a;
+}
+
+.import-error-card-head .import-error-badge{
+  margin-right:0;
+}
+
+.import-error-message{
+  margin:0 0 10px;
+  color:#1e293b;
+  font-size:13px;
+  line-height:1.5;
+  font-weight:700;
+}
+
+.import-error-fields{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:8px;
+}
+
+.import-error-field{
+  border:1px solid #dbeafe;
+  border-radius:10px;
+  background:#fff;
+  padding:8px 10px;
+}
+
+.import-error-field-label{
+  display:block;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.02em;
+  color:#64748b;
+  margin-bottom:3px;
+}
+
+.import-error-field-value{
+  display:block;
+  font-size:13px;
+  color:#0f172a;
+  font-weight:700;
+  line-height:1.35;
+  word-break:break-word;
 }
 
 .import-progress-card{

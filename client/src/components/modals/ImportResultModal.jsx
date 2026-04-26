@@ -13,6 +13,9 @@ function ImportResultModal() {
           <div className="import-result-label">Détails des erreurs ignorées</div>
           <div id="importResultErrors" className="import-result-errors" role="region" aria-label="Détails des erreurs ignorées"></div>
           <div className="import-result-actions">
+            <button id="exportImportErrorsBtn" className="btn-secondary" type="button">
+              <i className="fa-regular fa-file-excel"></i> Exporter erreurs Excel
+            </button>
             <button id="copyImportErrorsBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-copy"></i> Copier les erreurs
             </button>
