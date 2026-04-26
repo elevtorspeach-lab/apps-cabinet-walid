@@ -5,6 +5,11 @@ $supervisorScript = Join-Path $serverDir 'server-supervisor.ps1'
 $logDir = Join-Path $serverDir 'logs'
 $stdoutLog = Join-Path $logDir 'server.stdout.log'
 $stderrLog = Join-Path $logDir 'server.stderr.log'
+$powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+
+if (-not (Test-Path $powerShellPath)) {
+  $powerShellPath = 'powershell.exe'
+}
 
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir | Out-Null
@@ -27,7 +32,7 @@ if ($supervisorRunning) {
   exit 0
 }
 
-Start-Process -FilePath 'powershell.exe' `
+Start-Process -FilePath $powerShellPath `
   -ArgumentList @('-ExecutionPolicy', 'Bypass', '-File', $supervisorScript) `
   -WorkingDirectory $serverDir `
   -WindowStyle Hidden `

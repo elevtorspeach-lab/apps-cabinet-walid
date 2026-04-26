@@ -16,6 +16,32 @@ const SERVER_RETRY_INTERVAL_MS = 4000;
 const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
 let desktopServerStartPromise = null;
 
+function getPowerShellExecutableCandidates() {
+  const candidates = [];
+  const windowsRootCandidates = [
+    process.env.SystemRoot,
+    process.env.WINDIR,
+    'C:\\Windows'
+  ].filter(Boolean);
+  for (const windowsRoot of windowsRootCandidates) {
+    candidates.push(path.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    candidates.push(path.join(windowsRoot, 'Sysnative', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+  }
+  candidates.push('powershell.exe', 'pwsh.exe');
+  return Array.from(new Set(candidates));
+}
+
+function resolvePowerShellExecutable() {
+  const candidates = getPowerShellExecutableCandidates();
+  for (const candidate of candidates) {
+    if (!candidate.includes('\\')) return candidate;
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+  return 'powershell.exe';
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -199,8 +225,9 @@ async function ensureDesktopBundledServerRunning() {
     }
 
     try {
+      const powerShellExecutable = resolvePowerShellExecutable();
       const child = spawn(
-        'powershell.exe',
+        powerShellExecutable,
         ['-ExecutionPolicy', 'Bypass', '-File', starter.starterScript],
         {
           cwd: starter.serverDir,
@@ -209,6 +236,9 @@ async function ensureDesktopBundledServerRunning() {
           stdio: 'ignore'
         }
       );
+      child.once('error', (err) => {
+        console.warn(`Unable to start bundled server automatically via ${powerShellExecutable}.`, err);
+      });
       child.unref();
     } catch (err) {
       console.warn('Unable to start bundled server automatically.', err);
