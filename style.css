@@ -4057,7 +4057,8 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
 }
 
 .import-result-card{
-  width:min(760px, 100%);
+  width:min(1180px, calc(100vw - 36px));
+  max-height:min(88vh, 920px);
 }
 
 .import-result-summary{
@@ -4083,13 +4084,151 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
 
 .import-result-errors{
   width:100%;
-  min-height:180px;
-  max-height:52vh;
+  min-height:320px;
+  max-height:62vh;
   overflow:auto;
-  padding:6px;
-  border-radius:12px;
+  padding:10px;
+  border-radius:18px;
   border:1px solid #dbe4f0;
   background:#f8fbff;
+}
+
+.import-error-summary-pro{
+  position:sticky;
+  top:0;
+  z-index:2;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  padding-bottom:10px;
+  margin-bottom:12px;
+  background:linear-gradient(180deg,rgba(248,251,255,.98) 0%, rgba(248,251,255,.92) 82%, rgba(248,251,255,0) 100%);
+}
+
+.import-error-section{
+  border:1px solid #d9e4f5;
+  border-radius:18px;
+  padding:14px;
+  margin-bottom:14px;
+  background:linear-gradient(180deg,#ffffff 0%, #f8fbff 100%);
+  box-shadow:0 16px 32px rgba(15,23,42,.06);
+}
+
+.import-error-section.is-skipped{border-color:#fecaca;background:linear-gradient(180deg,#fff8f8 0%, #ffffff 100%)}
+.import-error-section.is-warning{border-color:#fde68a;background:linear-gradient(180deg,#fffdf3 0%, #ffffff 100%)}
+.import-error-section.is-info{border-color:#bfdbfe;background:linear-gradient(180deg,#f4f9ff 0%, #ffffff 100%)}
+
+.import-error-section-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+
+.import-error-section-badge{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:6px 12px;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:.02em;
+  background:#e2e8f0;
+  color:#0f172a;
+}
+
+.import-error-section-title{
+  font-size:15px;
+  font-weight:900;
+  color:#0f172a;
+}
+
+.import-error-card-pro{
+  border:1px solid #e2e8f0;
+  border-radius:16px;
+  padding:14px;
+  margin-bottom:10px;
+  background:#fff;
+}
+
+.import-error-card-pro.is-skipped{border-color:#fecaca}
+.import-error-card-pro.is-warning{border-color:#fde68a}
+.import-error-card-pro.is-info{border-color:#bfdbfe}
+
+.import-error-card-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+
+.import-error-card-title{
+  font-size:15px;
+  font-weight:900;
+  color:#0f172a;
+}
+
+.import-error-card-index{
+  flex:0 0 auto;
+  border-radius:999px;
+  padding:5px 10px;
+  font-size:12px;
+  font-weight:900;
+  color:#1e3a8a;
+  background:#eff6ff;
+  border:1px solid #bfdbfe;
+}
+
+.import-error-message{
+  margin:0 0 12px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:#f8fafc;
+  border-left:5px solid #2563eb;
+  color:#0f172a;
+  font-size:14px;
+  font-weight:800;
+  line-height:1.55;
+}
+
+.import-error-card-pro.is-skipped .import-error-message{border-left-color:#dc2626;background:#fff7f7}
+.import-error-card-pro.is-warning .import-error-message{border-left-color:#d97706;background:#fffaf0}
+.import-error-card-pro.is-info .import-error-message{border-left-color:#2563eb;background:#f5f9ff}
+
+.import-error-fields{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:10px;
+}
+
+.import-error-field{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  min-height:100%;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#f8fbff;
+  border:1px solid #dbe4f0;
+}
+
+.import-error-field-label{
+  font-size:11px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  color:#64748b;
+}
+
+.import-error-field-value{
+  font-size:13px;
+  font-weight:700;
+  color:#0f172a;
+  line-height:1.45;
+  word-break:break-word;
 }
 
 .import-error-empty{
@@ -4183,12 +4322,25 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
 .import-error-line.color-6 .import-error-line-head{color:#155e75;background:#cffafe}
 
 @media (max-width: 700px){
+  .import-result-card{
+    width:min(100vw - 18px, 100%);
+    max-height:92vh;
+  }
   .import-result-errors{
-    max-height:46vh;
+    min-height:240px;
+    max-height:58vh;
     padding:4px;
   }
   .import-error-line{
     padding:9px 10px;
+  }
+  .import-error-card-head,
+  .import-error-section-head{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .import-error-fields{
+    grid-template-columns:1fr;
   }
 }
 

@@ -13302,13 +13302,75 @@ function renderStructuredExcelImportIssues(issues = [], container){
   return true;
 }
 
+function renderProfessionalExcelImportIssues(issues = [], container){
+  if(!container) return false;
+  const safeIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
+  if(!safeIssues.length) return false;
+  const sections = [
+    ['skipped', 'Lignes non importees'],
+    ['warning', 'Avertissements'],
+    ['info', 'Informations']
+  ];
+  const counts = safeIssues.reduce((acc, issue)=>{
+    const key = normalizeExcelImportSeverity(issue?.severity);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, { skipped: 0, warning: 0, info: 0 });
+  const html = ['<div class="import-error-summary import-error-summary-pro">'];
+  sections.forEach(([key, label])=>{
+    const count = Number(counts[key] || 0);
+    if(!count) return;
+    const meta = getExcelImportSeverityMeta(key);
+    html.push(`<div class="import-error-summary-chip ${meta.chipClass}"><i class="${meta.icon}"></i><span>${count} ${escapeHtml(label)}</span></div>`);
+  });
+  html.push('</div>');
+  sections.forEach(([severityKey, sectionLabel])=>{
+    const sectionIssues = safeIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === severityKey);
+    if(!sectionIssues.length) return;
+    const meta = getExcelImportSeverityMeta(severityKey);
+    html.push(`<section class="import-error-section ${meta.chipClass}">`);
+    html.push('<div class="import-error-section-head">');
+    html.push(`<span class="import-error-section-badge">${escapeHtml(meta.label)}</span>`);
+    html.push(`<div class="import-error-section-title">${sectionIssues.length} ${escapeHtml(sectionLabel)}</div>`);
+    html.push('</div>');
+    sectionIssues.forEach((issue, index)=>{
+      const lineLabel = issue?.rowNumber ? `Ligne ${escapeHtml(String(issue.rowNumber))}` : `Entree ${index + 1}`;
+      const fields = [
+        ['Source', issue?.source], ['Zone', issue?.zone], ['Ref dossier', issue?.refDossier], ['Ref client', issue?.refClient],
+        ['Debiteur', issue?.debiteur], ['Procedure', issue?.procedure], ['Tribunal', issue?.tribunal], ['Date audience', issue?.audienceDate],
+        ['Sort', issue?.sort], ['Date depot', issue?.dateDepot], ['Statut', issue?.statut], ['Contexte', issue?.context]
+      ].filter(([, value])=>String(value || '').trim());
+      html.push(`<article class="import-error-card import-error-card-pro ${meta.chipClass}">`);
+      html.push('<div class="import-error-card-head">');
+      html.push(`<div class="import-error-card-title">${lineLabel}</div>`);
+      html.push(`<span class="import-error-card-index">#${index + 1}</span>`);
+      html.push('</div>');
+      html.push(`<div class="import-error-message">${escapeHtml(String(issue?.message || '').trim() || 'Erreur import Excel')}</div>`);
+      if(fields.length){
+        html.push('<div class="import-error-fields">');
+        fields.forEach(([label, value])=>{
+          html.push('<div class="import-error-field">');
+          html.push(`<span class="import-error-field-label">${escapeHtml(label)}</span>`);
+          html.push(`<span class="import-error-field-value">${escapeHtml(String(value).trim())}</span>`);
+          html.push('</div>');
+        });
+        html.push('</div>');
+      }
+      html.push('</article>');
+    });
+    html.push('</section>');
+  });
+  container.innerHTML = html.join('');
+  return true;
+}
+
 function renderExcelImportIssues(issuesText, container, issues = [], summary = ''){
   if(!container) return;
   const text = String(issuesText || '').trim() || 'Aucune erreur.';
   const safeIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
   container.dataset.copyText = buildExcelImportIssueCopyText(summary, safeIssues, text);
 
-  if(renderStructuredExcelImportIssues(safeIssues, container)){
+  if(renderProfessionalExcelImportIssues(safeIssues, container) || renderStructuredExcelImportIssues(safeIssues, container)){
     return;
   }
 
