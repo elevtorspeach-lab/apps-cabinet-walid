@@ -13746,6 +13746,23 @@ async function exportImportErrorsExcel(){
   }
 }
 
+function clearCreationDateAffectationError(){
+  const input = $('dateAffectation');
+  const error = $('dateAffectationError');
+  if(input) input.classList.remove('input-invalid');
+  if(error) error.classList.remove('visible');
+}
+
+function showCreationDateAffectationError(message){
+  const input = $('dateAffectation');
+  const error = $('dateAffectationError');
+  if(input) input.classList.add('input-invalid');
+  if(error){
+    error.textContent = String(message || 'Date d’affectation invalide. Utilisez le format jj/mm/aaaa.');
+    error.classList.add('visible');
+  }
+}
+
 async function exportImportErrorsExcelRobust(){
   if(!latestExcelImportResult || !Array.isArray(latestExcelImportResult.issues) || !latestExcelImportResult.issues.length){
     alert("Aucune erreur d'import a exporter.");
@@ -16147,20 +16164,27 @@ function setupEvents(){
   $('referenceClientInput')?.addEventListener('blur', ()=>{
     validateCreationReferenceClient({ focus: false });
   });
+  $('dateAffectation')?.addEventListener('input', ()=>{
+    clearCreationDateAffectationError();
+  });
   $('montantInput')?.addEventListener('input', (e)=>{
     syncMainMontantToGroup1(e.target?.value || '');
   });
   $('dateAffectation')?.addEventListener('blur', (e)=>{
     const raw = String(e.target?.value || '').trim();
     if(!raw){
+      clearCreationDateAffectationError();
       e.target.value = '';
       return;
     }
     const normalized = normalizeDateDDMMYYYY(raw);
     if(!normalized){
-      alert('Date d’affectation invalide. Utilisez le format jj/mm/aaaa.');
+      showCreationDateAffectationError('Date d’affectation invalide. Utilisez le format jj/mm/aaaa.');
+      if(typeof e.target.focus === 'function') e.target.focus();
+      if(typeof e.target.select === 'function') e.target.select();
       return;
     }
+    clearCreationDateAffectationError();
     e.target.value = normalized;
     syncProcedureDateAffectationToCards(true);
   });
@@ -17346,12 +17370,18 @@ async function addDossier(){
 
     const rawDateAffectation = String($('dateAffectation')?.value || '').trim();
     if(!rawDateAffectation){
-      return alert('Date d’affectation obligatoire');
+      showCreationDateAffectationError('Date d’affectation obligatoire');
+      $('dateAffectation')?.focus();
+      return;
     }
     const normalizedDateAffectation = normalizeDateDDMMYYYY(rawDateAffectation);
     if(!normalizedDateAffectation){
-      return alert('Date d’affectation invalide. Utilisez le format jj/mm/aaaa.');
+      showCreationDateAffectationError('Date d’affectation invalide. Utilisez le format jj/mm/aaaa.');
+      $('dateAffectation')?.focus();
+      $('dateAffectation')?.select?.();
+      return;
     }
+    clearCreationDateAffectationError();
     if(!validateCreationReferenceClient()){
       return;
     }
@@ -18121,6 +18151,7 @@ function compareAudienceRowsForDedupe(existing, next){
 function editDossier(clientId, index){
   if(!canEditData()) return alert('Accès refusé');
   clearCreationReferenceClientError();
+  clearCreationDateAffectationError();
   creationPinnedClientId = '';
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client) return;
@@ -18244,6 +18275,7 @@ function resetCreationForm(clientId = ''){
   uploadedFiles = [];
   procedureMontantGroups = [];
   clearCreationReferenceClientError();
+  clearCreationDateAffectationError();
 
   document.querySelectorAll('#creationSection input').forEach(i=> i.value='');
   document.querySelectorAll('.proc-check').forEach(cb=>cb.checked=false);

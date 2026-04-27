@@ -46,6 +46,7 @@ function CreationSection() {
                 <div className="form-group creation-layout-card creation-priority-field">
                   <label>Date d&apos;affectation <span className="creation-priority-badge">Prioritaire</span></label>
                   <input type="text" id="dateAffectation" placeholder="jj/mm/aaaa" inputMode="numeric" autoComplete="off" />
+                  <div id="dateAffectationError" className="creation-field-error">Date d&apos;affectation invalide.</div>
                 </div>
 
                 <div className="form-group creation-layout-card creation-top-inline-card">
