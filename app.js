@@ -13530,6 +13530,172 @@ async function copyImportErrors(){
   }
 }
 
+function normalizeImportIssueExportText(value){
+  return String(value ?? '').trim();
+}
+
+function isImportIssueOutsideGlobal(issue){
+  const haystack = normalizeLooseText([
+    issue?.zone || '',
+    issue?.context || '',
+    issue?.message || ''
+  ].join(' ')).toLowerCase();
+  return (
+    haystack.includes('orphel')
+    || haystack.includes('hors dossier global')
+    || haystack.includes('aucun dossier correspondant')
+    || haystack.includes('ref dossier vide')
+    || haystack.includes('matching non trouve')
+  );
+}
+
+function buildImportIssueExcelRows(issues = []){
+  return (Array.isArray(issues) ? issues : []).map((issue)=>{
+    const meta = getExcelImportSeverityMeta(issue?.severity);
+    const isOutsideGlobal = isImportIssueOutsideGlobal(issue);
+    return {
+      severityKey: meta.key,
+      severityLabel: meta.label,
+      segmentKey: isOutsideGlobal ? 'outside-global' : 'global',
+      segmentLabel: isOutsideGlobal ? 'Hors dossier global' : 'Rattache dossier global',
+      rowNumber: normalizeImportIssueExportText(issue?.rowNumber),
+      source: normalizeImportIssueExportText(issue?.source),
+      zone: normalizeImportIssueExportText(issue?.zone),
+      refDossier: normalizeImportIssueExportText(issue?.refDossier),
+      refClient: normalizeImportIssueExportText(issue?.refClient),
+      debiteur: normalizeImportIssueExportText(issue?.debiteur),
+      procedure: normalizeImportIssueExportText(issue?.procedure),
+      tribunal: normalizeImportIssueExportText(issue?.tribunal),
+      audienceDate: normalizeImportIssueExportText(issue?.audienceDate),
+      sort: normalizeImportIssueExportText(issue?.sort),
+      dateDepot: normalizeImportIssueExportText(issue?.dateDepot),
+      statut: normalizeImportIssueExportText(issue?.statut),
+      message: normalizeImportIssueExportText(issue?.message) || 'Erreur import Audience',
+      context: normalizeImportIssueExportText(issue?.context)
+    };
+  });
+}
+
+function getImportIssueRowTheme(row){
+  if(row?.segmentKey === 'outside-global') return { fill: 'FFF7ED', font: '9A3412', segmentFill: 'F97316', segmentFont: 'FFFFFFFF' };
+  if(row?.severityKey === 'warning') return { fill: 'FFFBEB', font: '92400E', segmentFill: '2563EB', segmentFont: 'FFFFFFFF' };
+  if(row?.severityKey === 'info') return { fill: 'EFF6FF', font: '1D4ED8', segmentFill: '2563EB', segmentFont: 'FFFFFFFF' };
+  return { fill: 'FEF2F2', font: 'B91C1C', segmentFill: '2563EB', segmentFont: 'FFFFFFFF' };
+}
+
+function styleImportIssueHeaderRow(row, fillColor = '1E3A8A'){
+  row.height = 26;
+  row.eachCell((cell)=>{
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'BFDBFE' } },
+      left: { style: 'thin', color: { argb: 'BFDBFE' } },
+      bottom: { style: 'thin', color: { argb: 'BFDBFE' } },
+      right: { style: 'thin', color: { argb: 'BFDBFE' } }
+    };
+  });
+}
+
+function appendImportIssueExcelSection(sheet, rows, options = {}){
+  const title = String(options.title || 'Erreurs import Audience').trim();
+  const subtitle = String(options.subtitle || '').trim();
+  const headerFill = String(options.headerFill || '1E3A8A').trim() || '1E3A8A';
+  sheet.mergeCells('A1:P1');
+  sheet.getCell('A1').value = title;
+  sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFill } };
+  sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+  sheet.mergeCells('A2:P2');
+  sheet.getCell('A2').value = subtitle || `Genere le ${formatDateTimeDisplay(new Date())}`;
+  sheet.getCell('A2').font = { italic: true, color: { argb: '334155' } };
+  const headers = ['Segment', 'Severite', 'Ligne', 'Source', 'Zone', 'Ref dossier', 'Ref client', 'Debiteur', 'Procedure', 'Tribunal', 'Date audience', 'Sort', 'Date depot', 'Statut', 'Message', 'Contexte'];
+  const headerRow = sheet.addRow(headers);
+  styleImportIssueHeaderRow(headerRow, headerFill);
+  rows.forEach((entry)=>{
+    const row = sheet.addRow([
+      entry.segmentLabel, entry.severityLabel, entry.rowNumber, entry.source, entry.zone, entry.refDossier, entry.refClient, entry.debiteur,
+      entry.procedure, entry.tribunal, entry.audienceDate, entry.sort, entry.dateDepot, entry.statut, entry.message, entry.context
+    ]);
+    const theme = getImportIssueRowTheme(entry);
+    row.eachCell((cell, colNumber)=>{
+      cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'E2E8F0' } },
+        left: { style: 'thin', color: { argb: 'E2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+        right: { style: 'thin', color: { argb: 'E2E8F0' } }
+      };
+      if(colNumber === 1){
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.segmentFill } };
+        cell.font = { bold: true, color: { argb: theme.segmentFont } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      }else{
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.fill } };
+        cell.font = { color: { argb: theme.font }, bold: colNumber === 2 || colNumber === 15 };
+      }
+    });
+  });
+  sheet.columns = [
+    { width: 22 }, { width: 14 }, { width: 10 }, { width: 14 }, { width: 22 }, { width: 18 }, { width: 18 }, { width: 24 },
+    { width: 20 }, { width: 18 }, { width: 15 }, { width: 16 }, { width: 15 }, { width: 18 }, { width: 52 }, { width: 32 }
+  ];
+  sheet.autoFilter = { from: { row: 3, column: 1 }, to: { row: Math.max(3, sheet.rowCount), column: 16 } };
+}
+
+function buildImportIssueSummarySheet(sheet, rows, summaryText = '', title = ''){
+  const severityCounts = { error: 0, warning: 0, info: 0 };
+  rows.forEach((row)=>{
+    if(Object.prototype.hasOwnProperty.call(severityCounts, row.severityKey)) severityCounts[row.severityKey] += 1;
+  });
+  const outsideGlobalCount = rows.filter((row)=>row.segmentKey === 'outside-global').length;
+  const globalCount = rows.length - outsideGlobalCount;
+  sheet.mergeCells('A1:H1');
+  sheet.getCell('A1').value = title || "Rapport d'erreurs import Audience";
+  sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1D4ED8' } };
+  sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+  sheet.mergeCells('A2:H2');
+  sheet.getCell('A2').value = `Genere le ${formatDateTimeDisplay(new Date())}`;
+  sheet.getCell('A2').font = { italic: true, color: { argb: '334155' } };
+  const metricHeader = sheet.getRow(4);
+  metricHeader.getCell(1).value = 'Indicateur';
+  metricHeader.getCell(2).value = 'Valeur';
+  styleImportIssueHeaderRow(metricHeader, '0F766E');
+  [
+    ['Total erreurs a verifier', rows.length],
+    ['Lignes rattachees dossier global', globalCount],
+    ['Lignes hors dossier global', outsideGlobalCount],
+    ['Erreurs bloquantes', severityCounts.error],
+    ['Warnings', severityCounts.warning],
+    ['Informations', severityCounts.info]
+  ].forEach(([label, value], index)=>{
+    const row = sheet.getRow(5 + index);
+    row.getCell(1).value = label;
+    row.getCell(2).value = value;
+    row.getCell(1).font = { bold: true, color: { argb: '0F172A' } };
+    row.getCell(2).font = { bold: true, color: { argb: '0F172A' } };
+    const fill = index === 2 ? 'FFF7ED' : 'F8FAFC';
+    row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+    row.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+  });
+  const summaryLines = String(summaryText || '').trim().split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean);
+  const baseRow = 13;
+  sheet.mergeCells(`A${baseRow}:H${baseRow}`);
+  sheet.getCell(`A${baseRow}`).value = 'Lecture rapide';
+  sheet.getCell(`A${baseRow}`).font = { bold: true, color: { argb: '1E3A8A' } };
+  sheet.getCell(`A${baseRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DBEAFE' } };
+  (summaryLines.length ? summaryLines : ['Import Audience - rapport professionnel']).forEach((line, index)=>{
+    const rowNumber = baseRow + 1 + index;
+    sheet.mergeCells(`A${rowNumber}:H${rowNumber}`);
+    sheet.getCell(`A${rowNumber}`).value = line;
+    sheet.getCell(`A${rowNumber}`).alignment = { wrapText: true };
+    sheet.getCell(`A${rowNumber}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F8FAFC' } };
+  });
+  sheet.columns = [{ width: 34 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }];
+}
+
 async function exportImportErrorsExcel(){
   if(!latestExcelImportResult || !Array.isArray(latestExcelImportResult.issues) || !latestExcelImportResult.issues.length){
     alert("Aucune erreur d'import Ã  exporter.");
@@ -13632,57 +13798,27 @@ async function exportImportErrorsExcelRobust(){
     exportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Export en cours...';
   }
   try{
+    const rows = buildImportIssueExcelRows(latestExcelImportResult.issues);
+    const outsideGlobalRows = rows.filter((row)=>row.segmentKey === 'outside-global');
     const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true, silent: true });
     if(excelReady && typeof ExcelJS !== 'undefined'){
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Cabinet Walid Araqi';
       workbook.created = new Date();
       const summarySheet = workbook.addWorksheet('Resume', { views: [{ state: 'frozen', ySplit: 4 }] });
-      const issueSheet = workbook.addWorksheet('Erreurs import', { views: [{ state: 'frozen', ySplit: 1 }] });
-      const safeSummary = String(latestExcelImportResult.summary || '').trim();
-      const summaryLines = safeSummary ? safeSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean) : ['Import Excel'];
-      summarySheet.mergeCells('A1:H1');
-      summarySheet.getCell('A1').value = latestExcelImportResult.title || "Rapport d'erreurs import Audience";
-      summarySheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
-      summarySheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1D4ED8' } };
-      summarySheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
-      summarySheet.mergeCells('A2:H2');
-      summarySheet.getCell('A2').value = `Genere le ${formatDateTimeDisplay(new Date())}`;
-      summarySheet.getCell('A2').font = { italic: true, color: { argb: '334155' } };
-      summaryLines.forEach((line, index)=>{
-        const rowNumber = 4 + index;
-        const row = summarySheet.getRow(rowNumber);
-        summarySheet.mergeCells(`A${rowNumber}:H${rowNumber}`);
-        row.getCell(1).value = line;
-        row.getCell(1).font = { bold: index === 0, color: { argb: '0F172A' } };
-        row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index === 0 ? 'DBEAFE' : 'F8FAFC' } };
+      const issueSheet = workbook.addWorksheet('Erreurs import', { views: [{ state: 'frozen', ySplit: 3 }] });
+      const outsideSheet = workbook.addWorksheet('Hors global', { views: [{ state: 'frozen', ySplit: 3 }] });
+      buildImportIssueSummarySheet(summarySheet, rows, latestExcelImportResult.summary || '', latestExcelImportResult.title || "Rapport d'erreurs import Audience");
+      appendImportIssueExcelSection(issueSheet, rows, {
+        title: latestExcelImportResult.title || "Rapport d'erreurs import Audience",
+        subtitle: `Total lignes a verifier: ${rows.length}`,
+        headerFill: '1E3A8A'
       });
-      summarySheet.columns = [{ width: 24 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }];
-      const headers = ['Severite', 'Ligne', 'Source', 'Zone', 'Ref dossier', 'Ref client', 'Debiteur', 'Procedure', 'Tribunal', 'Date audience', 'Sort', 'Date depot', 'Statut', 'Message', 'Contexte'];
-      const headerRow = issueSheet.addRow(headers);
-      headerRow.eachCell((cell)=>{
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E3A8A' } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      appendImportIssueExcelSection(outsideSheet, outsideGlobalRows, {
+        title: 'Lignes hors dossier global',
+        subtitle: outsideGlobalRows.length ? `${outsideGlobalRows.length} ligne(s) necessitent une verification manuelle prioritaire` : 'Aucune ligne hors dossier global detectee',
+        headerFill: 'EA580C'
       });
-      latestExcelImportResult.issues.forEach((issue)=>{
-        const meta = getExcelImportSeverityMeta(issue?.severity);
-        const row = issueSheet.addRow([
-          meta.label, issue?.rowNumber || '', issue?.source || '', issue?.zone || '', issue?.refDossier || '',
-          issue?.refClient || '', issue?.debiteur || '', issue?.procedure || '', issue?.tribunal || '',
-          issue?.audienceDate || '', issue?.sort || '', issue?.dateDepot || '', issue?.statut || '',
-          issue?.message || '', issue?.context || ''
-        ]);
-        const fillColor = meta.key === 'warning' ? 'FFFBEB' : (meta.key === 'info' ? 'EFF6FF' : 'FEF2F2');
-        const fontColor = meta.key === 'warning' ? '92400E' : (meta.key === 'info' ? '1D4ED8' : 'B91C1C');
-        row.eachCell((cell)=>{
-          cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
-          cell.font = { color: { argb: fontColor }, bold: cell.col === 1 || cell.col === 14 };
-        });
-      });
-      issueSheet.columns = [{ width: 16 }, { width: 10 }, { width: 14 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 24 }, { width: 18 }, { width: 18 }, { width: 15 }, { width: 16 }, { width: 15 }, { width: 18 }, { width: 48 }, { width: 30 }];
-      issueSheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, issueSheet.rowCount), column: headers.length } };
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const now = new Date();
@@ -13700,30 +13836,48 @@ async function exportImportErrorsExcelRobust(){
       const wb = XLSX.utils.book_new();
       const safeSummary = String(latestExcelImportResult.summary || '').trim();
       const summaryRows = (safeSummary ? safeSummary.split(/\r?\n/) : ['Import Excel']).map((line)=>[String(line || '').trim()]);
-      const issueRows = latestExcelImportResult.issues.map((issue)=>{
-        const meta = getExcelImportSeverityMeta(issue?.severity);
-        return {
-          Severite: meta.label,
-          Ligne: issue?.rowNumber || '',
-          Source: issue?.source || '',
-          Zone: issue?.zone || '',
-          RefDossier: issue?.refDossier || '',
-          RefClient: issue?.refClient || '',
-          Debiteur: issue?.debiteur || '',
-          Procedure: issue?.procedure || '',
-          Tribunal: issue?.tribunal || '',
-          DateAudience: issue?.audienceDate || '',
-          Sort: issue?.sort || '',
-          DateDepot: issue?.dateDepot || '',
-          Statut: issue?.statut || '',
-          Message: issue?.message || '',
-          Contexte: issue?.context || ''
-        };
-      });
+      const issueRows = rows.map((issue)=>({
+        Segment: issue.segmentLabel,
+        Severite: issue.severityLabel,
+        Ligne: issue.rowNumber,
+        Source: issue.source,
+        Zone: issue.zone,
+        RefDossier: issue.refDossier,
+        RefClient: issue.refClient,
+        Debiteur: issue.debiteur,
+        Procedure: issue.procedure,
+        Tribunal: issue.tribunal,
+        DateAudience: issue.audienceDate,
+        Sort: issue.sort,
+        DateDepot: issue.dateDepot,
+        Statut: issue.statut,
+        Message: issue.message,
+        Contexte: issue.context
+      }));
+      const outsideRows = outsideGlobalRows.map((issue)=>({
+        Segment: issue.segmentLabel,
+        Severite: issue.severityLabel,
+        Ligne: issue.rowNumber,
+        Source: issue.source,
+        Zone: issue.zone,
+        RefDossier: issue.refDossier,
+        RefClient: issue.refClient,
+        Debiteur: issue.debiteur,
+        Procedure: issue.procedure,
+        Tribunal: issue.tribunal,
+        DateAudience: issue.audienceDate,
+        Sort: issue.sort,
+        DateDepot: issue.dateDepot,
+        Statut: issue.statut,
+        Message: issue.message,
+        Contexte: issue.context
+      }));
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
       const wsIssues = XLSX.utils.json_to_sheet(issueRows);
+      const wsOutside = XLSX.utils.json_to_sheet(outsideRows.length ? outsideRows : [{ Segment: 'Hors dossier global', Message: 'Aucune ligne hors dossier global detectee.' }]);
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Resume');
       XLSX.utils.book_append_sheet(wb, wsIssues, 'Erreurs import');
+      XLSX.utils.book_append_sheet(wb, wsOutside, 'Hors global');
       const fallbackBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       const fallbackBlob = new Blob([fallbackBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const now = new Date();

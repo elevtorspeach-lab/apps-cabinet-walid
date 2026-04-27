@@ -9,7 +9,6 @@
     "start": "node scripts/start-electron.cjs",
     "start:fast": "node scripts/start-electron.cjs",
     "start:server-mode": "node scripts/start-electron.cjs",
-    "set:server-ip": "node set-server-ip.js",
     "build:mac": "electron-builder --mac --x64",
     "build:win": "electron-builder --win portable --x64",
     "build:win:portable": "electron-builder --win portable --x64"

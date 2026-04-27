@@ -24,11 +24,13 @@ function resolveDesktopWindowIconPath() {
         path.join(__dirname, 'build', 'icon.png'),
         path.join(__dirname, 'build', 'icon.ico')
       ];
+
   for (const candidate of iconCandidates) {
     try {
       if (fs.existsSync(candidate)) return candidate;
     } catch (_) {}
   }
+
   return undefined;
 }
 
@@ -44,6 +46,7 @@ function escapeHtml(value) {
 function buildLoadErrorHtml(appUrl, detail = '') {
   const safeAppUrl = escapeHtml(appUrl);
   const safeDetail = escapeHtml(detail);
+
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -65,12 +68,12 @@ function buildLoadErrorHtml(appUrl, detail = '') {
 <body>
   <main>
     <h1>Connexion au serveur impossible</h1>
-    <p>Le desktop app dépend entièrement de la version web hébergée sur cette adresse.</p>
+    <p>Le desktop app depend entierement de la version web hebergee sur cette adresse.</p>
     <code>${safeAppUrl}</code>
     <div class="status">Le serveur n'est pas accessible pour le moment.</div>
     ${safeDetail ? `<p>${safeDetail}</p>` : ''}
     <div class="actions">
-      <button onclick="location.reload()">Réessayer</button>
+      <button onclick="location.reload()">Reessayer</button>
       <button class="secondary" onclick="window.open('${safeAppUrl}', '_blank')">Ouvrir l'URL</button>
     </div>
   </main>
@@ -97,15 +100,6 @@ async function createWindow() {
     }
   });
 
-  const loadWebApp = async () => {
-    try {
-      await win.loadURL(DESKTOP_APP_URL);
-    } catch (error) {
-      const html = buildLoadErrorHtml(DESKTOP_APP_URL, String(error?.message || error || 'Erreur inconnue'));
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    }
-  };
-
   win.webContents.on('did-fail-load', async (_event, errorCode, errorDescription, validatedUrl) => {
     if (String(validatedUrl || '').startsWith('data:text/html')) return;
     const html = buildLoadErrorHtml(DESKTOP_APP_URL, `${errorCode} - ${errorDescription}`);
@@ -131,7 +125,15 @@ async function createWindow() {
     shell.openExternal(url);
   });
 
-  await loadWebApp();
+  try {
+    await win.loadURL(DESKTOP_APP_URL);
+  } catch (error) {
+    const html = buildLoadErrorHtml(
+      DESKTOP_APP_URL,
+      String(error?.message || error || 'Erreur inconnue')
+    );
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  }
 }
 
 configureDesktopUserDataPath();

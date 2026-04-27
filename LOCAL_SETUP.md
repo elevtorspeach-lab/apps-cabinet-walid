@@ -2,9 +2,9 @@
 
 To test the application locally without pushing changes to GitHub, follow these steps:
 
-## Clean MySQL + Wi-Fi IP Setup
+## Clean MySQL + Desktop Online Setup
 
-If you want a fresh empty database and you want the app to connect through the server Wi-Fi IP:
+If you want a fresh empty database and you want the desktop app to connect to the hosted local server:
 
 1. Copy `server/.env.example` to `server/.env`.
 2. Update the MySQL values in `server/.env`:
@@ -19,22 +19,12 @@ If you want a fresh empty database and you want the app to connect through the s
    cd server
    npm run db:reset
    ```
-5. Save the Wi-Fi server IP for the desktop app:
-   ```bash
-   cd desktop-app
-   npm run set:server-ip
-   ```
-   Or set it manually:
-   ```bash
-   cd desktop-app
-   node set-server-ip.js 192.168.1.20
-   ```
-6. Start the API:
+5. Start the API:
    ```bash
    cd server
    npm start
    ```
-7. The desktop app will read the server IP from `desktop-app/server_ip.txt` and connect to `http://<wifi-ip>:3000`.
+6. The desktop app connects directly to `http://192.168.1.11:3000/`.
 
 ## Windows Auto-Start For The API
 
