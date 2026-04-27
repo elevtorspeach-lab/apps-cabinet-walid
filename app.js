@@ -16978,6 +16978,18 @@ function renderClients(options = {}){
     });
 }
 
+function confirmDangerousAction(message, options = {}){
+  const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
+  if(!window.confirm(String(message || '').trim())) return false;
+  const typed = window.prompt(`Action sensible.\nTapez ${confirmationWord} pour confirmer.`);
+  if(typed === null) return false;
+  if(String(typed || '').trim().toUpperCase() !== confirmationWord){
+    alert('Confirmation invalide. Action annulee.');
+    return false;
+  }
+  return true;
+}
+
 function deleteClient(clientId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un client');
   const idx = AppState.clients.findIndex(c=>c.id == clientId);
@@ -16987,7 +16999,7 @@ function deleteClient(clientId){
   const warning = dossierCount > 0
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
-  if(!window.confirm(warning)) return;
+  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
   forceDeletionSafetyBackup('delete-client');
 
   pushRecycleBinEntry('client_delete', {
