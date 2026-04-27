@@ -2622,7 +2622,7 @@ function applyRemoteSlicePatchLocally(patchKind, patch){
       if(existingIdx !== -1){
         AppState.clients[existingIdx] = incomingClient;
       }else{
-        AppState.clients.push(incomingClient);
+        AppState.clients.unshift(incomingClient);
       }
       if(Array.isArray(patch.users)){
         USERS = ensureManagerUser(
@@ -5434,7 +5434,20 @@ function getVisibleClients(){
   ){
     return visibleClientsCache;
   }
-  const next = AppState.clients.filter(c=>canViewClient(c));
+  const next = AppState.clients
+    .filter(c=>canViewClient(c))
+    .slice()
+    .sort((a, b)=>{
+      const createdAtA = Date.parse(String(a?.createdAt || '').trim());
+      const createdAtB = Date.parse(String(b?.createdAt || '').trim());
+      const safeCreatedAtA = Number.isFinite(createdAtA) ? createdAtA : 0;
+      const safeCreatedAtB = Number.isFinite(createdAtB) ? createdAtB : 0;
+      if(safeCreatedAtA !== safeCreatedAtB) return safeCreatedAtB - safeCreatedAtA;
+      const idA = Number(a?.id || 0);
+      const idB = Number(b?.id || 0);
+      if(idA !== idB) return idB - idA;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' });
+    });
   visibleClientsCache = next;
   visibleClientsCacheVersion = dossierDataVersion;
   visibleClientsCacheUserKey = userKey;
@@ -8680,6 +8693,7 @@ function normalizeClient(rawClient, options = {}){
   const deepNormalize = opts.deep !== false;
   const id = Number(rawClient.id);
   const name = String(rawClient.name || '').trim();
+  const createdAt = String(rawClient.createdAt || '').trim();
   const dossiers = Array.isArray(rawClient.dossiers)
     ? (
       deepNormalize
@@ -8711,7 +8725,7 @@ function normalizeClient(rawClient, options = {}){
     )
     : [];
   if(!Number.isFinite(id) || !name) return null;
-  return { id, name, dossiers };
+  return { id, name, createdAt, dossiers };
 }
 
 function normalizeRecycleBinEntries(rawEntries){
@@ -9648,11 +9662,11 @@ function restoreAllRecycleItems(){
   alert(`Restauration terminée: ${restoredCount} élément(s) restauré(s).`);
 }
 
-function clearRecycleBinToBackup(){
+async function clearRecycleBinToBackup(){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut vider la corbeille');
   const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
   if(!items.length) return alert('Corbeille vide');
-  if(!confirmDangerousAction(
+  if(!await confirmDangerousAction(
     `Vider la corbeille (${items.length} element(s)) ?\nLes elements seront gardes dans le backup interne.`,
     { confirmationWord: 'VIDER' }
   )) return;
@@ -13288,13 +13302,75 @@ function renderStructuredExcelImportIssues(issues = [], container){
   return true;
 }
 
+function renderProfessionalExcelImportIssues(issues = [], container){
+  if(!container) return false;
+  const safeIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
+  if(!safeIssues.length) return false;
+  const sections = [
+    ['skipped', 'Lignes non importees'],
+    ['warning', 'Avertissements'],
+    ['info', 'Informations']
+  ];
+  const counts = safeIssues.reduce((acc, issue)=>{
+    const key = normalizeExcelImportSeverity(issue?.severity);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, { skipped: 0, warning: 0, info: 0 });
+  const html = ['<div class="import-error-summary import-error-summary-pro">'];
+  sections.forEach(([key, label])=>{
+    const count = Number(counts[key] || 0);
+    if(!count) return;
+    const meta = getExcelImportSeverityMeta(key);
+    html.push(`<div class="import-error-summary-chip ${meta.chipClass}"><i class="${meta.icon}"></i><span>${count} ${escapeHtml(label)}</span></div>`);
+  });
+  html.push('</div>');
+  sections.forEach(([severityKey, sectionLabel])=>{
+    const sectionIssues = safeIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === severityKey);
+    if(!sectionIssues.length) return;
+    const meta = getExcelImportSeverityMeta(severityKey);
+    html.push(`<section class="import-error-section ${meta.chipClass}">`);
+    html.push('<div class="import-error-section-head">');
+    html.push(`<span class="import-error-section-badge">${escapeHtml(meta.label)}</span>`);
+    html.push(`<div class="import-error-section-title">${sectionIssues.length} ${escapeHtml(sectionLabel)}</div>`);
+    html.push('</div>');
+    sectionIssues.forEach((issue, index)=>{
+      const lineLabel = issue?.rowNumber ? `Ligne ${escapeHtml(String(issue.rowNumber))}` : `Entree ${index + 1}`;
+      const fields = [
+        ['Source', issue?.source], ['Zone', issue?.zone], ['Ref dossier', issue?.refDossier], ['Ref client', issue?.refClient],
+        ['Debiteur', issue?.debiteur], ['Procedure', issue?.procedure], ['Tribunal', issue?.tribunal], ['Date audience', issue?.audienceDate],
+        ['Sort', issue?.sort], ['Date depot', issue?.dateDepot], ['Statut', issue?.statut], ['Contexte', issue?.context]
+      ].filter(([, value])=>String(value || '').trim());
+      html.push(`<article class="import-error-card import-error-card-pro ${meta.chipClass}">`);
+      html.push('<div class="import-error-card-head">');
+      html.push(`<div class="import-error-card-title">${lineLabel}</div>`);
+      html.push(`<span class="import-error-card-index">#${index + 1}</span>`);
+      html.push('</div>');
+      html.push(`<div class="import-error-message">${escapeHtml(String(issue?.message || '').trim() || 'Erreur import Excel')}</div>`);
+      if(fields.length){
+        html.push('<div class="import-error-fields">');
+        fields.forEach(([label, value])=>{
+          html.push('<div class="import-error-field">');
+          html.push(`<span class="import-error-field-label">${escapeHtml(label)}</span>`);
+          html.push(`<span class="import-error-field-value">${escapeHtml(String(value).trim())}</span>`);
+          html.push('</div>');
+        });
+        html.push('</div>');
+      }
+      html.push('</article>');
+    });
+    html.push('</section>');
+  });
+  container.innerHTML = html.join('');
+  return true;
+}
+
 function renderExcelImportIssues(issuesText, container, issues = [], summary = ''){
   if(!container) return;
   const text = String(issuesText || '').trim() || 'Aucune erreur.';
   const safeIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
   container.dataset.copyText = buildExcelImportIssueCopyText(summary, safeIssues, text);
 
-  if(renderStructuredExcelImportIssues(safeIssues, container)){
+  if(renderProfessionalExcelImportIssues(safeIssues, container) || renderStructuredExcelImportIssues(safeIssues, container)){
     return;
   }
 
@@ -17069,8 +17145,9 @@ async function addClient(name){
     goToCreation(existing.id);
     return;
   }
-  const newClient = { id: Date.now(), name, dossiers: [] };
-  AppState.clients.push(newClient);
+  const newClient = { id: Date.now(), name, createdAt: new Date().toISOString(), dossiers: [] };
+  AppState.clients.unshift(newClient);
+  paginationState.clients = 1;
   handleDossierDataChange({ audience: false });
   persistClientPatchNow({
     action: 'create',
@@ -17251,12 +17328,67 @@ function renderClients(options = {}){
     });
 }
 
-function confirmDangerousAction(message, options = {}){
+function requestDangerousActionWord(confirmationWord, message = ''){
+  return new Promise((resolve)=>{
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;z-index:100000;';
+    const card = document.createElement('div');
+    card.style.cssText = 'width:min(100%,420px);background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.24);border:1px solid #dbe4f0;padding:20px;';
+    const title = document.createElement('h3');
+    title.textContent = 'Confirmation requise';
+    title.style.cssText = 'margin:0 0 10px;color:#1e3a8a;font-size:20px;';
+    const text = document.createElement('p');
+    text.textContent = String(message || '').trim() || 'Cette action est irreversible.';
+    text.style.cssText = 'margin:0 0 10px;color:#334155;font-size:14px;line-height:1.5;white-space:pre-wrap;';
+    const helper = document.createElement('p');
+    helper.textContent = `Tapez ${confirmationWord} pour confirmer.`;
+    helper.style.cssText = 'margin:0 0 12px;color:#475569;font-size:14px;';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = confirmationWord;
+    input.autocomplete = 'off';
+    input.style.cssText = 'width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px;font-size:15px;outline:none;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:16px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.style.cssText = 'border:1px solid #cbd5e1;background:#fff;color:#334155;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Valider';
+    confirmBtn.style.cssText = 'border:1px solid #dc2626;background:#dc2626;color:#fff;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;';
+    const cleanup = (value)=>{
+      document.removeEventListener('keydown', onKeyDown, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKeyDown = (event)=>{
+      if(event.key === 'Escape'){
+        event.preventDefault();
+        cleanup(null);
+      }else if(event.key === 'Enter'){
+        event.preventDefault();
+        cleanup(input.value);
+      }
+    };
+    cancelBtn.onclick = ()=>cleanup(null);
+    confirmBtn.onclick = ()=>cleanup(input.value);
+    backdrop.onclick = (event)=>{
+      if(event.target === backdrop) cleanup(null);
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    actions.append(cancelBtn, confirmBtn);
+    card.append(title, text, helper, input, actions);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    setTimeout(()=>input.focus(), 0);
+  });
+}
+
+async function confirmDangerousAction(message, options = {}){
   const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
-  if(!window.confirm(String(message || '').trim())) return false;
-  const typed = window.prompt(
-    `Action sensible.\nTapez ${confirmationWord} pour confirmer.`
-  );
+  const typed = await requestDangerousActionWord(confirmationWord, String(message || '').trim());
   if(typed === null) return false;
   if(String(typed || '').trim().toUpperCase() !== confirmationWord){
     alert('Confirmation invalide. Action annulee.');
@@ -17265,7 +17397,7 @@ function confirmDangerousAction(message, options = {}){
   return true;
 }
 
-function deleteClient(clientId){
+async function deleteClient(clientId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un client');
   const idx = AppState.clients.findIndex(c=>c.id == clientId);
   if(idx === -1) return;
@@ -17274,7 +17406,7 @@ function deleteClient(clientId){
   const warning = dossierCount > 0
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
-  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
+  if(!await confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
 
   pushRecycleBinEntry('client_delete', {
     client: JSON.parse(JSON.stringify(client || {})),
@@ -17301,7 +17433,7 @@ function deleteClient(clientId){
   refreshPrimaryViews({ includeRecycle: true, refreshClientDropdown: true });
 }
 
-function deleteAllClients(){
+async function deleteAllClients(){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer tous les clients');
   const totalClients = AppState.clients.length;
   if(!totalClients) return alert('Aucun client à supprimer');
@@ -17312,7 +17444,7 @@ function deleteAllClients(){
   const warning =
     `Supprimer TOUS les clients (${totalClients}) et TOUS les dossiers (${totalDossiers}) ?\n\n`
     + 'Cette action est irréversible.';
-  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
+  if(!await confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
 
   pushRecycleBinEntry('all_clients_delete', {
     clients: JSON.parse(JSON.stringify(AppState.clients || [])),
@@ -17485,6 +17617,7 @@ async function addDossier(){
       queuePersistAppState();
     }
 
+    paginationState.suivi = 1;
     refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi' });
   }catch(err){
     console.error(err);
@@ -17652,7 +17785,23 @@ function isSuiviRowDuplicate(row){
   return Number(row?.__suiviDuplicateCount || 0) >= 2;
 }
 
+function getSuiviCreationPriority(row){
+  return row?.d?.isManualEntry === true ? 1 : 0;
+}
+
 function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
+  const creationPriorityA = getSuiviCreationPriority(a);
+  const creationPriorityB = getSuiviCreationPriority(b);
+  if(creationPriorityA !== creationPriorityB){
+    return creationPriorityB - creationPriorityA;
+  }
+
+  const createdAtA = Number(a?.createdAtTs || 0);
+  const createdAtB = Number(b?.createdAtTs || 0);
+  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
+    return createdAtB - createdAtA;
+  }
+
   if(pairCounts){
     const pairKeyA = a?.__suiviPairKey || buildSuiviRefDebiteurKey(a);
     const pairKeyB = b?.__suiviPairKey || buildSuiviRefDebiteurKey(b);
@@ -17666,12 +17815,6 @@ function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
       const byPair = pairKeyA.localeCompare(pairKeyB, 'fr', { numeric: true, sensitivity: 'base' });
       if(byPair !== 0) return byPair;
     }
-  }
-
-  const createdAtA = Number(a?.createdAtTs || 0);
-  const createdAtB = Number(b?.createdAtTs || 0);
-  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
-    return createdAtB - createdAtA;
   }
 
   const refA = String(a?.d?.referenceClient || '').trim();
@@ -18528,24 +18671,34 @@ function hydrateSuiviBaseRows(rawRows){
 
 function buildSortedSuiviRows(rawRows){
   const rows = Array.isArray(rawRows) ? rawRows : [];
-  let sortedDefaultRows = rows;
+  let sortedDefaultRows = rows
+    .slice()
+    .sort((a, b)=>{
+      const createdAtA = Number(a?.createdAtTs || 0);
+      const createdAtB = Number(b?.createdAtTs || 0);
+      if(createdAtA !== createdAtB) return createdAtB - createdAtA;
+      return String(a?.d?.referenceClient || '').localeCompare(String(b?.d?.referenceClient || ''), 'fr', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+    });
   const visibleClientCount = getVisibleClients().length;
   const shouldSkipDefaultSort =
     rows.length > SUIVI_DEFAULT_SORT_MAX_ROWS
     || (visibleClientCount >= SUIVI_HEAVY_SORT_MAX_CLIENTS && rows.length >= SUIVI_HEAVY_SORT_MAX_ROWS);
   if(!shouldSkipDefaultSort){
     const duplicatePairCounts = new Map();
-    rows.forEach((row)=>{
+    sortedDefaultRows.forEach((row)=>{
       const key = row.__suiviPairKey || buildSuiviRefDebiteurKey(row);
       if(!key) return;
       duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
     });
-    applySuiviDuplicateCounts(rows, duplicatePairCounts);
-    sortedDefaultRows = rows
+    applySuiviDuplicateCounts(sortedDefaultRows, duplicatePairCounts);
+    sortedDefaultRows = sortedDefaultRows
       .slice()
       .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
   }else{
-    applySuiviDuplicateCounts(rows);
+    applySuiviDuplicateCounts(sortedDefaultRows);
   }
   return sortedDefaultRows;
 }
