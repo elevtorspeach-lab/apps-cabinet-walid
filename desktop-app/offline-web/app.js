@@ -8942,7 +8942,10 @@ function clearRecycleBinToBackup(){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut vider la corbeille');
   const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
   if(!items.length) return alert('Corbeille vide');
-  if(!window.confirm(`Vider la corbeille (${items.length} élément(s)) ?\nLes éléments seront gardés dans le backup interne.`)) return;
+  if(!confirmDangerousAction(
+    `Vider la corbeille (${items.length} élément(s)) ?\nLes éléments seront gardés dans le backup interne.`,
+    { confirmationWord: 'VIDER' }
+  )) return;
   pushRecycleArchiveEntries(items);
   AppState.recycleBin = [];
   queuePersistAppState();
@@ -9682,8 +9685,19 @@ async function runWithHeavyUiOperation(task){
   }
 }
 
+function isEditableElementActive(){
+  if(typeof document === 'undefined') return false;
+  const active = document.activeElement;
+  if(!active || typeof active.matches !== 'function') return false;
+  if(active.matches('textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="range"])')){
+    return !active.disabled && !active.readOnly;
+  }
+  return active.isContentEditable === true;
+}
+
 function getRemoteRefreshBlocker(){
   if(typeof document !== 'undefined' && document.hidden) return 'hidden';
+  if(isEditableElementActive()) return 'typing';
   if(editingDossier) return 'editing';
   if(importInProgress) return 'import';
   if(heavyUiOperationCount > 0) return 'busy';
@@ -16317,6 +16331,18 @@ function renderClients(options = {}){
     });
 }
 
+function confirmDangerousAction(message, options = {}){
+  const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
+  if(!window.confirm(String(message || '').trim())) return false;
+  const typed = window.prompt(`Action sensible.\nTapez ${confirmationWord} pour confirmer.`);
+  if(typed === null) return false;
+  if(String(typed || '').trim().toUpperCase() !== confirmationWord){
+    alert('Confirmation invalide. Action annulee.');
+    return false;
+  }
+  return true;
+}
+
 function deleteClient(clientId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un client');
   const idx = AppState.clients.findIndex(c=>c.id == clientId);
@@ -16326,7 +16352,7 @@ function deleteClient(clientId){
   const warning = dossierCount > 0
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
-  if(!window.confirm(warning)) return;
+  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
 
   pushRecycleBinEntry('client_delete', {
     client: JSON.parse(JSON.stringify(client || {})),

@@ -16058,28 +16058,28 @@ function setupEvents(){
     handleAppsavocatImportFile(file).catch(err=>console.error(err));
     e.target.value = '';
   });
-  $('dashboardLink').onclick = ()=>showView('dashboard');
-  $('clientsLink').onclick = ()=>showView('clients');
-  $('creationLink').onclick = ()=>{
+  $('dashboardLink')?.addEventListener('click', ()=>showView('dashboard'));
+  $('clientsLink')?.addEventListener('click', ()=>showView('clients'));
+  $('creationLink')?.addEventListener('click', ()=>{
     creationPinnedClientId = '';
     resetCreationForm();
     showView('creation');
-  };
-  $('suiviLink').onclick = ()=>{
+  });
+  $('suiviLink')?.addEventListener('click', ()=>{
     filterSuiviStatus = 'all';
     filterSuiviAttDepotOnly = false;
     showView('suivi');
-  };
-  $('audienceLink').onclick = ()=>showView('audience');
-  $('diligenceLink').onclick = ()=>{
+  });
+  $('audienceLink')?.addEventListener('click', ()=>showView('audience'));
+  $('diligenceLink')?.addEventListener('click', ()=>{
     syncDiligenceMiseAPrixFilterVisibility();
     showView('diligence');
-  };
-  $('salleLink').onclick = ()=>showView('salle');
+  });
+  $('salleLink')?.addEventListener('click', ()=>showView('salle'));
   $('equipeLink')?.addEventListener('click', ()=>showView('equipe'));
   $('recycleLink')?.addEventListener('click', ()=>showView('recycle'));
 
-  $('loginBtn').onclick = login;
+  $('loginBtn')?.addEventListener('click', login);
   $('bootstrapSetupBtn')?.addEventListener('click', ()=>{
     const mode = String($('bootstrapSetupBtn')?.dataset.mode || PASSWORD_SETUP_MODE_BOOTSTRAP_LOCAL);
     openPasswordSetupModal({ mode });
@@ -16090,7 +16090,7 @@ function setupEvents(){
   $('password')?.addEventListener('keydown', (e)=>{
     if(e.key === 'Enter') login();
   });
-  $('logoutBtn').onclick = logout;
+  $('logoutBtn')?.addEventListener('click', logout);
   $('closeDossierModalBtn')?.addEventListener('click', closeDossierModal);
   $('closeImportResultModalBtn')?.addEventListener('click', closeImportResultModal);
   $('closeExportPreviewModalBtn')?.addEventListener('click', closeExportPreviewModal);
@@ -16115,7 +16115,7 @@ function setupEvents(){
     closeImportResultModal();
     closeExportPreviewModal();
   });
-  $('addClientBtn').onclick = ()=>addClient($('clientName').value);
+  $('addClientBtn')?.addEventListener('click', ()=>addClient($('clientName').value));
   $('selectClient')?.addEventListener('change', ()=>{
     if(creationPinnedClientId && String($('selectClient')?.value || '') !== String(creationPinnedClientId)){
       creationPinnedClientId = '';
@@ -16157,7 +16157,7 @@ function setupEvents(){
     handleAudienceImportFile(file).catch(err=>console.error(err));
     e.target.value = '';
   });
-  $('addDossierBtn').onclick = addDossier;
+  $('addDossierBtn')?.addEventListener('click', addDossier);
   $('referenceClientInput')?.addEventListener('input', ()=>{
     clearCreationReferenceClientError();
   });
