@@ -131,6 +131,7 @@ function buildUsers(clientIds) {
 
 function generateFixture() {
   const benchClientNames = resolveBenchClientNames();
+  const audienceProcedures = ['Restitution', 'Nantissement', 'Redressement', 'Liquidation judiciaire', 'Sanlam'];
   const diligenceProcedures = ['ASS', 'Commandement', 'SFDC', 'S/bien', 'Injonction'];
   const tribunals = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Agadir', 'Oujda', 'Meknès'];
   const villes = ['Casablanca', 'Rabat', 'Marrakech', 'Fès', 'Tanger', 'Kenitra', 'Tétouan', 'Safi'];
@@ -152,6 +153,7 @@ function generateFixture() {
 
     for (let dossierIndex = 0; dossierIndex < numDossiers; dossierIndex += 1) {
       dossierCount += 1;
+      const remainingDossiers = TARGET_DOSSIERS - dossierCount;
       const refClient = `REF-${clientId}-${dossierIndex + 1}`;
       const debiteur = `Debiteur ${dossierCount}`;
       const ville = villes[dossierCount % villes.length];
@@ -159,13 +161,37 @@ function generateFixture() {
       const montantByProcedure = {};
       const selectedProcedures = [];
 
+      if (audienceCount < TARGET_AUDIENCE) {
+        const audienceProc = audienceProcedures[(audienceCount + dossierCount) % audienceProcedures.length];
+        selectedProcedures.push(audienceProc);
+        audienceCount += 1;
+      }
       if (diligenceCount < TARGET_DILIGENCE) {
-        const diligenceProc = diligenceProcedures[dossierCount % diligenceProcedures.length];
-        selectedProcedures.push(diligenceProc);
-        diligenceCount += 1;
-        if (isAudienceProcedure(diligenceProc)) {
-          audienceCount += 1;
+        const diligenceProc = diligenceProcedures[(diligenceCount + dossierCount) % diligenceProcedures.length];
+        if (!selectedProcedures.includes(diligenceProc)) {
+          selectedProcedures.push(diligenceProc);
         }
+        diligenceCount += 1;
+      }
+      while (
+        audienceCount < TARGET_AUDIENCE
+        && selectedProcedures.length < 5
+        && (TARGET_AUDIENCE - audienceCount) > remainingDossiers
+      ) {
+        const extraAudienceProc = audienceProcedures[(audienceCount + dossierCount + selectedProcedures.length) % audienceProcedures.length];
+        if (selectedProcedures.includes(extraAudienceProc)) break;
+        selectedProcedures.push(extraAudienceProc);
+        audienceCount += 1;
+      }
+      while (
+        diligenceCount < TARGET_DILIGENCE
+        && selectedProcedures.length < 5
+        && (TARGET_DILIGENCE - diligenceCount) > remainingDossiers
+      ) {
+        const extraDiligenceProc = diligenceProcedures[(diligenceCount + dossierCount + selectedProcedures.length) % diligenceProcedures.length];
+        if (selectedProcedures.includes(extraDiligenceProc)) break;
+        selectedProcedures.push(extraDiligenceProc);
+        diligenceCount += 1;
       }
 
       for (const proc of selectedProcedures) {

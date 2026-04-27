@@ -886,11 +886,17 @@ async function doAudienceExport(session) {
   await showView(session, 'audience');
   const downloadPromise = captureDownloadResult(session.page, 180000);
   const details = await session.page.evaluate(async () => {
-    const rows = typeof getAudienceRowsForRegularExport === 'function'
-      ? getAudienceRowsForRegularExport().length
+    if (typeof setAllFilteredAudienceRowsForPrint === 'function') {
+      setAllFilteredAudienceRowsForPrint(false);
+    }
+    if (typeof setAllVisibleAudienceRowsForPrint === 'function') {
+      setAllVisibleAudienceRowsForPrint(true);
+    }
+    const selected = typeof audiencePrintSelection !== 'undefined' && audiencePrintSelection
+      ? audiencePrintSelection.size
       : null;
-    await exportAudienceRegularXLS();
-    return { rows };
+    await exportAudienceXLS({ blankSort: true });
+    return { selected };
   });
   const downloadResult = await downloadPromise;
   if (!downloadResult.ok) {

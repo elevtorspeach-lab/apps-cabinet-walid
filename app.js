@@ -2505,7 +2505,7 @@ function applyRemoteSlicePatchLocally(patchKind, patch){
       if(existingIdx !== -1){
         AppState.clients[existingIdx] = incomingClient;
       }else{
-        AppState.clients.push(incomingClient);
+        AppState.clients.unshift(incomingClient);
       }
       if(Array.isArray(patch.users)){
         USERS = ensureManagerUser(
@@ -5071,7 +5071,20 @@ function getVisibleClients(){
   ){
     return visibleClientsCache;
   }
-  const next = AppState.clients.filter(c=>canViewClient(c));
+  const next = AppState.clients
+    .filter(c=>canViewClient(c))
+    .slice()
+    .sort((a, b)=>{
+      const createdAtA = Date.parse(String(a?.createdAt || '').trim());
+      const createdAtB = Date.parse(String(b?.createdAt || '').trim());
+      const safeCreatedAtA = Number.isFinite(createdAtA) ? createdAtA : 0;
+      const safeCreatedAtB = Number.isFinite(createdAtB) ? createdAtB : 0;
+      if(safeCreatedAtA !== safeCreatedAtB) return safeCreatedAtB - safeCreatedAtA;
+      const idA = Number(a?.id || 0);
+      const idB = Number(b?.id || 0);
+      if(idA !== idB) return idB - idA;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' });
+    });
   visibleClientsCache = next;
   visibleClientsCacheVersion = dossierDataVersion;
   visibleClientsCacheUserKey = userKey;
@@ -8313,6 +8326,7 @@ function normalizeClient(rawClient, options = {}){
   const deepNormalize = opts.deep !== false;
   const id = Number(rawClient.id);
   const name = String(rawClient.name || '').trim();
+  const createdAt = String(rawClient.createdAt || '').trim();
   const dossiers = Array.isArray(rawClient.dossiers)
     ? (
       deepNormalize
@@ -8344,7 +8358,7 @@ function normalizeClient(rawClient, options = {}){
     )
     : [];
   if(!Number.isFinite(id) || !name) return null;
-  return { id, name, dossiers };
+  return { id, name, createdAt, dossiers };
 }
 
 function normalizeRecycleBinEntries(rawEntries){
@@ -16781,8 +16795,9 @@ async function addClient(name){
     goToCreation(existing.id);
     return;
   }
-  const newClient = { id: Date.now(), name, dossiers: [] };
-  AppState.clients.push(newClient);
+  const newClient = { id: Date.now(), name, createdAt: new Date().toISOString(), dossiers: [] };
+  AppState.clients.unshift(newClient);
+  paginationState.clients = 1;
   handleDossierDataChange({ audience: false });
   persistClientPatchNow({
     action: 'create',
@@ -17179,6 +17194,7 @@ async function addDossier(){
       queuePersistAppState();
     }
 
+    paginationState.suivi = 1;
     refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi' });
   }catch(err){
     console.error(err);
@@ -17347,6 +17363,12 @@ function isSuiviRowDuplicate(row){
 }
 
 function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
+  const createdAtA = Number(a?.createdAtTs || 0);
+  const createdAtB = Number(b?.createdAtTs || 0);
+  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
+    return createdAtB - createdAtA;
+  }
+
   if(pairCounts){
     const pairKeyA = a?.__suiviPairKey || buildSuiviRefDebiteurKey(a);
     const pairKeyB = b?.__suiviPairKey || buildSuiviRefDebiteurKey(b);
@@ -17360,12 +17382,6 @@ function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
       const byPair = pairKeyA.localeCompare(pairKeyB, 'fr', { numeric: true, sensitivity: 'base' });
       if(byPair !== 0) return byPair;
     }
-  }
-
-  const createdAtA = Number(a?.createdAtTs || 0);
-  const createdAtB = Number(b?.createdAtTs || 0);
-  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
-    return createdAtB - createdAtA;
   }
 
   const refA = String(a?.d?.referenceClient || '').trim();
@@ -18126,24 +18142,34 @@ function hydrateSuiviBaseRows(rawRows){
 
 function buildSortedSuiviRows(rawRows){
   const rows = Array.isArray(rawRows) ? rawRows : [];
-  let sortedDefaultRows = rows;
+  let sortedDefaultRows = rows
+    .slice()
+    .sort((a, b)=>{
+      const createdAtA = Number(a?.createdAtTs || 0);
+      const createdAtB = Number(b?.createdAtTs || 0);
+      if(createdAtA !== createdAtB) return createdAtB - createdAtA;
+      return String(a?.d?.referenceClient || '').localeCompare(String(b?.d?.referenceClient || ''), 'fr', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+    });
   const visibleClientCount = getVisibleClients().length;
   const shouldSkipDefaultSort =
     rows.length > SUIVI_DEFAULT_SORT_MAX_ROWS
     || (visibleClientCount >= SUIVI_HEAVY_SORT_MAX_CLIENTS && rows.length >= SUIVI_HEAVY_SORT_MAX_ROWS);
   if(!shouldSkipDefaultSort){
     const duplicatePairCounts = new Map();
-    rows.forEach((row)=>{
+    sortedDefaultRows.forEach((row)=>{
       const key = row.__suiviPairKey || buildSuiviRefDebiteurKey(row);
       if(!key) return;
       duplicatePairCounts.set(key, (duplicatePairCounts.get(key) || 0) + 1);
     });
-    applySuiviDuplicateCounts(rows, duplicatePairCounts);
-    sortedDefaultRows = rows
+    applySuiviDuplicateCounts(sortedDefaultRows, duplicatePairCounts);
+    sortedDefaultRows = sortedDefaultRows
       .slice()
       .sort((a, b)=>compareSuiviRowsByReferenceProximity(a, b, duplicatePairCounts));
   }else{
-    applySuiviDuplicateCounts(rows);
+    applySuiviDuplicateCounts(sortedDefaultRows);
   }
   return sortedDefaultRows;
 }
