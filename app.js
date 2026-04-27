@@ -16978,10 +16978,65 @@ function renderClients(options = {}){
     });
 }
 
-function confirmDangerousAction(message, options = {}){
+function requestDangerousActionWord(confirmationWord){
+  return new Promise((resolve)=>{
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;z-index:100000;';
+    const card = document.createElement('div');
+    card.style.cssText = 'width:min(100%,420px);background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.24);border:1px solid #dbe4f0;padding:20px;';
+    const title = document.createElement('h3');
+    title.textContent = 'Confirmation requise';
+    title.style.cssText = 'margin:0 0 10px;color:#1e3a8a;font-size:20px;';
+    const text = document.createElement('p');
+    text.textContent = `Tapez ${confirmationWord} pour confirmer.`;
+    text.style.cssText = 'margin:0 0 12px;color:#475569;font-size:14px;';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = confirmationWord;
+    input.autocomplete = 'off';
+    input.style.cssText = 'width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px;font-size:15px;outline:none;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:16px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.style.cssText = 'border:1px solid #cbd5e1;background:#fff;color:#334155;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Valider';
+    confirmBtn.style.cssText = 'border:1px solid #dc2626;background:#dc2626;color:#fff;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;';
+    const cleanup = (value)=>{
+      document.removeEventListener('keydown', onKeyDown, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKeyDown = (event)=>{
+      if(event.key === 'Escape'){
+        event.preventDefault();
+        cleanup(null);
+      }else if(event.key === 'Enter'){
+        event.preventDefault();
+        cleanup(input.value);
+      }
+    };
+    cancelBtn.onclick = ()=>cleanup(null);
+    confirmBtn.onclick = ()=>cleanup(input.value);
+    backdrop.onclick = (event)=>{
+      if(event.target === backdrop) cleanup(null);
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    actions.append(cancelBtn, confirmBtn);
+    card.append(title, text, input, actions);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    setTimeout(()=>input.focus(), 0);
+  });
+}
+
+async function confirmDangerousAction(message, options = {}){
   const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
   if(!window.confirm(String(message || '').trim())) return false;
-  const typed = window.prompt(`Action sensible.\nTapez ${confirmationWord} pour confirmer.`);
+  const typed = await requestDangerousActionWord(confirmationWord);
   if(typed === null) return false;
   if(String(typed || '').trim().toUpperCase() !== confirmationWord){
     alert('Confirmation invalide. Action annulee.');
@@ -16990,7 +17045,7 @@ function confirmDangerousAction(message, options = {}){
   return true;
 }
 
-function deleteClient(clientId){
+async function deleteClient(clientId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un client');
   const idx = AppState.clients.findIndex(c=>c.id == clientId);
   if(idx === -1) return;
@@ -16999,7 +17054,7 @@ function deleteClient(clientId){
   const warning = dossierCount > 0
     ? `Supprimer le client "${client.name}" et ses ${dossierCount} dossier(s) ?`
     : `Supprimer le client "${client.name}" ?`;
-  if(!confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
+  if(!await confirmDangerousAction(warning, { confirmationWord: 'SUPPRIMER' })) return;
   forceDeletionSafetyBackup('delete-client');
 
   pushRecycleBinEntry('client_delete', {
