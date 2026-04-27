@@ -17132,7 +17132,7 @@ function renderClients(options = {}){
     });
 }
 
-function requestDangerousActionWord(confirmationWord){
+function requestDangerousActionWord(confirmationWord, message = ''){
   return new Promise((resolve)=>{
     const backdrop = document.createElement('div');
     backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;z-index:100000;';
@@ -17142,8 +17142,11 @@ function requestDangerousActionWord(confirmationWord){
     title.textContent = 'Confirmation requise';
     title.style.cssText = 'margin:0 0 10px;color:#1e3a8a;font-size:20px;';
     const text = document.createElement('p');
-    text.textContent = `Tapez ${confirmationWord} pour confirmer.`;
-    text.style.cssText = 'margin:0 0 12px;color:#475569;font-size:14px;';
+    text.textContent = String(message || '').trim() || 'Cette action est irreversible.';
+    text.style.cssText = 'margin:0 0 10px;color:#334155;font-size:14px;line-height:1.5;white-space:pre-wrap;';
+    const helper = document.createElement('p');
+    helper.textContent = `Tapez ${confirmationWord} pour confirmer.`;
+    helper.style.cssText = 'margin:0 0 12px;color:#475569;font-size:14px;';
     const input = document.createElement('input');
     input.type = 'text';
     input.placeholder = confirmationWord;
@@ -17180,7 +17183,7 @@ function requestDangerousActionWord(confirmationWord){
     };
     document.addEventListener('keydown', onKeyDown, true);
     actions.append(cancelBtn, confirmBtn);
-    card.append(title, text, input, actions);
+    card.append(title, text, helper, input, actions);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
     setTimeout(()=>input.focus(), 0);
@@ -17189,8 +17192,7 @@ function requestDangerousActionWord(confirmationWord){
 
 async function confirmDangerousAction(message, options = {}){
   const confirmationWord = String(options.confirmationWord || 'SUPPRIMER').trim().toUpperCase();
-  if(!window.confirm(String(message || '').trim())) return false;
-  const typed = await requestDangerousActionWord(confirmationWord);
+  const typed = await requestDangerousActionWord(confirmationWord, String(message || '').trim());
   if(typed === null) return false;
   if(String(typed || '').trim().toUpperCase() !== confirmationWord){
     alert('Confirmation invalide. Action annulee.');
