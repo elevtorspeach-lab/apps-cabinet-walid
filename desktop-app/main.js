@@ -16,6 +16,16 @@ const SERVER_RETRY_INTERVAL_MS = 4000;
 const SERVER_IP_CONFIG_PATH = path.join(__dirname, 'server_ip.txt');
 let desktopServerStartPromise = null;
 
+function configureDesktopUserDataPath() {
+  const preferredPath = path.join(__dirname, '.electron-user-data');
+  try {
+    fs.mkdirSync(preferredPath, { recursive: true });
+    app.setPath('userData', preferredPath);
+  } catch (error) {
+    console.warn('Unable to set Electron userData path.', error);
+  }
+}
+
 function getPowerShellExecutableCandidates() {
   const candidates = [];
   const windowsRootCandidates = [
@@ -66,6 +76,28 @@ function resolveCmdExecutable() {
     } catch (_) {}
   }
   return 'cmd.exe';
+}
+
+function resolveDesktopWindowIconPath() {
+  const iconCandidates = process.platform === 'win32'
+    ? [
+        path.join(__dirname, 'build', 'icon.ico'),
+        path.join(process.resourcesPath || '', 'build', 'icon.ico'),
+        path.join(__dirname, 'build', 'icon.png'),
+        path.join(process.resourcesPath || '', 'build', 'icon.png')
+      ]
+    : [
+        path.join(__dirname, 'build', 'icon.png'),
+        path.join(process.resourcesPath || '', 'build', 'icon.png'),
+        path.join(__dirname, 'build', 'icon.ico'),
+        path.join(process.resourcesPath || '', 'build', 'icon.ico')
+      ];
+  for (const candidate of iconCandidates) {
+    try {
+      if (candidate && fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+  return undefined;
 }
 
 function escapeHtml(value) {
@@ -414,6 +446,7 @@ async function resolveAppIndexPath() {
 
 async function createWindow() {
   Menu.setApplicationMenu(null);
+  const windowIconPath = resolveDesktopWindowIconPath();
 
   const win = new BrowserWindow({
     width: 1400,
@@ -421,7 +454,7 @@ async function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     title: 'Cabinet Walid Araqi',
-    icon: path.join(__dirname, 'build', 'icon.png'),
+    icon: windowIconPath,
     backgroundColor: '#f0f2f5',
     show: false,
     webPreferences: {
@@ -504,6 +537,8 @@ async function createWindow() {
     shell.openExternal(url);
   });
 }
+
+configureDesktopUserDataPath();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {

@@ -6,15 +6,16 @@
   "author": "Cabinet Walid Araqi",
   "private": true,
   "scripts": {
-    "start": "electron .",
-    "start:fast": "electron .",
-    "start:server-mode": "electron .",
+    "start": "node scripts/start-electron.cjs",
+    "start:fast": "node scripts/start-electron.cjs",
+    "start:server-mode": "node scripts/start-electron.cjs",
     "set:server-ip": "node set-server-ip.js",
+    "build:web": "npm --prefix ../client run build",
     "sync:web-assets": "npm --prefix ../client run build && node scripts/sync-offline-web.mjs",
     "verify:web-assets": "node scripts/validate-offline-sync.mjs",
-    "build:mac": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --mac --x64",
-    "build:win": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --win portable --x64",
-    "build:win:portable": "npm run sync:web-assets && npm run verify:web-assets && electron-builder --win portable --x64"
+    "build:mac": "npm run build:web && electron-builder --mac --x64",
+    "build:win": "npm run build:web && electron-builder --win portable --x64",
+    "build:win:portable": "npm run build:web && electron-builder --win portable --x64"
   },
   "devDependencies": {
     "electron": "^30.5.1",
@@ -27,9 +28,18 @@
     "files": [
       "main.js",
       "preload.js",
-      "offline-web/**/*"
+      "build/icon.png",
+      "build/icon.ico",
+      "build/icon-256.png"
     ],
     "extraResources": [
+      {
+        "from": "../client/dist",
+        "to": "client/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "../server",
         "to": "server",
