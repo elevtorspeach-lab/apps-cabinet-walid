@@ -846,103 +846,6 @@ function buildBackupFileName(ts = new Date()) {
   return `state_${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}_${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}.json`;
 }
 
-function parseBackupFileMetadata(fileName) {
-  const safeName = String(fileName || '').trim();
-  const match = safeName.match(/^state_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.json$/i);
-  if (!match) return null;
-  const [, year, month, day, hour, minute, second] = match;
-  const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`;
-  const timestamp = Date.parse(iso);
-  if (!Number.isFinite(timestamp)) return null;
-  return {
-    fileName: safeName,
-    timestamp,
-    iso,
-    dayKey: `${year}-${month}-${day}`
-  };
-}
-
-function parseRestoreDateInput(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-  const dayOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (dayOnly) {
-    const [, year, month, day] = dayOnly;
-    const startIso = `${year}-${month}-${day}T00:00:00.000Z`;
-    const startTimestamp = Date.parse(startIso);
-    if (!Number.isFinite(startTimestamp)) return null;
-    return {
-      raw,
-      dayKey: `${year}-${month}-${day}`,
-      isDayOnly: true,
-      timestamp: startTimestamp
-    };
-  }
-  const timestamp = Date.parse(raw);
-  if (!Number.isFinite(timestamp)) return null;
-  const iso = new Date(timestamp).toISOString();
-  return {
-    raw,
-    dayKey: iso.slice(0, 10),
-    isDayOnly: false,
-    timestamp
-  };
-}
-
-async function listBackupSnapshots() {
-  try {
-    const entries = await fsp.readdir(BACKUP_DIR, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-      .map((entry) => parseBackupFileMetadata(entry.name))
-      .filter(Boolean)
-      .sort((a, b) => b.timestamp - a.timestamp);
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return [];
-    throw err;
-  }
-}
-
-function pickBackupSnapshot(backups, options = {}) {
-  const safeBackups = Array.isArray(backups) ? backups : [];
-  const requestedFileName = String(options.fileName || '').trim();
-  if (requestedFileName) {
-    return safeBackups.find((entry) => entry.fileName === requestedFileName) || null;
-  }
-
-  const requestedDate = parseRestoreDateInput(options.date);
-  if (!requestedDate) return safeBackups[0] || null;
-
-  if (requestedDate.isDayOnly) {
-    return safeBackups.find((entry) => entry.dayKey === requestedDate.dayKey) || null;
-  }
-
-  let closest = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const entry of safeBackups) {
-    const distance = Math.abs(entry.timestamp - requestedDate.timestamp);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      closest = entry;
-    }
-  }
-  return closest;
-}
-
-async function readBackupSnapshotFile(fileName) {
-  const metadata = parseBackupFileMetadata(fileName);
-  if (!metadata) {
-    throw new Error('Invalid backup file name.');
-  }
-  const filePath = path.join(BACKUP_DIR, metadata.fileName);
-  const raw = await fsp.readFile(filePath, 'utf8');
-  const parsed = JSON.parse(raw);
-  return {
-    metadata,
-    payload: parsed && typeof parsed === 'object' ? parsed : {}
-  };
-}
-
 async function pruneBackupFiles() {
   try {
     const entries = await fsp.readdir(BACKUP_DIR, { withFileTypes: true });
@@ -958,16 +861,14 @@ async function pruneBackupFiles() {
   }
 }
 
-async function maybeWriteBackupSnapshot(state, options = {}) {
+async function maybeWriteBackupSnapshot(state) {
   const now = Date.now();
-  const force = options.force === true;
-  if (!force && lastBackupAt && (now - lastBackupAt) < SERVER_BACKUP_MIN_INTERVAL_MS) return;
+  if (lastBackupAt && (now - lastBackupAt) < SERVER_BACKUP_MIN_INTERVAL_MS) return;
   const signature = buildBackupSignature(state);
-  if (!force && signature && signature === lastBackupSignature) return;
+  if (signature && signature === lastBackupSignature) return;
 
   const snapshot = {
     savedAt: new Date(now).toISOString(),
-    reason: String(options.reason || '').trim() || undefined,
     ...state
   };
   await fsp.mkdir(BACKUP_DIR, { recursive: true });
@@ -2087,76 +1988,6 @@ app.get('/api/state/meta', async (req, res) => {
         : buildStateExportMetadataForSession(state, req.authSession)
     )
   });
-});
-
-app.get('/api/state/backups', async (req, res) => {
-  try {
-    await ensureDataFile();
-    const backups = await listBackupSnapshots();
-    return res.json({
-      ok: true,
-      backups: backups.map((entry) => ({
-        fileName: entry.fileName,
-        timestamp: entry.timestamp,
-        iso: entry.iso,
-        dayKey: entry.dayKey
-      }))
-    });
-  } catch (err) {
-    return sendJsonError(res, 500, 'BACKUP_LIST_FAILED', 'Backup list failed.', err);
-  }
-});
-
-app.post('/api/state/backups/restore', async (req, res) => {
-  try {
-    const result = await enqueueStateMutation(async () => {
-      await ensureDataFile();
-      const body = getRequestBodyObject(req);
-      const sourceId = String(body?._sourceId || '').trim();
-      const currentState = await readState();
-      const backups = await listBackupSnapshots();
-      const selected = pickBackupSnapshot(backups, {
-        fileName: body?.fileName,
-        date: body?.date
-      });
-      if (!selected) {
-        throw new Error('Backup not found for the requested date.');
-      }
-
-      const backupSnapshot = await readBackupSnapshotFile(selected.fileName);
-      await maybeWriteBackupSnapshot(currentState, {
-        force: true,
-        reason: `before-restore:${selected.fileName}`
-      });
-
-      const restoredState = normalizeStoredState(backupSnapshot.payload, currentState);
-      const saved = await writeStateSnapshot(restoredState, { clearJournal: true });
-      broadcastStateUpdated({
-        ...saved,
-        sourceId,
-        patchKind: 'restore-backup',
-        patch: {
-          fileName: selected.fileName,
-          requestedDate: String(body?.date || '').trim() || null
-        }
-      });
-      return {
-        saved,
-        restoredFrom: {
-          fileName: selected.fileName,
-          iso: selected.iso,
-          timestamp: selected.timestamp,
-          dayKey: selected.dayKey
-        }
-      };
-    });
-
-    return sendVersionedOk(res, result.saved, {
-      restoredFrom: result.restoredFrom
-    });
-  } catch (err) {
-    return sendJsonError(res, 400, 'BACKUP_RESTORE_FAILED', 'Backup restore failed.', err);
-  }
 });
 
 app.get('/api/state/export-page', async (req, res) => {

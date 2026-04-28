@@ -2912,6 +2912,23 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   color:#b91c1c;
   font-weight:700;
 }
+.date-input-invalid{
+  border-color:#ef4444 !important;
+  background:#fff1f2 !important;
+  box-shadow:0 0 0 2px rgba(239,68,68,.25) !important;
+}
+.date-inline-error{
+  margin-top:3px;
+  font-size:11px;
+  line-height:1.2;
+  color:#dc2626;
+  font-weight:700;
+  letter-spacing:.01em;
+}
+.audience-date-field{
+  display:flex;
+  flex-direction:column;
+}
 
 @media (max-width: 600px){
   #audienceSection{
@@ -4704,24 +4721,24 @@ td[data-label="Actions"] .btn-danger{
   background:#b18af0;
 }
 
-#audienceSection tbody tr.color-blue td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-blue:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-green td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-green:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-red td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-red:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-yellow td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-yellow:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-document-ok td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-document-ok:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-purple-dark td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-purple-dark:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-purple-light td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-purple-light:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-green-purple td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-green-purple:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-yellow-purple td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
-#audienceSection tbody tr.color-yellow-purple:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input){
+#audienceSection tbody tr.color-blue td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-blue:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-green td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-green:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-red td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-red:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-yellow td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-yellow:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-document-ok td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-document-ok:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-purple-dark td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-purple-dark:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-purple-light td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-purple-light:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-green-purple td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-green-purple:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-yellow-purple td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-yellow-purple:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid){
   background:transparent;
 }
 

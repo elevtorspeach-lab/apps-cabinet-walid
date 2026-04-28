@@ -217,6 +217,94 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   `;
 }
 
+function renderAudienceRowHtml(row, duplicateKeySet){
+  const { c, d, procKey, p, key, draft } = row;
+  const canEdit = canEditClient(c) && canEditData();
+  const canView = Number.isFinite(Number(row?.c?.id)) && Number.isFinite(Number(row?.di));
+  const safeColor = getAudienceRowEffectiveColor(row);
+  const resolvedStatus = String(row?.__resolvedStatus || d?.statut || 'En cours').trim() || 'En cours';
+  const resolvedStatusDetail = String(row?.__resolvedStatusDetail || d?.statutDetails || '').trim();
+  const duplicateKey = buildAudienceDuplicateKey(row);
+  const isDuplicate = !!(duplicateKey && duplicateKeySet.has(duplicateKey));
+  const hasError = isAudienceRowInvalid(row, duplicateKeySet);
+  const isMissingGlobal = !!row?.p?._missingGlobal;
+  const isRefClientMismatch = !!row?.p?._refClientMismatch;
+  const audienceImportErrorMessage = String(row?.p?._audienceImportErrorMessage || '').trim();
+  const canFixRefClient = canEdit && (isRefClientMismatch || isMissingGlobal);
+  const refClientCellClass = (isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch' : '';
+  const refClientDisplay = isRefClientMismatch
+    ? String(row?.p?._refClientProvided || d.referenceClient || '-')
+    : String(d.referenceClient || '-');
+  const refClientErrorMessage = isMissingGlobal
+    ? 'Audience introuvable dans le dossier global. Modifiez la reference client ou la reference dossier, puis appuyez sur Entree pour relancer le rapprochement.'
+    : (isRefClientMismatch
+      ? 'Ref client audience introuvable dans le dossier global. Modifiez-la ici pour corriger rapidement.'
+      : '');
+  const refDossierErrorMessage = audienceImportErrorMessage || (isMissingGlobal ? 'Introuvable dans dossier global' : '');
+  const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
+  const procKeyEncoded = encodeURIComponent(String(procKey));
+  const keyEncoded = encodeURIComponent(String(key));
+  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
+  const displayDateDepot = getAudienceDateDepotDisplayValue(row);
+  const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
+  const tribunalValue = String(draft.tribunal || p.tribunal || '').trim();
+  const dateDepotValue = displayDateDepot === '-' ? '' : displayDateDepot;
+  const audienceDateInvalid = parseStrictAudienceDateValue(audienceDateValue).invalid;
+  const dateDepotInvalid = parseStrictAudienceDateValue(dateDepotValue).invalid;
+  return `
+    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
+      <td data-label="SÃ©lection">
+        <input type="checkbox" class="audience-print-check"
+          data-ci="${row.ci}"
+          data-di="${row.di}"
+          data-proc-key="${procKeyEncoded}"
+          ${isPrintChecked ? 'checked' : ''}
+          onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
+      </td>
+      <td data-label="Client">${escapeHtml(c.name)}</td>
+      <td data-label="RÃ©fÃ©rence Client" class="${refClientCellClass}">
+        ${canFixRefClient
+          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
+          : escapeHtml(refClientDisplay)
+        }
+        ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
+      </td>
+      <td data-label="DÃ©biteur">${escapeHtml(d.debiteur || '-')}</td>
+      <td data-label="RÃ©fÃ©rence dossier">
+        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
+        ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
+      </td>
+      <td data-label="Date dâ€™audience">
+        <div class="audience-date-field">
+          <input class="${audienceDateInvalid ? 'date-input-invalid' : ''}" value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="handleAudienceDateInputFromEncoded('${keyEncoded}','dateAudience',this)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateAudience',this,event)" aria-invalid="${audienceDateInvalid ? 'true' : 'false'}">
+          <div class="date-inline-error" ${audienceDateInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
+        </div>
+      </td>
+      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
+      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
+      <td data-label="Tribunal"><input value="${escapeAttr(tribunalValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','tribunal',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','tribunal',this,event)"></td>
+      <td data-label="ProcÃ©dure">${escapeHtml(procKey || '-')}</td>
+      <td data-label="Date dÃ©pÃ´t">
+        <div class="audience-date-field">
+          <input class="${dateDepotInvalid ? 'date-input-invalid' : ''}" value="${escapeAttr(dateDepotValue)}" ${canEdit ? '' : 'readonly'} oninput="handleAudienceDateInputFromEncoded('${keyEncoded}','dateDepot',this)" onblur="normalizeAudienceDateDepotDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateDepot',this,event)" aria-invalid="${dateDepotInvalid ? 'true' : 'false'}">
+          <div class="date-inline-error" ${dateDepotInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
+        </div>
+      </td>
+      <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
+      <td data-label="Actions">
+        <div class="table-actions">
+          <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
+            <i class="fa-solid fa-eye"></i>
+          </button>
+          <button type="button" class="btn-primary" ${(canEdit && canView) ? `onclick="editDossier(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
+            <i class="fa-solid fa-pen"></i>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
 function renderAudienceVirtualWindow(force = false){
   const body = $('audienceBody');
   if(!body) return;

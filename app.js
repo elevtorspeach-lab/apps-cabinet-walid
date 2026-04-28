@@ -89,9 +89,6 @@ let filterAudienceColor = 'all';
 let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
-let filterAudienceSort = '';
-let filterAudienceDateDepot = '';
-let filterAudienceJuge = '';
 let filterAudienceErrorsOnly = false;
 let filterAudienceCheckedFirst = false;
 let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1 };
@@ -1162,9 +1159,10 @@ function getAudienceProcedureFieldValue(procData, draftField){
   if(!procData || !draftField) return '';
   if(draftField === 'refDossier') return procData.referenceClient;
   if(draftField === 'dateAudience') return procData.audience;
+  if(draftField === 'dateDepot') return procData.depotLe || procData.dateDepot || '';
+  if(draftField === 'tribunal') return procData.tribunal;
   if(draftField === 'juge') return procData.juge;
   if(draftField === 'sort') return procData.sort;
-  if(draftField === 'dateDepot') return procData.depotLe || procData.dateDepot;
   return procData[draftField];
 }
 
@@ -3942,7 +3940,7 @@ function ensureClientExcelFillControls(){
   button.id = 'fillClientExcelBtn';
   button.className = 'btn-primary';
   button.type = 'button';
-  button.innerHTML = '<i class="fa-solid fa-file-circle-plus"></i> Remplir Excel client';
+  button.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client';
 
   const input = document.createElement('input');
   input.id = 'fillClientExcelInput';
@@ -10580,7 +10578,6 @@ async function importAppsavocatPayload(rawPayload){
 
     let addedClients = 0;
     let addedDossiers = 0;
-    let skippedDossiers = 0;
 
     const reportClientsProgress = makeProgressReporter('Import Cabinet Walid Araqi - clients');
     await runChunked(importedClients, async (importedClient)=>{
@@ -10607,19 +10604,8 @@ async function importAppsavocatPayload(rawPayload){
       importedClientIdToResolvedId.set(importedClientId, Number(target.id));
     }
 
-    const existingSignatures = new Set(
-      (Array.isArray(target.dossiers) ? target.dossiers : [])
-        .map(d=>makeDossierMergeSignature(d))
-        .filter(Boolean)
-    );
     const importedDossiers = Array.isArray(importedClient.dossiers) ? importedClient.dossiers : [];
     importedDossiers.forEach(dossier=>{
-      const signature = makeDossierMergeSignature(dossier);
-      if(signature && existingSignatures.has(signature)){
-        skippedDossiers += 1;
-        return;
-      }
-      if(signature) existingSignatures.add(signature);
       if(!Array.isArray(target.dossiers)) target.dossiers = [];
       target.dossiers.push(dossier);
       addedDossiers += 1;
@@ -10675,7 +10661,6 @@ async function importAppsavocatPayload(rawPayload){
         'Import Cabinet Walid Araqi terminé.',
         `Clients ajoutés: ${addedClients}`,
         `Dossiers ajoutés: ${addedDossiers}`,
-        `Dossiers ignorés (doublons): ${skippedDossiers}`,
         `Utilisateurs ajoutés: ${addedUsers}`,
         `Salles fusionnées: ${AppState.salleAssignments.length}`,
         `Audience hors global rapprochée: ${reconciliation.matchedDossiers}`
@@ -12690,7 +12675,7 @@ function parseExcelData(rows, sheet = null){
 
     let carriedAffectationDate = '';
     let carriedMontant = '';
-    let carriedClientName = '';
+    let emptyDossierRowStreak = 0;
     for(let j=i + 1; j<rows.length; j++){
       const row = rows[j] || [];
       const rowMap = buildHeaderMap(row);
@@ -12710,8 +12695,7 @@ function parseExcelData(rows, sheet = null){
         : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
       const adversaire = idx.adversaire !== -1 ? String(row[idx.adversaire] || '').trim() : '';
       const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
-      const rawClientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
-      const clientName = rawClientName || carriedClientName;
+      const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
       const gestionnaire = idx.gestionnaire !== -1 ? String(row[idx.gestionnaire] || '').trim() : '';
@@ -12760,7 +12744,12 @@ function parseExcelData(rows, sheet = null){
       const sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
       const isEmptyDossierRow = !refClient && !debiteur && !adversaire && !sanlamNRef && !clientName && !procedureText && !type && !montant && !dateAffectation;
-      if(isEmptyDossierRow) break;
+      if(isEmptyDossierRow){
+        emptyDossierRowStreak += 1;
+        if(emptyDossierRowStreak >= 5) break;
+        continue;
+      }
+      emptyDossierRowStreak = 0;
       const hasExplicitReferences = !!(refAssignation || refRestitution || refSfdc || refInjonction);
       const hasOtherDossierSignals = !!(
         immatriculation
@@ -12795,12 +12784,8 @@ function parseExcelData(rows, sheet = null){
         if(montant) carriedMontant = montant;
         continue;
       }
-      const isClientTitleRow = /^client\s*:/i.test(rawClientName) && !refClient && !debiteur && !procedureText && !type && !montant;
-      if(isClientTitleRow){
-        carriedClientName = String(rawClientName).replace(/^client\s*:\s*/i, '').trim();
-        continue;
-      }
-      if(rawClientName) carriedClientName = rawClientName;
+      const isClientTitleRow = /^client\s*:/i.test(clientName) && !refClient && !debiteur && !procedureText && !type && !montant;
+      if(isClientTitleRow) continue;
 
       dossiers.push({
         rowNumber: j + 1,
@@ -12853,7 +12838,6 @@ function parseExcelData(rows, sheet = null){
       });
       carriedAffectationDate = '';
       carriedMontant = '';
-      carriedClientName = '';
     }
   }
 
@@ -12879,6 +12863,7 @@ function parseExcelData(rows, sheet = null){
       statut: getColIndex(map, audienceHeaderKeys.statut)
     };
 
+    let emptyAudienceRowStreak = 0;
     for(let j=i+1; j<rows.length; j++){
       const row = rows[j] || [];
       const refDossier = idx.refDossier !== -1 ? String(row[idx.refDossier] || '').trim() : '';
@@ -12887,7 +12872,12 @@ function parseExcelData(rows, sheet = null){
         : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
       const refClient = idx.refClient !== -1 ? String(row[idx.refClient] || '').trim() : '';
       const sanlamSinistre = idx.sanlamSinistre !== -1 ? String(row[idx.sanlamSinistre] || '').trim() : '';
-      if(!refDossier && !debiteur && !refClient && !sanlamSinistre) break;
+      if(!refDossier && !debiteur && !refClient && !sanlamSinistre){
+        emptyAudienceRowStreak += 1;
+        if(emptyAudienceRowStreak >= 5) break;
+        continue;
+      }
+      emptyAudienceRowStreak = 0;
       const sortOrdText = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const importColorMeta = getAudienceOrdonnanceMetaFromValue(sortOrdText);
       audiences.push({
@@ -13906,7 +13896,7 @@ async function exportImportErrorsExcelRobust(){
       const now = new Date();
       const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '_', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0')].join('');
       const baseName = String(latestExcelImportResult.filenameBase || 'audience_import_erreurs').trim() || 'audience_import_erreurs';
-      await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: true });
+      await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: false });
       return;
     }
     throw new Error('ExcelJS indisponible');
@@ -14213,9 +14203,6 @@ function resetAudienceFiltersUi(){
   filterAudienceProcedure = 'all';
   filterAudienceTribunal = 'all';
   filterAudienceDate = '';
-  filterAudienceSort = '';
-  filterAudienceDateDepot = '';
-  filterAudienceJuge = '';
   filterAudienceErrorsOnly = false;
   filterAudienceCheckedFirst = false;
   setSelectedAudienceColor('all', false);
@@ -14225,9 +14212,6 @@ function resetAudienceFiltersUi(){
   if($('filterAudienceProcedure')) $('filterAudienceProcedure').value = 'all';
   if($('filterAudienceTribunal')) $('filterAudienceTribunal').value = '';
   if($('filterAudienceDate')) $('filterAudienceDate').value = '';
-  if($('filterAudienceSort')) $('filterAudienceSort').value = '';
-  if($('filterAudienceDateDepot')) $('filterAudienceDateDepot').value = '';
-  if($('filterAudienceJuge')) $('filterAudienceJuge').value = '';
   if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
   const errBtn = $('audienceErrorsBtn');
   if(errBtn) errBtn.classList.remove('active');
@@ -14826,10 +14810,7 @@ async function applyExcelImport(payload, options = {}){
     if(unknownProcedureTokens.length){
       addWarningImportIssue(`${rowNumberLabel}: procédure inconnue (${unknownProcedureTokens.join(', ')})${dossierContext}`);
     }
-    const clientName = String(row.clientName || '').trim() || 'Client introuvable';
-    if(clientName === 'Client introuvable'){
-      addWarningImportIssue(`${rowNumberLabel}: client introuvable dans Excel - dossier rattaché au client provisoire "Client introuvable"${dossierContext}`);
-    }
+    const clientName = row.clientName || row.debiteur || 'Client';
     const clientKey = String(clientName).trim().toLowerCase();
     let client = clientMap.get(clientKey);
     if(!client){
@@ -16115,6 +16096,7 @@ function setupEvents(){
   });
   $('deleteAllClientsBtn')?.addEventListener('click', deleteAllClients);
   $('importExcelBtn')?.addEventListener('click', ()=> $('importExcelInput')?.click());
+  $('fillClientExcelClientBtn')?.addEventListener('click', ()=> $('fillClientExcelClientInput')?.click());
   $('exportBackupExcelBtn')?.addEventListener('click', ()=>{
     if(!canEditData()) return alert('Accès refusé');
     exportBackupExcelImportable().catch(err=>console.error(err));
@@ -16127,6 +16109,11 @@ function setupEvents(){
       importDossiers: true,
       importAudiences: false
     }).catch(err=>console.error(err));
+    e.target.value = '';
+  });
+  $('fillClientExcelClientInput')?.addEventListener('change', (e)=>{
+    const file = e.target?.files?.[0];
+    if(file) fillClientExcelFile(file).catch(err=>console.error(err));
     e.target.value = '';
   });
   $('importAudienceExcelBtn')?.addEventListener('click', ()=> $('importAudienceExcelInput')?.click());
@@ -16456,43 +16443,10 @@ function setupEvents(){
     filterAudienceDate = String(e.target?.value || '').trim();
     renderAudience();
   });
-  $('filterAudienceSort')?.addEventListener('input', (e)=>{
-    filterAudienceSort = String(e.target?.value || '').trim();
-    paginationState.audience = 1;
-    renderAudience();
-  });
-  $('filterAudienceSort')?.addEventListener('change', (e)=>{
-    filterAudienceSort = String(e.target?.value || '').trim();
-    paginationState.audience = 1;
-    renderAudience();
-  });
-  $('filterAudienceDateDepot')?.addEventListener('change', (e)=>{
-    filterAudienceDateDepot = String(e.target?.value || '').trim();
-    paginationState.audience = 1;
-    renderAudience();
-  });
-  $('filterAudienceJuge')?.addEventListener('input', (e)=>{
-    filterAudienceJuge = String(e.target?.value || '').trim();
-    paginationState.audience = 1;
-    renderAudience();
-  });
-  $('filterAudienceJuge')?.addEventListener('change', (e)=>{
-    filterAudienceJuge = String(e.target?.value || '').trim();
-    paginationState.audience = 1;
-    renderAudience();
-  });
   $('filterAudienceCheckedOrder')?.addEventListener('change', (e)=>{
     filterAudienceCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderAudience();
   });
-  const audienceTableBody = $('audienceBody');
-  if(audienceTableBody && typeof MutationObserver !== 'undefined'){
-    const observer = new MutationObserver(()=>{
-      enhanceAudienceInlineEditableColumns();
-    });
-    observer.observe(audienceTableBody, { childList: true, subtree: true });
-    enhanceAudienceInlineEditableColumns();
-  }
   $('undoAudienceColorBtn')?.addEventListener('click', undoLastAudienceColorChange);
 
   document.addEventListener('keydown', handleAudienceSaveShortcut);
@@ -17026,7 +16980,7 @@ function applyRoleUI(options = {}){
   // No more manual style.display manipulations here to avoid conflicts.
   setRoleControlledVisibility(['importExcelBtn', 'importAudienceExcelBtn', 'exportBackupExcelBtn'], canImport);
   setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup'], canCreateClient);
-  setRoleControlledVisibility(['fillClientExcelBtn'], canUseClientExcelFill());
+  setRoleControlledVisibility(['fillClientExcelBtn', 'fillClientExcelClientBtn', 'clientExcelFillGroup'], canUseClientExcelFill());
   setRoleControlledVisibility([
     'selectAllSuiviBtn',
     'clearAllSuiviBtn',
@@ -21916,9 +21870,6 @@ function getFilteredAudienceRows(allRows = null){
     filterAudienceProcedure,
     filterAudienceTribunal,
     filterAudienceDate,
-    filterAudienceSort,
-    filterAudienceDateDepot,
-    filterAudienceJuge,
     filterAudienceErrorsOnly ? '1' : '0',
     strictPriorityColorFilter || priorityColor || 'all'
   ].join('||');
@@ -21928,28 +21879,12 @@ function getFilteredAudienceRows(allRows = null){
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
   const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
-  const targetDateDepot = filterAudienceDateDepot ? normalizeIsoDateToDDMMYYYY(filterAudienceDateDepot) : '';
-  const sortNeedle = filterAudienceSort ? String(filterAudienceSort).trim().toLowerCase() : '';
-  const jugeNeedle = filterAudienceJuge ? String(filterAudienceJuge).trim().toLowerCase() : '';
   const filtered = rows.filter(row=>{
     if(filterAudienceProcedure !== 'all' && row.__procFilterKey !== filterAudienceProcedure) return false;
     if(filterAudienceTribunal !== 'all' && row.__tribunalFilterKey !== filterAudienceTribunal) return false;
     if(filterAudienceDate){
       const rowDate = row.__audienceDateDisplay || (row.__audienceDateDisplay = getAudienceRowDateValue(row));
       if(targetDate && rowDate !== targetDate) return false;
-    }
-    if(sortNeedle){
-      const rowSort = String(row?.draft?.sort || row?.p?.sort || '').trim().toLowerCase();
-      if(!rowSort.includes(sortNeedle)) return false;
-    }
-    if(targetDateDepot){
-      const rowDateDepot = getAudienceDateDepotDisplayValue(row);
-      const normalizedRowDepot = normalizeDateDDMMYYYY(rowDateDepot) || rowDateDepot;
-      if(normalizedRowDepot !== targetDateDepot) return false;
-    }
-    if(jugeNeedle){
-      const rowJuge = String(row?.draft?.juge || row?.p?.juge || '').trim().toLowerCase();
-      if(!rowJuge.includes(jugeNeedle)) return false;
     }
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
     if(strictPriorityColorFilter && !audienceRowMatchesColorFilter(row, strictPriorityColorFilter)) return false;
@@ -22141,11 +22076,6 @@ function setAllFilteredAudienceRowsForPrint(checked){
 }
 
 function getAudienceDateDepotDisplayValue(row){
-  const draftDateDepotRaw = String(row?.draft?.dateDepot || '').trim();
-  if(draftDateDepotRaw){
-    return normalizeDateDDMMYYYY(draftDateDepotRaw) || draftDateDepotRaw;
-  }
-
   const depotLeRaw = String(row?.p?.depotLe || '').trim();
   if(depotLeRaw){
     return normalizeDateDDMMYYYY(depotLeRaw) || depotLeRaw;
@@ -22859,8 +22789,6 @@ function hasAudienceProcedureData(procData, draftData, dossier){
     p.sort,
     d.instruction,
     p.instruction,
-    d.tribunal,
-    d.dateDepot,
     p.tribunal
   ];
   return fields.some(value=>String(value || '').trim().length > 0);
@@ -22908,7 +22836,7 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
         di: dossierIndex,
         __dupKey: duplicateKey,
         __procFilterKey: getAudienceProcedureFilterKey(procKey),
-        __tribunalFilterKey: resolveAudienceTribunalFilterKey(draft?.tribunal || p?.tribunal || ''),
+        __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
         __rowReference: refDossier,
         __sortMeta: sortMeta,
         __audienceDateDisplay: audienceDateDisplay
@@ -23492,25 +23420,23 @@ function applyAudienceFieldToProcedure(p, field, value){
     p.audience = normalizedAudience || value;
     return;
   }
+  if(field === 'dateDepot'){
+    const normalizedDepot = normalizeDateDDMMYYYY(value);
+    const nextDepot = normalizedDepot || value;
+    p.dateDepot = nextDepot;
+    p.depotLe = nextDepot;
+    return;
+  }
+  if(field === 'tribunal'){
+    p.tribunal = value;
+    return;
+  }
   if(field === 'juge'){
     p.juge = value;
     return;
   }
   if(field === 'sort'){
     p.sort = value;
-    return;
-  }
-  if(field === 'tribunal'){
-    p.tribunal = String(value || '').trim();
-    return;
-  }
-  if(field === 'dateDepot'){
-    const normalizedDepot = normalizeDateDDMMYYYY(value);
-    const nextDepot = normalizedDepot || String(value || '').trim();
-    p.dateDepot = nextDepot;
-    if(nextDepot){
-      delete p.depotLe;
-    }
   }
 }
 
@@ -23554,10 +23480,10 @@ function updateAudienceDraft(key, field, value){
     refClient: 'referenceClient',
     refDossier: 'procedureDetails.referenceClient',
     dateAudience: 'procedureDetails.audience',
-    juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort',
+    dateDepot: 'procedureDetails.dateDepot',
     tribunal: 'procedureDetails.tribunal',
-    dateDepot: 'procedureDetails.dateDepot'
+    juge: 'procedureDetails.juge',
+    sort: 'procedureDetails.sort'
   };
   if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
@@ -23575,6 +23501,45 @@ function updateAudienceDraft(key, field, value){
 
 function updateAudienceDraftFromEncoded(keyEncoded, field, value){
   updateAudienceDraft(decodeURIComponent(String(keyEncoded)), field, value);
+}
+
+function parseStrictAudienceDateValue(value){
+  const text = String(value || '')
+    .trim()
+    .replace(/[٠-٩]/g, d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  if(!text) return { normalized: '', invalid: false };
+  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(!match) return { normalized: '', invalid: true };
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const dt = new Date(year, month - 1, day);
+  const isValid = !Number.isNaN(dt.getTime())
+    && dt.getFullYear() === year
+    && dt.getMonth() === month - 1
+    && dt.getDate() === day;
+  return {
+    normalized: isValid ? formatDateDDMMYYYY(dt) : '',
+    invalid: !isValid
+  };
+}
+
+function setAudienceDateInputValidationState(inputEl){
+  if(!inputEl) return false;
+  const errorEl = inputEl.parentElement?.querySelector('.date-inline-error');
+  const { invalid } = parseStrictAudienceDateValue(inputEl.value);
+  inputEl.classList.toggle('date-input-invalid', invalid);
+  inputEl.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+  if(errorEl){
+    errorEl.hidden = !invalid;
+  }
+  return invalid;
+}
+
+function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
+  if(!inputEl) return;
+  updateAudienceDraftFromEncoded(keyEncoded, field, inputEl.value);
+  setAudienceDateInputValidationState(inputEl);
 }
 
 function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
@@ -23614,6 +23579,87 @@ function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
   }
   inputEl.value = normalized;
   updateAudienceDraft(key, 'dateDepot', normalized);
+  return true;
+}
+
+function parseStrictAudienceDateValue(value){
+  const text = String(value || '')
+    .trim()
+    .replace(/[٠-٩]/g, d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  if(!text) return { normalized: '', invalid: false };
+  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(!match) return { normalized: '', invalid: true };
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const dt = new Date(year, month - 1, day);
+  const isValid = !Number.isNaN(dt.getTime())
+    && dt.getFullYear() === year
+    && dt.getMonth() === month - 1
+    && dt.getDate() === day;
+  return {
+    normalized: isValid ? formatDateDDMMYYYY(dt) : '',
+    invalid: !isValid
+  };
+}
+
+function setAudienceDateInputValidationState(inputEl){
+  if(!inputEl) return false;
+  const errorEl = inputEl.parentElement?.querySelector('.date-inline-error');
+  const { invalid } = parseStrictAudienceDateValue(inputEl.value);
+  inputEl.classList.toggle('date-input-invalid', invalid);
+  inputEl.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+  if(errorEl){
+    errorEl.hidden = !invalid;
+  }
+  return invalid;
+}
+
+function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
+  if(!inputEl) return;
+  updateAudienceDraftFromEncoded(keyEncoded, field, inputEl.value);
+  setAudienceDateInputValidationState(inputEl);
+}
+
+function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateAudience', '');
+    inputEl.value = '';
+    setAudienceDateInputValidationState(inputEl);
+    return true;
+  }
+  const { normalized, invalid } = parseStrictAudienceDateValue(raw);
+  if(!invalid && normalized){
+    inputEl.value = normalized;
+    updateAudienceDraft(key, 'dateAudience', normalized);
+  }else{
+    updateAudienceDraft(key, 'dateAudience', raw);
+  }
+  setAudienceDateInputValidationState(inputEl);
+  return true;
+}
+
+function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateDepot', '');
+    inputEl.value = '';
+    setAudienceDateInputValidationState(inputEl);
+    return true;
+  }
+  const { normalized, invalid } = parseStrictAudienceDateValue(raw);
+  if(!invalid && normalized){
+    inputEl.value = normalized;
+    updateAudienceDraft(key, 'dateDepot', normalized);
+  }else{
+    updateAudienceDraft(key, 'dateDepot', raw);
+  }
+  setAudienceDateInputValidationState(inputEl);
   return true;
 }
 
@@ -23663,6 +23709,30 @@ function saveAudienceDraftEntry(key, options = {}){
         after
       });
     }
+    if(data.dateDepot !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.tribunal !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
     if(data.juge !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'juge');
       applyAudienceFieldToProcedure(p, 'juge', data.juge);
@@ -23682,30 +23752,6 @@ function saveAudienceDraftEntry(key, options = {}){
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
         field: 'procedureDetails.sort',
-        procedure: procKey,
-        before,
-        after
-      });
-    }
-    if(data.tribunal !== undefined){
-      const before = getAudienceProcedureFieldValue(p, 'tribunal');
-      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
-      const after = getAudienceProcedureFieldValue(p, 'tribunal');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.tribunal',
-        procedure: procKey,
-        before,
-        after
-      });
-    }
-    if(data.dateDepot !== undefined){
-      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
-      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
-      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.dateDepot',
         procedure: procKey,
         before,
         after
@@ -23846,6 +23892,30 @@ function saveAllAudience(options = {}){
         after
       });
     }
+    if(data.dateDepot!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.tribunal!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
     if(data.juge!==undefined){
       const before = getAudienceProcedureFieldValue(p, 'juge');
       applyAudienceFieldToProcedure(p, 'juge', data.juge);
@@ -23865,30 +23935,6 @@ function saveAllAudience(options = {}){
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
         field: 'procedureDetails.sort',
-        procedure: procKey,
-        before,
-        after
-      });
-    }
-    if(data.tribunal!==undefined){
-      const before = getAudienceProcedureFieldValue(p, 'tribunal');
-      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
-      const after = getAudienceProcedureFieldValue(p, 'tribunal');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.tribunal',
-        procedure: procKey,
-        before,
-        after
-      });
-    }
-    if(data.dateDepot!==undefined){
-      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
-      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
-      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.dateDepot',
         procedure: procKey,
         before,
         after
@@ -23939,130 +23985,6 @@ function queueAudienceAutoSave(){
     audienceAutoSaveTimer = null;
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
-}
-
-function normalizeAudienceInlineHeaderLabel(value){
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  return normalized
-    .replace(/d[aÃ]©p[aÃ][´o]t/g, 'depot')
-    .replace(/proc[aÃ]©dure/g, 'procedure')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-function extractAudienceDraftKeyFromInlineHandlerText(text){
-  const source = String(text || '');
-  if(!source) return '';
-  const directMatch = source.match(/(?:updateAudienceDraftFromEncoded|confirmAudienceInlineEditFromEncoded)\('([^']+)'/);
-  if(directMatch && directMatch[1]) return decodeURIComponent(directMatch[1]);
-  const rowMatch = source.match(/(?:toggleAudienceSelectionAndColorEncoded|toggleAudiencePrintSelectionEncoded|setAudienceColorEncoded)\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*'([^']+)'/);
-  if(rowMatch){
-    const ci = String(rowMatch[1] || '').trim();
-    const di = String(rowMatch[2] || '').trim();
-    const procKey = decodeURIComponent(String(rowMatch[3] || ''));
-    return makeAudienceDraftKey(ci, di, procKey);
-  }
-  return '';
-}
-
-function extractAudienceDraftKeyFromRow(row){
-  if(!row) return '';
-  if(String(row.dataset.audienceDraftKey || '').trim()){
-    return row.dataset.audienceDraftKey;
-  }
-  const elements = row.querySelectorAll('input, select, button, label');
-  for(const element of elements){
-    const candidate = extractAudienceDraftKeyFromInlineHandlerText(
-      element.getAttribute('oninput')
-      || element.getAttribute('onkeydown')
-      || element.getAttribute('onclick')
-      || element.getAttribute('onchange')
-      || ''
-    );
-    if(candidate){
-      row.dataset.audienceDraftKey = candidate;
-      return candidate;
-    }
-  }
-  return '';
-}
-
-function buildAudienceInlineEnhancedInput(row, draftKey, field, value, placeholder){
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'audience-inline-input audience-inline-enhanced-input';
-  input.value = value;
-  input.placeholder = placeholder;
-  input.dataset.field = field;
-  input.dataset.audienceEnhanced = '1';
-  input.addEventListener('input', ()=>{
-    updateAudienceDraft(draftKey, field, input.value);
-  });
-  input.addEventListener('keydown', (event)=>{
-    confirmAudienceInlineEditFromEncoded(encodeURIComponent(String(draftKey || '')), field, input, event);
-  });
-  input.addEventListener('blur', ()=>{
-    const currentDraft = audienceDraft?.[draftKey];
-    if(!currentDraft || currentDraft[field] === undefined) return;
-    if(field === 'dateDepot' && !normalizeAudienceDateDepotDraftInputFromEncoded(encodeURIComponent(String(draftKey || '')), input)){
-      return;
-    }
-    saveAudienceDraftEntry(draftKey, { clearDraft: true, rerender: true });
-  });
-  return input;
-}
-
-function enhanceAudienceInlineEditableColumns(){
-  const table = document.querySelector('#audienceSection table') || document.querySelector('#audienceTableContainer table');
-  const headerCells = table ? [...table.querySelectorAll('thead th')] : [];
-  const tbody = document.querySelector('#audienceBody') || table?.querySelector('tbody');
-  if(!tbody || !headerCells.length) return;
-  const headerIndexByKey = new Map();
-  headerCells.forEach((cell, index)=>{
-    const normalized = normalizeAudienceInlineHeaderLabel(cell.textContent);
-    if(normalized) headerIndexByKey.set(normalized, index);
-  });
-  const tribunalIndex = headerIndexByKey.get('tribunal');
-  const dateDepotIndex = headerIndexByKey.get('date depot');
-  if(!Number.isInteger(tribunalIndex) && !Number.isInteger(dateDepotIndex)) return;
-
-  [...tbody.querySelectorAll('tr')].forEach((row)=>{
-    const draftKey = extractAudienceDraftKeyFromRow(row);
-    if(!draftKey) return;
-    const { ci, di, procKey } = parseAudienceDraftKey(draftKey);
-    const procData = getAudienceProcedure(ci, di, procKey);
-    const draftData = audienceDraft?.[draftKey] || {};
-    const cells = [...row.children];
-
-    const enhanceCell = (cellIndex, field, placeholder, valueResolver)=>{
-      if(!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex >= cells.length) return;
-      const cell = cells[cellIndex];
-      if(!cell || cell.querySelector(`[data-field="${field}"]`)) return;
-      const currentValue = String(valueResolver(procData, draftData, cell) || '').trim();
-      cell.innerHTML = '';
-      cell.appendChild(buildAudienceInlineEnhancedInput(row, draftKey, field, currentValue, placeholder));
-    };
-
-    enhanceCell(
-      tribunalIndex,
-      'tribunal',
-      'Tribunal',
-      (proc, draft)=>String(draft?.tribunal || proc?.tribunal || '').trim()
-    );
-    enhanceCell(
-      dateDepotIndex,
-      'dateDepot',
-      'Date dépôt',
-      (proc, draft, cell)=>{
-        const text = String(draft?.dateDepot || proc?.depotLe || proc?.dateDepot || cell?.textContent || '').trim();
-        return text === '-' ? '' : text;
-      }
-    );
-  });
 }
 
 // ================== PROCEDURE DETAILS ==================
@@ -24769,4 +24691,47 @@ function syncDiligenceMiseAPrixFilterVisibility(){
   if(!container) return;
   const isCommandement = isDiligenceCommandementProcedure(filterDiligenceProcedure);
   container.style.display = isCommandement ? 'inline-block' : 'none';
+}
+
+// Final override: keep audience date validation inline and non-blocking.
+function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateAudience', '');
+    inputEl.value = '';
+    setAudienceDateInputValidationState(inputEl);
+    return true;
+  }
+  const { normalized, invalid } = parseStrictAudienceDateValue(raw);
+  if(!invalid && normalized){
+    inputEl.value = normalized;
+    updateAudienceDraft(key, 'dateAudience', normalized);
+  }else{
+    updateAudienceDraft(key, 'dateAudience', raw);
+  }
+  setAudienceDateInputValidationState(inputEl);
+  return true;
+}
+
+function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateDepot', '');
+    inputEl.value = '';
+    setAudienceDateInputValidationState(inputEl);
+    return true;
+  }
+  const { normalized, invalid } = parseStrictAudienceDateValue(raw);
+  if(!invalid && normalized){
+    inputEl.value = normalized;
+    updateAudienceDraft(key, 'dateDepot', normalized);
+  }else{
+    updateAudienceDraft(key, 'dateDepot', raw);
+  }
+  setAudienceDateInputValidationState(inputEl);
+  return true;
 }
