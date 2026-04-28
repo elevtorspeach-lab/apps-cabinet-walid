@@ -7,14 +7,17 @@ import ExportPreviewModal from './components/modals/ExportPreviewModal'
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
+const LEGACY_ASSET_VERSION = '20260427-audience-inline-tribunal-date-depot-1'
 const LEGACY_SCRIPTS = [
+  '/vendor/libs/xlsx.full.min.js',
+  '/vendor/libs/exceljs.min.js',
   '/legacy/state-persistence.js',
   '/legacy/audience-ui-helpers.js',
   '/legacy/render-audience-suivi.js',
   '/legacy/render-diligence.js',
   '/legacy/render-dashboard.js',
   '/legacy/app.js',
-]
+].map((src) => `${src}?v=${LEGACY_ASSET_VERSION}`)
 
 const LEGACY_LOADER_PROMISE_KEY = '__cabinetLegacyScriptsPromise'
 const LEGACY_LOADER_DONE_KEY = '__cabinetLegacyScriptsLoaded'
@@ -27,9 +30,17 @@ function loadScript(src) {
         resolve()
         return
       }
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', reject, { once: true })
-      return
+      if (existing.dataset.failed === 'true') {
+        existing.remove()
+      } else {
+        existing.addEventListener('load', () => resolve(), { once: true })
+        existing.addEventListener('error', () => {
+          existing.dataset.failed = 'true'
+          existing.remove()
+          reject(new Error(`Impossible de charger ${src}`))
+        }, { once: true })
+        return
+      }
     }
     const script = document.createElement('script')
     script.src = src
@@ -38,7 +49,11 @@ function loadScript(src) {
       script.dataset.loaded = 'true'
       resolve()
     }, { once: true })
-    script.addEventListener('error', reject, { once: true })
+    script.addEventListener('error', () => {
+      script.dataset.failed = 'true'
+      script.remove()
+      reject(new Error(`Impossible de charger ${src}`))
+    }, { once: true })
     document.body.appendChild(script)
   })
 }

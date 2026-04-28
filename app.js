@@ -89,6 +89,9 @@ let filterAudienceColor = 'all';
 let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
+let filterAudienceSort = '';
+let filterAudienceDateDepot = '';
+let filterAudienceJuge = '';
 let filterAudienceErrorsOnly = false;
 let filterAudienceCheckedFirst = false;
 let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1 };
@@ -1161,6 +1164,7 @@ function getAudienceProcedureFieldValue(procData, draftField){
   if(draftField === 'dateAudience') return procData.audience;
   if(draftField === 'juge') return procData.juge;
   if(draftField === 'sort') return procData.sort;
+  if(draftField === 'dateDepot') return procData.depotLe || procData.dateDepot;
   return procData[draftField];
 }
 
@@ -12686,6 +12690,7 @@ function parseExcelData(rows, sheet = null){
 
     let carriedAffectationDate = '';
     let carriedMontant = '';
+    let carriedClientName = '';
     for(let j=i + 1; j<rows.length; j++){
       const row = rows[j] || [];
       const rowMap = buildHeaderMap(row);
@@ -12705,7 +12710,8 @@ function parseExcelData(rows, sheet = null){
         : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
       const adversaire = idx.adversaire !== -1 ? String(row[idx.adversaire] || '').trim() : '';
       const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
-      const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
+      const rawClientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
+      const clientName = rawClientName || carriedClientName;
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
       const gestionnaire = idx.gestionnaire !== -1 ? String(row[idx.gestionnaire] || '').trim() : '';
@@ -12789,8 +12795,12 @@ function parseExcelData(rows, sheet = null){
         if(montant) carriedMontant = montant;
         continue;
       }
-      const isClientTitleRow = /^client\s*:/i.test(clientName) && !refClient && !debiteur && !procedureText && !type && !montant;
-      if(isClientTitleRow) continue;
+      const isClientTitleRow = /^client\s*:/i.test(rawClientName) && !refClient && !debiteur && !procedureText && !type && !montant;
+      if(isClientTitleRow){
+        carriedClientName = String(rawClientName).replace(/^client\s*:\s*/i, '').trim();
+        continue;
+      }
+      if(rawClientName) carriedClientName = rawClientName;
 
       dossiers.push({
         rowNumber: j + 1,
@@ -12843,6 +12853,7 @@ function parseExcelData(rows, sheet = null){
       });
       carriedAffectationDate = '';
       carriedMontant = '';
+      carriedClientName = '';
     }
   }
 
@@ -13895,7 +13906,7 @@ async function exportImportErrorsExcelRobust(){
       const now = new Date();
       const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '_', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0')].join('');
       const baseName = String(latestExcelImportResult.filenameBase || 'audience_import_erreurs').trim() || 'audience_import_erreurs';
-      await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: false });
+      await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: true });
       return;
     }
     throw new Error('ExcelJS indisponible');
@@ -14202,6 +14213,9 @@ function resetAudienceFiltersUi(){
   filterAudienceProcedure = 'all';
   filterAudienceTribunal = 'all';
   filterAudienceDate = '';
+  filterAudienceSort = '';
+  filterAudienceDateDepot = '';
+  filterAudienceJuge = '';
   filterAudienceErrorsOnly = false;
   filterAudienceCheckedFirst = false;
   setSelectedAudienceColor('all', false);
@@ -14211,6 +14225,9 @@ function resetAudienceFiltersUi(){
   if($('filterAudienceProcedure')) $('filterAudienceProcedure').value = 'all';
   if($('filterAudienceTribunal')) $('filterAudienceTribunal').value = '';
   if($('filterAudienceDate')) $('filterAudienceDate').value = '';
+  if($('filterAudienceSort')) $('filterAudienceSort').value = '';
+  if($('filterAudienceDateDepot')) $('filterAudienceDateDepot').value = '';
+  if($('filterAudienceJuge')) $('filterAudienceJuge').value = '';
   if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
   const errBtn = $('audienceErrorsBtn');
   if(errBtn) errBtn.classList.remove('active');
@@ -14809,7 +14826,10 @@ async function applyExcelImport(payload, options = {}){
     if(unknownProcedureTokens.length){
       addWarningImportIssue(`${rowNumberLabel}: procédure inconnue (${unknownProcedureTokens.join(', ')})${dossierContext}`);
     }
-    const clientName = row.clientName || row.debiteur || 'Client';
+    const clientName = String(row.clientName || '').trim() || 'Client introuvable';
+    if(clientName === 'Client introuvable'){
+      addWarningImportIssue(`${rowNumberLabel}: client introuvable dans Excel - dossier rattaché au client provisoire "Client introuvable"${dossierContext}`);
+    }
     const clientKey = String(clientName).trim().toLowerCase();
     let client = clientMap.get(clientKey);
     if(!client){
@@ -16442,10 +16462,43 @@ function setupEvents(){
     filterAudienceDate = String(e.target?.value || '').trim();
     renderAudience();
   });
+  $('filterAudienceSort')?.addEventListener('input', (e)=>{
+    filterAudienceSort = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  });
+  $('filterAudienceSort')?.addEventListener('change', (e)=>{
+    filterAudienceSort = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  });
+  $('filterAudienceDateDepot')?.addEventListener('change', (e)=>{
+    filterAudienceDateDepot = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  });
+  $('filterAudienceJuge')?.addEventListener('input', (e)=>{
+    filterAudienceJuge = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  });
+  $('filterAudienceJuge')?.addEventListener('change', (e)=>{
+    filterAudienceJuge = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  });
   $('filterAudienceCheckedOrder')?.addEventListener('change', (e)=>{
     filterAudienceCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderAudience();
   });
+  const audienceTableBody = $('audienceBody');
+  if(audienceTableBody && typeof MutationObserver !== 'undefined'){
+    const observer = new MutationObserver(()=>{
+      enhanceAudienceInlineEditableColumns();
+    });
+    observer.observe(audienceTableBody, { childList: true, subtree: true });
+    enhanceAudienceInlineEditableColumns();
+  }
   $('undoAudienceColorBtn')?.addEventListener('click', undoLastAudienceColorChange);
 
   document.addEventListener('keydown', handleAudienceSaveShortcut);
@@ -21869,6 +21922,9 @@ function getFilteredAudienceRows(allRows = null){
     filterAudienceProcedure,
     filterAudienceTribunal,
     filterAudienceDate,
+    filterAudienceSort,
+    filterAudienceDateDepot,
+    filterAudienceJuge,
     filterAudienceErrorsOnly ? '1' : '0',
     strictPriorityColorFilter || priorityColor || 'all'
   ].join('||');
@@ -21878,12 +21934,28 @@ function getFilteredAudienceRows(allRows = null){
   const duplicateKeySet = getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
   const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
+  const targetDateDepot = filterAudienceDateDepot ? normalizeIsoDateToDDMMYYYY(filterAudienceDateDepot) : '';
+  const sortNeedle = filterAudienceSort ? String(filterAudienceSort).trim().toLowerCase() : '';
+  const jugeNeedle = filterAudienceJuge ? String(filterAudienceJuge).trim().toLowerCase() : '';
   const filtered = rows.filter(row=>{
     if(filterAudienceProcedure !== 'all' && row.__procFilterKey !== filterAudienceProcedure) return false;
     if(filterAudienceTribunal !== 'all' && row.__tribunalFilterKey !== filterAudienceTribunal) return false;
     if(filterAudienceDate){
       const rowDate = row.__audienceDateDisplay || (row.__audienceDateDisplay = getAudienceRowDateValue(row));
       if(targetDate && rowDate !== targetDate) return false;
+    }
+    if(sortNeedle){
+      const rowSort = String(row?.draft?.sort || row?.p?.sort || '').trim().toLowerCase();
+      if(!rowSort.includes(sortNeedle)) return false;
+    }
+    if(targetDateDepot){
+      const rowDateDepot = getAudienceDateDepotDisplayValue(row);
+      const normalizedRowDepot = normalizeDateDDMMYYYY(rowDateDepot) || rowDateDepot;
+      if(normalizedRowDepot !== targetDateDepot) return false;
+    }
+    if(jugeNeedle){
+      const rowJuge = String(row?.draft?.juge || row?.p?.juge || '').trim().toLowerCase();
+      if(!rowJuge.includes(jugeNeedle)) return false;
     }
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
     if(strictPriorityColorFilter && !audienceRowMatchesColorFilter(row, strictPriorityColorFilter)) return false;
@@ -22075,6 +22147,11 @@ function setAllFilteredAudienceRowsForPrint(checked){
 }
 
 function getAudienceDateDepotDisplayValue(row){
+  const draftDateDepotRaw = String(row?.draft?.dateDepot || '').trim();
+  if(draftDateDepotRaw){
+    return normalizeDateDDMMYYYY(draftDateDepotRaw) || draftDateDepotRaw;
+  }
+
   const depotLeRaw = String(row?.p?.depotLe || '').trim();
   if(depotLeRaw){
     return normalizeDateDDMMYYYY(depotLeRaw) || depotLeRaw;
@@ -22788,6 +22865,8 @@ function hasAudienceProcedureData(procData, draftData, dossier){
     p.sort,
     d.instruction,
     p.instruction,
+    d.tribunal,
+    d.dateDepot,
     p.tribunal
   ];
   return fields.some(value=>String(value || '').trim().length > 0);
@@ -22835,7 +22914,7 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
         di: dossierIndex,
         __dupKey: duplicateKey,
         __procFilterKey: getAudienceProcedureFilterKey(procKey),
-        __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
+        __tribunalFilterKey: resolveAudienceTribunalFilterKey(draft?.tribunal || p?.tribunal || ''),
         __rowReference: refDossier,
         __sortMeta: sortMeta,
         __audienceDateDisplay: audienceDateDisplay
@@ -23425,6 +23504,19 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
   if(field === 'sort'){
     p.sort = value;
+    return;
+  }
+  if(field === 'tribunal'){
+    p.tribunal = String(value || '').trim();
+    return;
+  }
+  if(field === 'dateDepot'){
+    const normalizedDepot = normalizeDateDDMMYYYY(value);
+    const nextDepot = normalizedDepot || String(value || '').trim();
+    p.dateDepot = nextDepot;
+    if(nextDepot){
+      delete p.depotLe;
+    }
   }
 }
 
@@ -23469,7 +23561,9 @@ function updateAudienceDraft(key, field, value){
     refDossier: 'procedureDetails.referenceClient',
     dateAudience: 'procedureDetails.audience',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    tribunal: 'procedureDetails.tribunal',
+    dateDepot: 'procedureDetails.dateDepot'
   };
   if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
@@ -23506,6 +23600,26 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   }
   inputEl.value = normalized;
   updateAudienceDraft(key, 'dateAudience', normalized);
+  return true;
+}
+
+function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateDepot', '');
+    inputEl.value = '';
+    return true;
+  }
+  const normalized = normalizeDateDDMMYYYY(raw);
+  if(!normalized){
+    alert('Date de dépôt invalide. Utilisez le format jj/mm/aaaa.');
+    inputEl.focus();
+    return false;
+  }
+  inputEl.value = normalized;
+  updateAudienceDraft(key, 'dateDepot', normalized);
   return true;
 }
 
@@ -23579,6 +23693,30 @@ function saveAudienceDraftEntry(key, options = {}){
         after
       });
     }
+    if(data.tribunal !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.dateDepot !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
   }
 
   const shouldReconcileAudienceRefs = !!(
@@ -23629,6 +23767,8 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   const targetField = String(field || '').trim();
   if(targetField === 'dateAudience'){
     if(!normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl)) return;
+  }else if(targetField === 'dateDepot'){
+    if(!normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl)) return;
   }else{
     updateAudienceDraft(key, targetField, inputEl.value);
   }
@@ -23736,6 +23876,30 @@ function saveAllAudience(options = {}){
         after
       });
     }
+    if(data.tribunal!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.dateDepot!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
   });
 
   const reconciliation = shouldReconcileAudienceRefs
@@ -23781,6 +23945,130 @@ function queueAudienceAutoSave(){
     audienceAutoSaveTimer = null;
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
+}
+
+function normalizeAudienceInlineHeaderLabel(value){
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return normalized
+    .replace(/d[aÃ]©p[aÃ][´o]t/g, 'depot')
+    .replace(/proc[aÃ]©dure/g, 'procedure')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function extractAudienceDraftKeyFromInlineHandlerText(text){
+  const source = String(text || '');
+  if(!source) return '';
+  const directMatch = source.match(/(?:updateAudienceDraftFromEncoded|confirmAudienceInlineEditFromEncoded)\('([^']+)'/);
+  if(directMatch && directMatch[1]) return decodeURIComponent(directMatch[1]);
+  const rowMatch = source.match(/(?:toggleAudienceSelectionAndColorEncoded|toggleAudiencePrintSelectionEncoded|setAudienceColorEncoded)\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*'([^']+)'/);
+  if(rowMatch){
+    const ci = String(rowMatch[1] || '').trim();
+    const di = String(rowMatch[2] || '').trim();
+    const procKey = decodeURIComponent(String(rowMatch[3] || ''));
+    return makeAudienceDraftKey(ci, di, procKey);
+  }
+  return '';
+}
+
+function extractAudienceDraftKeyFromRow(row){
+  if(!row) return '';
+  if(String(row.dataset.audienceDraftKey || '').trim()){
+    return row.dataset.audienceDraftKey;
+  }
+  const elements = row.querySelectorAll('input, select, button, label');
+  for(const element of elements){
+    const candidate = extractAudienceDraftKeyFromInlineHandlerText(
+      element.getAttribute('oninput')
+      || element.getAttribute('onkeydown')
+      || element.getAttribute('onclick')
+      || element.getAttribute('onchange')
+      || ''
+    );
+    if(candidate){
+      row.dataset.audienceDraftKey = candidate;
+      return candidate;
+    }
+  }
+  return '';
+}
+
+function buildAudienceInlineEnhancedInput(row, draftKey, field, value, placeholder){
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'audience-inline-input audience-inline-enhanced-input';
+  input.value = value;
+  input.placeholder = placeholder;
+  input.dataset.field = field;
+  input.dataset.audienceEnhanced = '1';
+  input.addEventListener('input', ()=>{
+    updateAudienceDraft(draftKey, field, input.value);
+  });
+  input.addEventListener('keydown', (event)=>{
+    confirmAudienceInlineEditFromEncoded(encodeURIComponent(String(draftKey || '')), field, input, event);
+  });
+  input.addEventListener('blur', ()=>{
+    const currentDraft = audienceDraft?.[draftKey];
+    if(!currentDraft || currentDraft[field] === undefined) return;
+    if(field === 'dateDepot' && !normalizeAudienceDateDepotDraftInputFromEncoded(encodeURIComponent(String(draftKey || '')), input)){
+      return;
+    }
+    saveAudienceDraftEntry(draftKey, { clearDraft: true, rerender: true });
+  });
+  return input;
+}
+
+function enhanceAudienceInlineEditableColumns(){
+  const table = document.querySelector('#audienceSection table') || document.querySelector('#audienceTableContainer table');
+  const headerCells = table ? [...table.querySelectorAll('thead th')] : [];
+  const tbody = document.querySelector('#audienceBody') || table?.querySelector('tbody');
+  if(!tbody || !headerCells.length) return;
+  const headerIndexByKey = new Map();
+  headerCells.forEach((cell, index)=>{
+    const normalized = normalizeAudienceInlineHeaderLabel(cell.textContent);
+    if(normalized) headerIndexByKey.set(normalized, index);
+  });
+  const tribunalIndex = headerIndexByKey.get('tribunal');
+  const dateDepotIndex = headerIndexByKey.get('date depot');
+  if(!Number.isInteger(tribunalIndex) && !Number.isInteger(dateDepotIndex)) return;
+
+  [...tbody.querySelectorAll('tr')].forEach((row)=>{
+    const draftKey = extractAudienceDraftKeyFromRow(row);
+    if(!draftKey) return;
+    const { ci, di, procKey } = parseAudienceDraftKey(draftKey);
+    const procData = getAudienceProcedure(ci, di, procKey);
+    const draftData = audienceDraft?.[draftKey] || {};
+    const cells = [...row.children];
+
+    const enhanceCell = (cellIndex, field, placeholder, valueResolver)=>{
+      if(!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex >= cells.length) return;
+      const cell = cells[cellIndex];
+      if(!cell || cell.querySelector(`[data-field="${field}"]`)) return;
+      const currentValue = String(valueResolver(procData, draftData, cell) || '').trim();
+      cell.innerHTML = '';
+      cell.appendChild(buildAudienceInlineEnhancedInput(row, draftKey, field, currentValue, placeholder));
+    };
+
+    enhanceCell(
+      tribunalIndex,
+      'tribunal',
+      'Tribunal',
+      (proc, draft)=>String(draft?.tribunal || proc?.tribunal || '').trim()
+    );
+    enhanceCell(
+      dateDepotIndex,
+      'dateDepot',
+      'Date dépôt',
+      (proc, draft, cell)=>{
+        const text = String(draft?.dateDepot || proc?.depotLe || proc?.dateDepot || cell?.textContent || '').trim();
+        return text === '-' ? '' : text;
+      }
+    );
+  });
 }
 
 // ================== PROCEDURE DETAILS ==================

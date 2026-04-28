@@ -1279,6 +1279,7 @@ function getAudienceProcedureFieldValue(procData, draftField){
   if(draftField === 'dateAudience') return procData.audience;
   if(draftField === 'juge') return procData.juge;
   if(draftField === 'sort') return procData.sort;
+  if(draftField === 'dateDepot') return procData.depotLe || procData.dateDepot;
   return procData[draftField];
 }
 
@@ -4592,9 +4593,17 @@ function loadExternalScript(url, key){
         resolve();
         return;
       }
-      existing.addEventListener('load', ()=>resolve(), { once: true });
-      existing.addEventListener('error', ()=>reject(new Error(`Impossible de charger ${key}`)), { once: true });
-      return;
+      if(existing.dataset.failed === '1'){
+        existing.remove();
+      } else {
+        existing.addEventListener('load', ()=>resolve(), { once: true });
+        existing.addEventListener('error', ()=>{
+          existing.dataset.failed = '1';
+          existing.remove();
+          reject(new Error(`Impossible de charger ${key}`));
+        }, { once: true });
+        return;
+      }
     }
 
     const script = document.createElement('script');
@@ -4606,6 +4615,8 @@ function loadExternalScript(url, key){
       resolve();
     }, { once: true });
     script.addEventListener('error', ()=>{
+      script.dataset.failed = '1';
+      script.remove();
       reject(new Error(`Impossible de charger ${key}`));
     }, { once: true });
     document.head.appendChild(script);
@@ -4617,7 +4628,11 @@ async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false, sile
     if(needXlsx && typeof XLSX === 'undefined'){
       if(!xlsxLoadPromise){
         xlsxLoadPromise = loadExternalScript(XLSX_LOCAL_URL, 'xlsx-local')
-          .catch(()=>loadExternalScript(XLSX_CDN_URL, 'xlsx-cdn'));
+          .catch(()=>loadExternalScript(XLSX_CDN_URL, 'xlsx-cdn'))
+          .catch((err)=>{
+            xlsxLoadPromise = null;
+            throw err;
+          });
       }
       await xlsxLoadPromise;
       if(typeof XLSX === 'undefined'){
@@ -4628,7 +4643,11 @@ async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false, sile
     if(needExcelJs && typeof ExcelJS === 'undefined'){
       if(!excelJsLoadPromise){
         excelJsLoadPromise = loadExternalScript(EXCELJS_LOCAL_URL, 'exceljs-local')
-          .catch(()=>loadExternalScript(EXCELJS_CDN_URL, 'exceljs-cdn'));
+          .catch(()=>loadExternalScript(EXCELJS_CDN_URL, 'exceljs-cdn'))
+          .catch((err)=>{
+            excelJsLoadPromise = null;
+            throw err;
+          });
       }
       await excelJsLoadPromise;
       if(typeof ExcelJS === 'undefined'){
@@ -4648,7 +4667,16 @@ async function ensureExcelLibraries({ needXlsx = true, needExcelJs = false, sile
 }
 
 function warmupExcelLibrariesOnIdle(){
-  // Keep startup lean: Excel libraries are loaded on demand when an import/export is triggered.
+  const runWarmup = ()=>{
+    ensureExcelLibraries({ needXlsx: true, needExcelJs: true, silent: true }).catch(()=>{});
+  };
+  if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+    try{
+      window.requestIdleCallback(()=>runWarmup(), { timeout: 1800 });
+      return;
+    }catch(_){}
+  }
+  setTimeout(runWarmup, 900);
 }
 
 async function ensureAudienceExportTemplateEmbeddedScript(){
@@ -12860,6 +12888,7 @@ function parseExcelData(rows, sheet = null){
 
     let carriedAffectationDate = '';
     let carriedMontant = '';
+    let carriedClientName = '';
     for(let j=i + 1; j<rows.length; j++){
       const row = rows[j] || [];
       const rowMap = buildHeaderMap(row);
@@ -12878,7 +12907,8 @@ function parseExcelData(rows, sheet = null){
         ? normalizeImportedDebiteurName(row[idx.debiteur])
         : (idx.adversaire !== -1 ? normalizeImportedDebiteurName(row[idx.adversaire]) : '');
       const adversaire = idx.adversaire !== -1 ? String(row[idx.adversaire] || '').trim() : '';
-      const clientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
+      const rawClientName = idx.client !== -1 ? String(row[idx.client] || '').trim() : '';
+      const clientName = rawClientName || carriedClientName;
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
@@ -12966,8 +12996,12 @@ function parseExcelData(rows, sheet = null){
         if(montant) carriedMontant = montant;
         continue;
       }
-      const isClientTitleRow = /^client\s*:/i.test(clientName) && !refClient && !debiteur && !procedureText && !type && !montant;
-      if(isClientTitleRow) continue;
+      const isClientTitleRow = /^client\s*:/i.test(rawClientName) && !refClient && !debiteur && !procedureText && !type && !montant;
+      if(isClientTitleRow){
+        carriedClientName = String(rawClientName).replace(/^client\s*:\s*/i, '').trim();
+        continue;
+      }
+      if(rawClientName) carriedClientName = rawClientName;
 
       dossiers.push({
         rowNumber: j + 1,
@@ -13023,6 +13057,7 @@ function parseExcelData(rows, sheet = null){
       });
       carriedAffectationDate = '';
       carriedMontant = '';
+      carriedClientName = '';
     }
   }
 
@@ -13434,6 +13469,71 @@ function renderExcelImportIssues(issuesText, container, issues = [], summary = '
   }
 
   container.innerHTML = html.join('');
+}
+
+function renderExcelImportSummary(summaryText, container, issues = []){
+  if(!container) return;
+  const rawSummary = String(summaryText || '').trim();
+  if(!rawSummary){
+    container.innerHTML = '';
+    return;
+  }
+  const lines = rawSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean);
+  const title = lines[0] || 'Import termine';
+  const stats = [];
+  lines.slice(1).forEach((line)=>{
+    const match = line.match(/^(.+?)\s*:\s*(-?\d+)$/);
+    if(!match) return;
+    stats.push({
+      label: String(match[1] || '').trim(),
+      value: Number(match[2] || 0)
+    });
+  });
+  const totalIssues = Array.isArray(issues) ? issues.length : 0;
+  const importedAudience = stats.find((entry)=>/audiences import/i.test(String(entry.label || '')));
+  const failedAudience = stats.find((entry)=>/audiences non import/i.test(String(entry.label || '')));
+  const statusTone = totalIssues > 0 ? 'warning' : 'success';
+  const statusLabel = totalIssues > 0 ? 'Import reussi avec points a verifier' : 'Import reussi';
+  const highlighted = stats.map((entry)=>{
+    const key = String(entry.label || '').toLowerCase();
+    let tone = '';
+    if(key.includes('non import') || key.includes('matching non trouv') || key.includes('hors global')){
+      tone = entry.value > 0 ? 'tone-danger' : '';
+    }else if(key.includes('avertissement') || key.includes('warning')){
+      tone = entry.value > 0 ? 'tone-warning' : '';
+    }else if(key.includes('import') || key.includes('detect')){
+      tone = entry.value > 0 ? 'tone-info' : '';
+    }
+    return { ...entry, tone };
+  });
+  const subtitle = totalIssues
+    ? `${totalIssues} ligne(s) a verifier dans le rapport detaille`
+    : 'Aucune anomalie bloquante detectee dans ce lot';
+  const cardsHtml = highlighted.map((entry)=>{
+    const value = Number.isFinite(entry.value) ? entry.value : 0;
+    const toneClass = entry.tone ? ` ${entry.tone}` : '';
+    return `
+      <article class="import-result-summary-card${toneClass}">
+        <span class="import-result-summary-card-label">${escapeHtml(entry.label)}</span>
+        <strong class="import-result-summary-card-value">${escapeHtml(String(value))}</strong>
+      </article>
+    `;
+  }).join('');
+  container.innerHTML = `
+    <div class="import-result-summary-banner tone-${statusTone}">
+      <div class="import-result-summary-badge">${statusLabel}</div>
+      <div class="import-result-summary-banner-text">${escapeHtml(subtitle)}</div>
+    </div>
+    <div class="import-result-summary-head">
+      <div>
+        <div class="import-result-summary-title">${escapeHtml(title)}</div>
+        <div class="import-result-summary-subtitle">Synthese executive du lot importe</div>
+      </div>
+    </div>
+    <div class="import-result-summary-grid">
+      ${cardsHtml}
+    </div>
+  `;
 }
 
 function closeImportResultModal(){
@@ -13850,6 +13950,202 @@ async function exportImportErrorsExcelRobust(){
     exportBtn.disabled = true;
     exportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Export en cours...';
   }
+  const buildRowsForXlsxExport = (filteredIssues)=>{
+    const headers = ['Severite', 'Type probleme', 'Action recommandee', 'Ligne', 'Source', 'Zone', 'Ref dossier', 'Ref client', 'Debiteur', 'Procedure', 'Tribunal', 'Date audience', 'Sort', 'Date depot', 'Statut', 'Message', 'Contexte'];
+    const detectProblemType = (issue)=>{
+      const normalized = String(issue?.message || issue?.context || '').toLowerCase();
+      if(normalized.includes('matching non trouv') || normalized.includes('introuvable')) return 'Matching / introuvable';
+      if(normalized.includes('date audience invalide')) return 'Date audience invalide';
+      if(normalized.includes('proc') || normalized.includes('procedure')) return 'Procedure';
+      if(normalized.includes('ref client')) return 'Ref client';
+      if(normalized.includes('ref dossier')) return 'Ref dossier';
+      if(normalized.includes('doublon')) return 'Doublon';
+      return 'Autre controle';
+    };
+    const buildRecommendedAction = (issue)=>{
+      const problemType = detectProblemType(issue);
+      if(problemType === 'Matching / introuvable') return 'Verifier la ref dossier / ref client dans le fichier source et dans les dossiers globaux.';
+      if(problemType === 'Date audience invalide') return 'Corriger la date au format jj/mm/aaaa.';
+      if(problemType === 'Procedure') return 'Verifier la procedure et utiliser une valeur reconnue.';
+      if(problemType === 'Ref client') return 'Comparer la ref client du fichier avec celle du dossier global.';
+      if(problemType === 'Ref dossier') return 'Verifier la reference dossier et supprimer les espaces / variantes incorrectes.';
+      if(problemType === 'Doublon') return 'Verifier si la ligne existe deja avant reimport.';
+      return 'Verifier la ligne source et corriger les champs signales.';
+    };
+    return [
+      headers,
+      ...filteredIssues.map((issue)=>{
+        const meta = getExcelImportSeverityMeta(issue?.severity);
+        return [
+          meta.label,
+          detectProblemType(issue),
+          buildRecommendedAction(issue),
+          issue?.rowNumber || '',
+          issue?.source || '',
+          issue?.zone || '',
+          issue?.refDossier || '',
+          issue?.refClient || '',
+          issue?.debiteur || '',
+          issue?.procedure || '',
+          issue?.tribunal || '',
+          issue?.audienceDate || '',
+          issue?.sort || '',
+          issue?.dateDepot || '',
+          issue?.statut || '',
+          issue?.message || '',
+          issue?.context || ''
+        ];
+      })
+    ];
+  };
+  const buildIssueSheetWithXlsx = (sheetName, filteredIssues)=>{
+    const skippedIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped').length;
+    const warningIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning').length;
+    const infoIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info').length;
+    const aoa = [
+      [sheetName],
+      [
+        `Total: ${filteredIssues.length}`,
+        `Non importees: ${skippedIssuesCount}`,
+        `Avertissements: ${warningIssuesCount}`,
+        `Informations: ${infoIssuesCount}`
+      ],
+      [`Lecture: ${filteredIssues.length ? 'traiter d abord les lignes bloquantes puis verifier les avertissements.' : 'aucune anomalie detectee dans cette feuille.'}`],
+      ...buildRowsForXlsxExport(filteredIssues)
+    ];
+    const sheet = XLSX.utils.aoa_to_sheet(aoa);
+    sheet['!cols'] = [
+      { wch: 16 }, { wch: 22 }, { wch: 42 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 20 },
+      { wch: 18 }, { wch: 26 }, { wch: 20 }, { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 16 },
+      { wch: 16 }, { wch: 52 }, { wch: 34 }
+    ];
+    sheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 16 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 16 } }
+    ];
+    sheet['!autofilter'] = { ref: `A4:Q${Math.max(4, aoa.length)}` };
+    return sheet;
+  };
+  const exportImportErrorsWithXlsx = async ()=>{
+    const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: false, silent: true });
+    if(!excelReady || typeof XLSX === 'undefined'){
+      throw new Error('XLSX indisponible');
+    }
+    const issues = Array.isArray(latestExcelImportResult.issues) ? latestExcelImportResult.issues.filter(Boolean) : [];
+    const skippedCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped').length;
+    const warningCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning').length;
+    const infoCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info').length;
+    const importSuccessCount = Math.max(0, Number(latestExcelImportResult?.savedCount) || 0);
+    const safeSummary = String(latestExcelImportResult.summary || '').trim();
+    const summaryLines = safeSummary ? safeSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean) : ['Import Excel'];
+    const summaryAoa = [
+      [latestExcelImportResult.title || "Rapport d'erreurs import Audience"],
+      [`Genere le ${formatDateTimeDisplay(new Date())} - Controle import Audience`],
+      [],
+      ['Synthese executive'],
+      ...summaryLines.map((line)=>[line]),
+      [],
+      ['Chiffres cles'],
+      ['Total anomalies', issues.length, 'Non importees', skippedCount, 'Avertissements', warningCount, 'Informations', infoCount],
+      [],
+      ['Lecture rapide'],
+      [`Lignes importees avec succes : ${importSuccessCount}`],
+      [`Anomalies bloquantes : ${skippedCount}. Priorite sur les feuilles "Non importees" puis "Erreurs import".`],
+      [`Anomalies de controle : ${warningCount} avertissement(s) et ${infoCount} information(s).`],
+      [skippedCount > 0 ? 'Action recommandee : corriger les references dossier/client puis relancer l import.' : 'Action recommandee : controle final des avertissements avant validation definitive.']
+    ];
+    const workbook = XLSX.utils.book_new();
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryAoa);
+    summarySheet['!cols'] = [{ wch: 24 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 22 }, { wch: 18 }];
+    summarySheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 7 } },
+      { s: { r: 6, c: 0 }, e: { r: 6, c: 7 } },
+      { s: { r: 9, c: 0 }, e: { r: 9, c: 7 } }
+    ];
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resume');
+    XLSX.utils.book_append_sheet(workbook, buildIssueSheetWithXlsx('Erreurs import', issues), 'Erreurs import');
+    XLSX.utils.book_append_sheet(workbook, buildIssueSheetWithXlsx('Non importees', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped')), 'Non importees');
+    XLSX.utils.book_append_sheet(workbook, buildIssueSheetWithXlsx('Avertissements', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning')), 'Avertissements');
+    XLSX.utils.book_append_sheet(workbook, buildIssueSheetWithXlsx('Informations', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info')), 'Informations');
+    const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const now = new Date();
+    const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '_', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0')].join('');
+    const baseName = String(latestExcelImportResult.filenameBase || 'audience_import_erreurs').trim() || 'audience_import_erreurs';
+    await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: false });
+  };
+  const exportImportErrorsWithHtmlExcel = async ()=>{
+    const issues = Array.isArray(latestExcelImportResult?.issues) ? latestExcelImportResult.issues.filter(Boolean) : [];
+    const safeSummary = String(latestExcelImportResult?.summary || '').trim();
+    const summaryLines = safeSummary ? safeSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean) : [];
+    const rowsHtml = issues.map((issue)=>{
+      const meta = getExcelImportSeverityMeta(issue?.severity);
+      const severityBg = meta.key === 'warning' ? '#fef3c7' : (meta.key === 'info' ? '#dbeafe' : '#fee2e2');
+      const severityColor = meta.key === 'warning' ? '#92400e' : (meta.key === 'info' ? '#1d4ed8' : '#991b1b');
+      return `
+        <tr>
+          <td style="background:${severityBg};color:${severityColor};font-weight:700;">${escapeHtml(meta.label)}</td>
+          <td>${escapeHtml(String(issue?.rowNumber || ''))}</td>
+          <td>${escapeHtml(String(issue?.source || ''))}</td>
+          <td>${escapeHtml(String(issue?.zone || ''))}</td>
+          <td>${escapeHtml(String(issue?.refDossier || ''))}</td>
+          <td>${escapeHtml(String(issue?.refClient || ''))}</td>
+          <td>${escapeHtml(String(issue?.debiteur || ''))}</td>
+          <td>${escapeHtml(String(issue?.procedure || ''))}</td>
+          <td>${escapeHtml(String(issue?.tribunal || ''))}</td>
+          <td>${escapeHtml(String(issue?.audienceDate || ''))}</td>
+          <td>${escapeHtml(String(issue?.sort || ''))}</td>
+          <td>${escapeHtml(String(issue?.dateDepot || ''))}</td>
+          <td>${escapeHtml(String(issue?.statut || ''))}</td>
+          <td>${escapeHtml(String(issue?.message || ''))}</td>
+          <td>${escapeHtml(String(issue?.context || ''))}</td>
+        </tr>
+      `;
+    }).join('');
+    const summaryHtml = summaryLines.length
+      ? `<ul style="margin:0 0 16px 18px;padding:0;">${summaryLines.map((line)=>`<li style="margin:4px 0;">${escapeHtml(line)}</li>`).join('')}</ul>`
+      : '';
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8">
+        </head>
+        <body>
+          <h2 style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">${escapeHtml(String(latestExcelImportResult?.title || "Rapport d'erreurs import Audience"))}</h2>
+          ${summaryHtml}
+          <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:12px;">
+            <thead>
+              <tr style="background:#1e3a8a;color:#ffffff;font-weight:700;">
+                <th>Severite</th>
+                <th>Ligne</th>
+                <th>Source</th>
+                <th>Zone</th>
+                <th>Ref dossier</th>
+                <th>Ref client</th>
+                <th>Debiteur</th>
+                <th>Procedure</th>
+                <th>Tribunal</th>
+                <th>Date audience</th>
+                <th>Sort</th>
+                <th>Date depot</th>
+                <th>Statut</th>
+                <th>Message</th>
+                <th>Contexte</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml || '<tr><td colspan="15">Aucune erreur a exporter.</td></tr>'}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+    const blob = createExcelUtf8Blob(html);
+    const now = new Date();
+    const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '_', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0')].join('');
+    const baseName = String(latestExcelImportResult?.filenameBase || 'audience_import_erreurs').trim() || 'audience_import_erreurs';
+    await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xls`, { openAfterExport: false });
+  };
   try{
     const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true, silent: true });
     if(excelReady && typeof ExcelJS !== 'undefined'){
@@ -13861,36 +14157,61 @@ async function exportImportErrorsExcelRobust(){
       const skippedSheet = workbook.addWorksheet('Non importees', { views: [{ state: 'frozen', ySplit: 2 }] });
       const warningSheet = workbook.addWorksheet('Avertissements', { views: [{ state: 'frozen', ySplit: 2 }] });
       const infoSheet = workbook.addWorksheet('Informations', { views: [{ state: 'frozen', ySplit: 2 }] });
+      issueSheet.properties.tabColor = { argb: 'FF1E3A8A' };
+      skippedSheet.properties.tabColor = { argb: 'FFDC2626' };
+      warningSheet.properties.tabColor = { argb: 'FFF59E0B' };
+      infoSheet.properties.tabColor = { argb: 'FF3B82F6' };
       const safeSummary = String(latestExcelImportResult.summary || '').trim();
       const summaryLines = safeSummary ? safeSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean) : ['Import Excel'];
       const issues = Array.isArray(latestExcelImportResult.issues) ? latestExcelImportResult.issues.filter(Boolean) : [];
       const detectProblemType = (issue)=>{
         const normalized = String(issue?.message || issue?.context || '').toLowerCase();
-        if(normalized.includes('matching non trouvé') || normalized.includes('introuvable')) return 'Matching / introuvable';
+        if(normalized.includes('hors global') || normalized.includes('hors dossier global')) return 'Hors global';
+        if(normalized.includes('matching non trouvé') || normalized.includes('matching non trouv') || normalized.includes('introuvable')) return 'Matching / introuvable';
         if(normalized.includes('date audience invalide')) return 'Date audience invalide';
+        if(normalized.includes('date depot')) return 'Date depot';
         if(normalized.includes('procédure') || normalized.includes('procedure')) return 'Procédure';
         if(normalized.includes('ref client')) return 'Ref client';
         if(normalized.includes('ref dossier')) return 'Ref dossier';
         if(normalized.includes('doublon')) return 'Doublon';
         return 'Autre controle';
       };
+      const buildPriorityMeta = (issue, severityKey)=>{
+        const problemType = detectProblemType(issue);
+        if(problemType === 'Hors global' || problemType === 'Matching / introuvable'){
+          return { label: 'Urgent', fill: 'FFFEE2E2', font: 'FF991B1B', accent: 'FFDC2626' };
+        }
+        if(problemType === 'Date audience invalide' || problemType === 'Date depot'){
+          return { label: 'Haute', fill: 'FFFEF3C7', font: 'FF92400E', accent: 'FFD97706' };
+        }
+        if(severityKey === 'warning'){
+          return { label: 'Controle', fill: 'FFFFF7ED', font: 'FF9A3412', accent: 'FFFB923C' };
+        }
+        if(severityKey === 'info'){
+          return { label: 'Info', fill: 'FFEFF6FF', font: 'FF1D4ED8', accent: 'FF3B82F6' };
+        }
+        return { label: 'Normale', fill: 'FFF8FAFC', font: 'FF334155', accent: 'FF64748B' };
+      };
       const buildRecommendedAction = (issue)=>{
         const problemType = detectProblemType(issue);
+        if(problemType === 'Hors global') return 'Rattacher cette audience a un dossier global avant validation finale.';
         if(problemType === 'Matching / introuvable') return 'Verifier la ref dossier / ref client dans le fichier source et dans les dossiers globaux.';
         if(problemType === 'Date audience invalide') return 'Corriger la date au format jj/mm/aaaa.';
+        if(problemType === 'Date depot') return 'Verifier et corriger la date de depot dans le fichier source.';
         if(problemType === 'Procédure') return 'Verifier la procedure et utiliser une valeur reconnue.';
         if(problemType === 'Ref client') return 'Comparer la ref client du fichier avec celle du dossier global.';
         if(problemType === 'Ref dossier') return 'Verifier la reference dossier et supprimer les espaces / variantes incorrectes.';
         if(problemType === 'Doublon') return 'Verifier si la ligne existe deja avant reimport.';
         return 'Verifier la ligne source et corriger les champs signales.';
       };
-      const allHeaders = ['Severite', 'Type probleme', 'Action recommandee', 'Ligne', 'Source', 'Zone', 'Ref dossier', 'Ref client', 'Debiteur', 'Procedure', 'Tribunal', 'Date audience', 'Sort', 'Date depot', 'Statut', 'Message', 'Contexte'];
+      const allHeaders = ['Severite', 'Priorite', 'Type probleme', 'Action recommandee', 'Ligne', 'Source', 'Zone', 'Ref dossier', 'Ref client', 'Debiteur', 'Procedure', 'Tribunal', 'Date audience', 'Sort', 'Date depot', 'Statut', 'Message', 'Contexte'];
       const getProblemPalette = (issue, severityKey)=>{
         const problemType = detectProblemType(issue);
         const normalized = `${String(issue?.message || '')} ${String(issue?.context || '')} ${String(issue?.zone || '')}`.toLowerCase();
         if(normalized.includes('hors global') || normalized.includes('hors dossier global')) return { type: 'Hors global', fill: 'FFFFEDD5', font: 'FF9A3412', accent: 'FFEA580C' };
         if(problemType === 'Matching / introuvable') return { type: problemType, fill: 'FFFEE2E2', font: 'FF991B1B', accent: 'FFDC2626' };
         if(problemType === 'Date audience invalide') return { type: problemType, fill: 'FFFEF3C7', font: 'FF92400E', accent: 'FFD97706' };
+        if(problemType === 'Date depot') return { type: 'Date depot', fill: 'FFFFF7ED', font: 'FF9A3412', accent: 'FFF59E0B' };
         if(problemType === 'ProcÃ©dure' || problemType === 'Procedure') return { type: 'Procedure', fill: 'FFEDE9FE', font: 'FF6D28D9', accent: 'FF7C3AED' };
         if(problemType === 'Ref client') return { type: problemType, fill: 'FFDCFCE7', font: 'FF166534', accent: 'FF16A34A' };
         if(problemType === 'Ref dossier') return { type: problemType, fill: 'FFE0F2FE', font: 'FF075985', accent: 'FF0284C7' };
@@ -13915,25 +14236,67 @@ async function exportImportErrorsExcelRobust(){
       };
       const applyIssueSheetColumns = (sheet)=>{
         sheet.columns = [
-          { width: 16 }, { width: 22 }, { width: 42 }, { width: 10 }, { width: 14 }, { width: 18 }, { width: 20 },
+          { width: 16 }, { width: 14 }, { width: 22 }, { width: 42 }, { width: 10 }, { width: 14 }, { width: 18 }, { width: 20 },
           { width: 18 }, { width: 26 }, { width: 20 }, { width: 22 }, { width: 16 }, { width: 18 }, { width: 16 },
           { width: 16 }, { width: 52 }, { width: 34 }
         ];
-        sheet.autoFilter = { from: { row: 2, column: 1 }, to: { row: Math.max(2, sheet.rowCount), column: allHeaders.length } };
+        sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(4, sheet.rowCount), column: allHeaders.length } };
       };
       const addIssueRowsToSheet = (sheet, filteredIssues)=>{
+        const skippedIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped').length;
+        const warningIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning').length;
+        const infoIssuesCount = filteredIssues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info').length;
         const titleRow = sheet.addRow([sheet.name]);
-        sheet.mergeCells(`A1:Q1`);
+        sheet.mergeCells(`A1:R1`);
         titleRow.getCell(1).font = { bold: true, size: 15, color: { argb: 'FFFFFFFF' } };
-        titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
+        titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F172A' } };
         titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
+        titleRow.height = 24;
+        const summaryRow = sheet.addRow([
+          `Total: ${filteredIssues.length}`,
+          `Non importees: ${skippedIssuesCount}`,
+          `Avertissements: ${warningIssuesCount}`,
+          `Informations: ${infoIssuesCount}`
+        ]);
+        sheet.mergeCells('A2:D2');
+        sheet.mergeCells('E2:H2');
+        sheet.mergeCells('I2:L2');
+        sheet.mergeCells('M2:R2');
+        summaryRow.eachCell((cell, index)=>{
+          const fills = ['E2E8F0', 'FEE2E2', 'FEF3C7', 'DBEAFE'];
+          const fonts = ['0F172A', '991B1B', '92400E', '1E3A8A'];
+          cell.font = { bold: true, size: 11, color: { argb: fonts[index - 1] || '0F172A' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fills[index - 1] || 'F8FAFC' } };
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'CBD5E1' } },
+            left: { style: 'thin', color: { argb: 'CBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'CBD5E1' } },
+            right: { style: 'thin', color: { argb: 'CBD5E1' } }
+          };
+        });
+        summaryRow.height = 22;
+        const introRow = sheet.addRow([`Lecture: ${filteredIssues.length ? 'traiter d abord les lignes "Urgent" puis "Haute", ensuite verifier les warnings et infos.' : 'aucune anomalie detectee dans cette feuille.'}`]);
+        sheet.mergeCells('A3:R3');
+        introRow.getCell(1).font = { italic: true, size: 11, color: { argb: '334155' } };
+        introRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F8FAFC' } };
+        introRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        introRow.getCell(1).border = {
+          top: { style: 'thin', color: { argb: 'E2E8F0' } },
+          left: { style: 'thin', color: { argb: 'E2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+          right: { style: 'thin', color: { argb: 'E2E8F0' } }
+        };
+        introRow.height = 22;
         const headerRow = sheet.addRow(allHeaders);
         applyHeaderStyle(headerRow);
         filteredIssues.forEach((issue)=>{
           const meta = getExcelImportSeverityMeta(issue?.severity);
           const palette = getProblemPalette(issue, meta.key);
+          const priority = buildPriorityMeta(issue, meta.key);
           const row = sheet.addRow([
             meta.label,
+            priority.label,
             palette.type,
             buildRecommendedAction(issue),
             issue?.rowNumber || '',
@@ -13954,7 +14317,7 @@ async function exportImportErrorsExcelRobust(){
           row.eachCell((cell)=>{
             cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.fill } };
-            cell.font = { color: { argb: palette.font }, bold: cell.col === 1 || cell.col === 2 || cell.col === 3 || cell.col === 16 };
+            cell.font = { color: { argb: palette.font }, bold: cell.col === 1 || cell.col === 2 || cell.col === 3 || cell.col === 4 || cell.col === 17 };
             cell.border = {
               top: { style: 'thin', color: { argb: 'E2E8F0' } },
               left: { style: 'thin', color: { argb: 'E2E8F0' } },
@@ -13964,49 +14327,133 @@ async function exportImportErrorsExcelRobust(){
           });
           row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.accent } };
           row.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-          row.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.accent } };
+          row.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: priority.accent } };
           row.getCell(2).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          row.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.accent } };
+          row.getCell(3).font = { bold: true, color: { argb: 'FFFFFFFF' } };
         });
         applyIssueSheetColumns(sheet);
       };
+      const skippedCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped').length;
+      const warningCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning').length;
+      const infoCount = issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info').length;
+      const totalIssues = issues.length;
+      const importSuccessCount = Math.max(0, Number(latestExcelImportResult?.savedCount) || 0);
+      summarySheet.columns = [{ width: 18 }, { width: 16 }, { width: 18 }, { width: 16 }, { width: 18 }, { width: 16 }, { width: 18 }, { width: 16 }];
       summarySheet.mergeCells('A1:H1');
       summarySheet.getCell('A1').value = latestExcelImportResult.title || "Rapport d'erreurs import Audience";
-      summarySheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
-      summarySheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1D4ED8' } };
+      summarySheet.getCell('A1').font = { bold: true, size: 20, color: { argb: 'FFFFFFFF' } };
+      summarySheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F172A' } };
       summarySheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+      summarySheet.getRow(1).height = 28;
       summarySheet.mergeCells('A2:H2');
-      summarySheet.getCell('A2').value = `Genere le ${formatDateTimeDisplay(new Date())}`;
-      summarySheet.getCell('A2').font = { italic: true, color: { argb: '334155' } };
+      summarySheet.getCell('A2').value = `Genere le ${formatDateTimeDisplay(new Date())} - Controle import Audience`;
+      summarySheet.getCell('A2').font = { italic: true, size: 11, color: { argb: 'E2E8F0' } };
+      summarySheet.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E293B' } };
+      summarySheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'center' };
+      summarySheet.getRow(2).height = 20;
+      summarySheet.mergeCells('A4:H4');
+      summarySheet.getCell('A4').value = 'Synthese executive';
+      summarySheet.getCell('A4').font = { bold: true, size: 13, color: { argb: '0F172A' } };
+      summarySheet.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DBEAFE' } };
+      summarySheet.getCell('A4').alignment = { vertical: 'middle', horizontal: 'left' };
+      summarySheet.getRow(4).height = 22;
       summaryLines.forEach((line, index)=>{
-        const rowNumber = 4 + index;
+        const rowNumber = 5 + index;
         const row = summarySheet.getRow(rowNumber);
         summarySheet.mergeCells(`A${rowNumber}:H${rowNumber}`);
         row.getCell(1).value = line;
         row.getCell(1).font = { bold: index === 0, color: { argb: '0F172A' } };
-        row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index === 0 ? 'DBEAFE' : 'F8FAFC' } };
+        row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index === 0 ? 'EFF6FF' : 'F8FAFC' } };
+        row.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        row.getCell(1).border = {
+          top: { style: 'thin', color: { argb: 'E2E8F0' } },
+          left: { style: 'thin', color: { argb: 'E2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+          right: { style: 'thin', color: { argb: 'E2E8F0' } }
+        };
       });
-      summarySheet.columns = [{ width: 24 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }];
-      const statsRow = summarySheet.addRow(['Non importees', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped').length, 'Avertissements', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'warning').length, 'Informations', issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'info').length]);
-      statsRow.eachCell((cell, index)=>{
-        cell.font = { bold: index % 2 === 1 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index % 2 === 0 ? 'E2E8F0' : 'FFFFFF' } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      const metricsStartRow = summarySheet.rowCount + 2;
+      summarySheet.mergeCells(`A${metricsStartRow}:H${metricsStartRow}`);
+      summarySheet.getCell(`A${metricsStartRow}`).value = 'Chiffres cles';
+      summarySheet.getCell(`A${metricsStartRow}`).font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
+      summarySheet.getCell(`A${metricsStartRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
+      summarySheet.getCell(`A${metricsStartRow}`).alignment = { vertical: 'middle', horizontal: 'center' };
+      const metricCards = [
+        { label: 'Total anomalies', value: totalIssues, accent: '334155', fill: 'E2E8F0', font: '0F172A' },
+        { label: 'Non importees', value: skippedCount, accent: 'B91C1C', fill: 'FEE2E2', font: '7F1D1D' },
+        { label: 'Avertissements', value: warningCount, accent: 'B45309', fill: 'FEF3C7', font: '92400E' },
+        { label: 'Informations', value: infoCount, accent: '1D4ED8', fill: 'DBEAFE', font: '1E3A8A' }
+      ];
+      const metricRowNumber = metricsStartRow + 1;
+      const metricValueRowNumber = metricsStartRow + 2;
+      metricCards.forEach((card, index)=>{
+        const startCol = index * 2 + 1;
+        const labelCell = summarySheet.getRow(metricRowNumber).getCell(startCol);
+        const valueCell = summarySheet.getRow(metricValueRowNumber).getCell(startCol);
+        summarySheet.mergeCells(metricRowNumber, startCol, metricRowNumber, startCol + 1);
+        summarySheet.mergeCells(metricValueRowNumber, startCol, metricValueRowNumber, startCol + 1);
+        labelCell.value = card.label;
+        labelCell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+        labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: card.accent } };
+        labelCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        valueCell.value = card.value;
+        valueCell.font = { bold: true, size: 22, color: { argb: card.font } };
+        valueCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: card.fill } };
+        valueCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        [labelCell, valueCell].forEach((cell)=>{
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'CBD5E1' } },
+            left: { style: 'thin', color: { argb: 'CBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'CBD5E1' } },
+            right: { style: 'thin', color: { argb: 'CBD5E1' } }
+          };
+        });
+      });
+      summarySheet.getRow(metricRowNumber).height = 22;
+      summarySheet.getRow(metricValueRowNumber).height = 30;
+      const analysisStartRow = metricValueRowNumber + 2;
+      summarySheet.mergeCells(`A${analysisStartRow}:H${analysisStartRow}`);
+      summarySheet.getCell(`A${analysisStartRow}`).value = 'Lecture rapide';
+      summarySheet.getCell(`A${analysisStartRow}`).font = { bold: true, size: 13, color: { argb: '0F172A' } };
+      summarySheet.getCell(`A${analysisStartRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DCFCE7' } };
+      summarySheet.getCell(`A${analysisStartRow}`).alignment = { vertical: 'middle', horizontal: 'left' };
+      const analysisLines = [
+        `Lignes importees avec succes : ${importSuccessCount}`,
+        `Anomalies bloquantes : ${skippedCount}. Priorite sur les feuilles "Non importees" puis "Erreurs import".`,
+        `Anomalies de controle : ${warningCount} avertissement(s) et ${infoCount} information(s).`,
+        skippedCount > 0 ? 'Action recommandee : corriger les references dossier/client puis relancer l import.' : 'Action recommandee : controle final des avertissements avant validation definitive.'
+      ];
+      analysisLines.forEach((line, index)=>{
+        const rowNumber = analysisStartRow + 1 + index;
+        summarySheet.mergeCells(`A${rowNumber}:H${rowNumber}`);
+        const cell = summarySheet.getCell(`A${rowNumber}`);
+        cell.value = line;
+        cell.font = { size: 11, color: { argb: '1F2937' }, bold: index === 0 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index === 0 ? 'F0FDF4' : 'FFFFFF' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'E2E8F0' } },
+          left: { style: 'thin', color: { argb: 'E2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+          right: { style: 'thin', color: { argb: 'E2E8F0' } }
+        };
       });
       const legendStartRow = summarySheet.rowCount + 2;
-      summarySheet.mergeCells(`A${legendStartRow}:D${legendStartRow}`);
+      summarySheet.mergeCells(`A${legendStartRow}:H${legendStartRow}`);
       const legendTitleCell = summarySheet.getCell(`A${legendStartRow}`);
-      legendTitleCell.value = 'Legende couleurs';
+      legendTitleCell.value = 'Legende couleurs et priorites';
       legendTitleCell.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
       legendTitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
       legendTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
       [
-        ['Hors global', 'Orange fort', 'Audience sans dossier global parent'],
-        ['Matching / introuvable', 'Rouge', 'Ref dossier ou liaison introuvable'],
-        ['Date audience invalide', 'Jaune', 'Date a corriger dans le fichier'],
+        ['Hors global', 'Priorite haute', 'Audience sans dossier global parent'],
+        ['Matching / introuvable', 'Blocage', 'Ref dossier ou liaison introuvable'],
+        ['Date audience invalide', 'A corriger', 'Date a corriger dans le fichier'],
         ['ProcÃ©dure', 'Violet', 'Valeur procedure a verifier'],
-        ['Ref client', 'Vert', 'Ref client incoherente ou absente'],
-        ['Ref dossier', 'Bleu', 'Reference dossier a nettoyer'],
-        ['Doublon', 'Rose', 'Ligne potentiellement deja importee']
+        ['Ref client', 'Controle', 'Ref client incoherente ou absente'],
+        ['Ref dossier', 'Controle', 'Reference dossier a nettoyer'],
+        ['Doublon', 'Verification', 'Ligne potentiellement deja importee']
       ].forEach((item, index)=>{
         const rowNumber = legendStartRow + 1 + index;
         const row = summarySheet.getRow(rowNumber);
@@ -14014,11 +14461,14 @@ async function exportImportErrorsExcelRobust(){
         row.getCell(1).value = item[0];
         row.getCell(2).value = item[1];
         row.getCell(3).value = item[2];
+        row.getCell(4).value = index < 2 ? 'Traiter en premier' : 'Controle metier';
         row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.accent } };
         row.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
         row.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: palette.fill } };
         row.getCell(2).font = { bold: true, color: { argb: palette.font } };
         row.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        row.getCell(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index < 2 ? 'FEE2E2' : 'ECFCCB' } };
+        row.getCell(4).font = { bold: true, color: { argb: index < 2 ? '991B1B' : '365314' } };
         row.eachCell((cell)=>{
           cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
           cell.border = {
@@ -14028,6 +14478,7 @@ async function exportImportErrorsExcelRobust(){
             right: { style: 'thin', color: { argb: 'E2E8F0' } }
           };
         });
+        row.height = 20;
       });
       addIssueRowsToSheet(issueSheet, issues);
       addIssueRowsToSheet(skippedSheet, issues.filter((issue)=>normalizeExcelImportSeverity(issue?.severity) === 'skipped'));
@@ -14043,46 +14494,19 @@ async function exportImportErrorsExcelRobust(){
     }
     throw new Error('ExcelJS indisponible');
   }catch(err){
-    console.error('Export ExcelJS impossible, fallback XLSX', err);
+    console.error('Export ExcelJS impossible', err);
     try{
-      const xlsxReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: false, silent: true });
-      if(!xlsxReady || typeof XLSX === 'undefined') throw new Error('XLSX indisponible');
-      const wb = XLSX.utils.book_new();
-      const safeSummary = String(latestExcelImportResult.summary || '').trim();
-      const summaryRows = (safeSummary ? safeSummary.split(/\r?\n/) : ['Import Excel']).map((line)=>[String(line || '').trim()]);
-      const issueRows = latestExcelImportResult.issues.map((issue)=>{
-        const meta = getExcelImportSeverityMeta(issue?.severity);
-        return {
-          Severite: meta.label,
-          Ligne: issue?.rowNumber || '',
-          Source: issue?.source || '',
-          Zone: issue?.zone || '',
-          RefDossier: issue?.refDossier || '',
-          RefClient: issue?.refClient || '',
-          Debiteur: issue?.debiteur || '',
-          Procedure: issue?.procedure || '',
-          Tribunal: issue?.tribunal || '',
-          DateAudience: issue?.audienceDate || '',
-          Sort: issue?.sort || '',
-          DateDepot: issue?.dateDepot || '',
-          Statut: issue?.statut || '',
-          Message: issue?.message || '',
-          Contexte: issue?.context || ''
-        };
-      });
-      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-      const wsIssues = XLSX.utils.json_to_sheet(issueRows);
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Resume');
-      XLSX.utils.book_append_sheet(wb, wsIssues, 'Erreurs import');
-      const fallbackBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const fallbackBlob = new Blob([fallbackBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const now = new Date();
-      const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '_', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0')].join('');
-      const baseName = String(latestExcelImportResult.filenameBase || 'audience_import_erreurs').trim() || 'audience_import_erreurs';
-      await saveBlobDirectOrDownload(fallbackBlob, `${baseName}_${stamp}.xlsx`, { openAfterExport: false });
+      await exportImportErrorsWithXlsx();
+      return;
     }catch(fallbackErr){
-      console.error(fallbackErr);
-      alert("Export des erreurs impossible. Reessayez.");
+      console.error('Export XLSX impossible', fallbackErr);
+      try{
+        await exportImportErrorsWithHtmlExcel();
+        return;
+      }catch(lastErr){
+        console.error('Export HTML Excel impossible', lastErr);
+        alert("Export Excel impossible pour le moment. Reessayez dans quelques secondes.");
+      }
     }
   }finally{
     setImportResultExportState(latestExcelImportResult);
@@ -14105,7 +14529,8 @@ function showExcelImportResult(summary, issuesText, options = {}){
     issuesText: String(issuesText || '').trim(),
     issues: safeIssues
   });
-  summaryNode.innerText = summary;
+  warmupExcelLibrariesOnIdle();
+  renderExcelImportSummary(summary, summaryNode, safeIssues);
   renderExcelImportIssues(issuesText || 'Aucune erreur.', errorsNode, safeIssues, summary);
   errorsNode.scrollTop = 0;
   modal.style.display = 'flex';
@@ -14914,7 +15339,10 @@ async function applyExcelImport(payload, options = {}){
     if(unknownProcedureTokens.length){
       addWarningImportIssue(`${rowNumberLabel}: procédure inconnue (${unknownProcedureTokens.join(', ')})${dossierContext}`);
     }
-    const clientName = row.clientName || row.debiteur || 'Client';
+    const clientName = String(row.clientName || '').trim() || 'Client introuvable';
+    if(clientName === 'Client introuvable'){
+      addWarningImportIssue(`${rowNumberLabel}: client introuvable dans Excel - dossier rattaché au client provisoire "Client introuvable"${dossierContext}`);
+    }
     const clientKey = String(clientName).trim().toLowerCase();
     let client = clientMap.get(clientKey);
     if(!client){
@@ -16565,6 +16993,14 @@ function setupEvents(){
     filterAudienceCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderAudience();
   });
+  const audienceTableBody = $('audienceBody');
+  if(audienceTableBody && typeof MutationObserver !== 'undefined'){
+    const observer = new MutationObserver(()=>{
+      enhanceAudienceInlineEditableColumns();
+    });
+    observer.observe(audienceTableBody, { childList: true, subtree: true });
+    enhanceAudienceInlineEditableColumns();
+  }
   $('undoAudienceColorBtn')?.addEventListener('click', undoLastAudienceColorChange);
 
   document.addEventListener('keydown', handleAudienceSaveShortcut);
@@ -22322,6 +22758,11 @@ function setAllFilteredAudienceRowsForPrint(checked){
 }
 
 function getAudienceDateDepotDisplayValue(row){
+  const draftDateDepotRaw = String(row?.draft?.dateDepot || '').trim();
+  if(draftDateDepotRaw){
+    return normalizeDateDDMMYYYY(draftDateDepotRaw) || draftDateDepotRaw;
+  }
+
   const depotLeRaw = String(row?.p?.depotLe || '').trim();
   if(depotLeRaw){
     return normalizeDateDDMMYYYY(depotLeRaw) || depotLeRaw;
@@ -23035,6 +23476,8 @@ function hasAudienceProcedureData(procData, draftData, dossier){
     p.sort,
     d.instruction,
     p.instruction,
+    d.tribunal,
+    d.dateDepot,
     p.tribunal
   ];
   return fields.some(value=>String(value || '').trim().length > 0);
@@ -23082,7 +23525,7 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
         di: dossierIndex,
         __dupKey: duplicateKey,
         __procFilterKey: getAudienceProcedureFilterKey(procKey),
-        __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
+        __tribunalFilterKey: resolveAudienceTribunalFilterKey(draft?.tribunal || p?.tribunal || ''),
         __rowReference: refDossier,
         __sortMeta: sortMeta,
         __audienceDateDisplay: audienceDateDisplay
@@ -23672,6 +24115,19 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
   if(field === 'sort'){
     p.sort = value;
+    return;
+  }
+  if(field === 'tribunal'){
+    p.tribunal = String(value || '').trim();
+    return;
+  }
+  if(field === 'dateDepot'){
+    const normalizedDepot = normalizeDateDDMMYYYY(value);
+    const nextDepot = normalizedDepot || String(value || '').trim();
+    p.dateDepot = nextDepot;
+    if(nextDepot){
+      delete p.depotLe;
+    }
   }
 }
 
@@ -23716,7 +24172,9 @@ function updateAudienceDraft(key, field, value){
     refDossier: 'procedureDetails.referenceClient',
     dateAudience: 'procedureDetails.audience',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    tribunal: 'procedureDetails.tribunal',
+    dateDepot: 'procedureDetails.dateDepot'
   };
   if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
@@ -23736,6 +24194,28 @@ function updateAudienceDraftFromEncoded(keyEncoded, field, value){
   updateAudienceDraft(decodeURIComponent(String(keyEncoded)), field, value);
 }
 
+function clearAudienceInlineInputError(inputEl){
+  if(!inputEl) return;
+  inputEl.classList.remove('audience-inline-input-invalid');
+  inputEl.removeAttribute('aria-invalid');
+  const next = inputEl.nextElementSibling;
+  if(next && next.classList && next.classList.contains('audience-inline-error')) next.remove();
+}
+
+function setAudienceInlineInputError(inputEl, message){
+  if(!inputEl) return false;
+  inputEl.classList.add('audience-inline-input-invalid');
+  inputEl.setAttribute('aria-invalid', 'true');
+  let errorNode = inputEl.nextElementSibling;
+  if(!errorNode || !errorNode.classList || !errorNode.classList.contains('audience-inline-error')){
+    errorNode = document.createElement('div');
+    errorNode.className = 'audience-inline-error';
+    inputEl.insertAdjacentElement('afterend', errorNode);
+  }
+  errorNode.textContent = String(message || '').trim();
+  return false;
+}
+
 function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
@@ -23753,6 +24233,26 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   }
   inputEl.value = normalized;
   updateAudienceDraft(key, 'dateAudience', normalized);
+  return true;
+}
+
+function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    updateAudienceDraft(key, 'dateDepot', '');
+    inputEl.value = '';
+    return true;
+  }
+  const normalized = normalizeDateDDMMYYYY(raw);
+  if(!normalized){
+    alert('Date de dépôt invalide. Utilisez le format jj/mm/aaaa.');
+    inputEl.focus();
+    return false;
+  }
+  inputEl.value = normalized;
+  updateAudienceDraft(key, 'dateDepot', normalized);
   return true;
 }
 
@@ -23826,6 +24326,30 @@ function saveAudienceDraftEntry(key, options = {}){
         after
       });
     }
+    if(data.tribunal !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.dateDepot !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
   }
 
   const shouldReconcileAudienceRefs = !!(
@@ -23876,6 +24400,8 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   const targetField = String(field || '').trim();
   if(targetField === 'dateAudience'){
     if(!normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl)) return;
+  }else if(targetField === 'dateDepot'){
+    if(!normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl)) return;
   }else{
     updateAudienceDraft(key, targetField, inputEl.value);
   }
@@ -23983,6 +24509,30 @@ function saveAllAudience(options = {}){
         after
       });
     }
+    if(data.tribunal!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'tribunal');
+      applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      const after = getAudienceProcedureFieldValue(p, 'tribunal');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.tribunal',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.dateDepot!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'dateDepot');
+      applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      const after = getAudienceProcedureFieldValue(p, 'dateDepot');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.dateDepot',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
   });
 
   const reconciliation = shouldReconcileAudienceRefs
@@ -24028,6 +24578,276 @@ function queueAudienceAutoSave(){
     audienceAutoSaveTimer = null;
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
+}
+
+function normalizeAudienceInlineHeaderLabel(value){
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return normalized
+    .replace(/d[aÃ]©p[aÃ][´o]t/g, 'depot')
+    .replace(/proc[aÃ]©dure/g, 'procedure')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function extractAudienceDraftKeyFromInlineHandlerText(text){
+  const source = String(text || '');
+  if(!source) return '';
+  const directMatch = source.match(/(?:updateAudienceDraftFromEncoded|confirmAudienceInlineEditFromEncoded)\('([^']+)'/);
+  if(directMatch && directMatch[1]) return decodeURIComponent(directMatch[1]);
+  const rowMatch = source.match(/(?:toggleAudienceSelectionAndColorEncoded|toggleAudiencePrintSelectionEncoded|setAudienceColorEncoded)\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*'([^']+)'/);
+  if(rowMatch){
+    const ci = String(rowMatch[1] || '').trim();
+    const di = String(rowMatch[2] || '').trim();
+    const procKey = decodeURIComponent(String(rowMatch[3] || ''));
+    return makeAudienceDraftKey(ci, di, procKey);
+  }
+  return '';
+}
+
+function extractAudienceDraftKeyFromRow(row){
+  if(!row) return '';
+  if(String(row.dataset.audienceDraftKey || '').trim()){
+    return row.dataset.audienceDraftKey;
+  }
+  const elements = row.querySelectorAll('input, select, button, label');
+  for(const element of elements){
+    const candidate = extractAudienceDraftKeyFromInlineHandlerText(
+      element.getAttribute('oninput')
+      || element.getAttribute('onkeydown')
+      || element.getAttribute('onclick')
+      || element.getAttribute('onchange')
+      || ''
+    );
+    if(candidate){
+      row.dataset.audienceDraftKey = candidate;
+      return candidate;
+    }
+  }
+  return '';
+}
+
+function buildAudienceInlineEnhancedInput(row, draftKey, field, value, placeholder){
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'audience-inline-input audience-inline-enhanced-input';
+  input.value = value;
+  input.placeholder = placeholder;
+  input.dataset.field = field;
+  input.dataset.audienceEnhanced = '1';
+  input.addEventListener('input', ()=>{
+    updateAudienceDraft(draftKey, field, input.value);
+  });
+  input.addEventListener('keydown', (event)=>{
+    confirmAudienceInlineEditFromEncoded(encodeURIComponent(String(draftKey || '')), field, input, event);
+  });
+  input.addEventListener('blur', ()=>{
+    const currentDraft = audienceDraft?.[draftKey];
+    if(!currentDraft || currentDraft[field] === undefined) return;
+    if(field === 'dateDepot' && !normalizeAudienceDateDepotDraftInputFromEncoded(encodeURIComponent(String(draftKey || '')), input)){
+      return;
+    }
+    saveAudienceDraftEntry(draftKey, { clearDraft: true, rerender: true });
+  });
+  return input;
+}
+
+function clearAudienceInlineInputError(inputEl){
+  if(!inputEl) return;
+  inputEl.classList.remove('audience-inline-input-invalid');
+  inputEl.removeAttribute('aria-invalid');
+  const next = inputEl.nextElementSibling;
+  if(next && next.classList && next.classList.contains('audience-inline-error')){
+    next.remove();
+  }
+}
+
+function setAudienceInlineInputError(inputEl, message){
+  if(!inputEl) return false;
+  inputEl.classList.add('audience-inline-input-invalid');
+  inputEl.setAttribute('aria-invalid', 'true');
+  let errorNode = inputEl.nextElementSibling;
+  if(!errorNode || !errorNode.classList || !errorNode.classList.contains('audience-inline-error')){
+    errorNode = document.createElement('div');
+    errorNode.className = 'audience-inline-error';
+    inputEl.insertAdjacentElement('afterend', errorNode);
+  }
+  errorNode.textContent = String(message || '').trim();
+  return false;
+}
+
+function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    clearAudienceInlineInputError(inputEl);
+    updateAudienceDraft(key, 'dateAudience', '');
+    inputEl.value = '';
+    return true;
+  }
+  const normalized = normalizeDateDDMMYYYY(raw);
+  if(!normalized){
+    return setAudienceInlineInputError(inputEl, 'Format attendu: jj/mm/aaaa');
+  }
+  clearAudienceInlineInputError(inputEl);
+  inputEl.value = normalized;
+  updateAudienceDraft(key, 'dateAudience', normalized);
+  return true;
+}
+
+function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+  if(!inputEl) return false;
+  const key = decodeURIComponent(String(keyEncoded));
+  const raw = String(inputEl.value || '').trim();
+  if(!raw){
+    clearAudienceInlineInputError(inputEl);
+    updateAudienceDraft(key, 'dateDepot', '');
+    inputEl.value = '';
+    return true;
+  }
+  const normalized = normalizeDateDDMMYYYY(raw);
+  if(!normalized){
+    return setAudienceInlineInputError(inputEl, 'Format attendu: jj/mm/aaaa');
+  }
+  clearAudienceInlineInputError(inputEl);
+  inputEl.value = normalized;
+  updateAudienceDraft(key, 'dateDepot', normalized);
+  return true;
+}
+
+function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event){
+  if(!event || event.key !== 'Enter') return;
+  event.preventDefault();
+  if(!inputEl) return;
+  const key = decodeURIComponent(String(keyEncoded));
+  const targetField = String(field || '').trim();
+  if(targetField === 'dateAudience'){
+    if(!normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl)) return;
+  }else if(targetField === 'dateDepot'){
+    if(!normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl)) return;
+  }else{
+    clearAudienceInlineInputError(inputEl);
+    updateAudienceDraft(key, targetField, inputEl.value);
+  }
+  saveAudienceDraftEntry(key, { clearDraft: true, rerender: true });
+  if(typeof inputEl.blur === 'function'){
+    inputEl.blur();
+  }
+}
+
+function buildAudienceInlineEnhancedInput(row, draftKey, field, value, placeholder){
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'audience-inline-input audience-inline-enhanced-input';
+  input.value = value;
+  input.placeholder = placeholder;
+  input.dataset.field = field;
+  input.dataset.audienceEnhanced = '1';
+  input.addEventListener('input', ()=>{
+    const encodedKey = encodeURIComponent(String(draftKey || ''));
+    if(field === 'dateAudience'){
+      const raw = String(input.value || '').trim();
+      if(!raw){
+        clearAudienceInlineInputError(input);
+        updateAudienceDraft(draftKey, field, '');
+        return;
+      }
+      const normalized = normalizeDateDDMMYYYY(raw);
+      if(normalized){
+        clearAudienceInlineInputError(input);
+        updateAudienceDraft(draftKey, field, normalized);
+      }else{
+        setAudienceInlineInputError(input, 'Format attendu: jj/mm/aaaa');
+      }
+      return;
+    }
+    if(field === 'dateDepot'){
+      const raw = String(input.value || '').trim();
+      if(!raw){
+        clearAudienceInlineInputError(input);
+        updateAudienceDraft(draftKey, field, '');
+        return;
+      }
+      const normalized = normalizeDateDDMMYYYY(raw);
+      if(normalized){
+        clearAudienceInlineInputError(input);
+        updateAudienceDraft(draftKey, field, normalized);
+      }else{
+        setAudienceInlineInputError(input, 'Format attendu: jj/mm/aaaa');
+      }
+      return;
+    }
+    clearAudienceInlineInputError(input);
+    updateAudienceDraft(draftKey, field, input.value);
+  });
+  input.addEventListener('keydown', (event)=>{
+    confirmAudienceInlineEditFromEncoded(encodeURIComponent(String(draftKey || '')), field, input, event);
+  });
+  input.addEventListener('blur', ()=>{
+    const currentDraft = audienceDraft?.[draftKey];
+    if(!currentDraft || currentDraft[field] === undefined) return;
+    if(field === 'dateAudience' && !normalizeAudienceDateDraftInputFromEncoded(encodeURIComponent(String(draftKey || '')), input)){
+      return;
+    }
+    if(field === 'dateDepot' && !normalizeAudienceDateDepotDraftInputFromEncoded(encodeURIComponent(String(draftKey || '')), input)){
+      return;
+    }
+    saveAudienceDraftEntry(draftKey, { clearDraft: true, rerender: true });
+  });
+  return input;
+}
+
+function enhanceAudienceInlineEditableColumns(){
+  const table = document.querySelector('#audienceSection table') || document.querySelector('#audienceTableContainer table');
+  const headerCells = table ? [...table.querySelectorAll('thead th')] : [];
+  const tbody = document.querySelector('#audienceBody') || table?.querySelector('tbody');
+  if(!tbody || !headerCells.length) return;
+  const headerIndexByKey = new Map();
+  headerCells.forEach((cell, index)=>{
+    const normalized = normalizeAudienceInlineHeaderLabel(cell.textContent);
+    if(normalized) headerIndexByKey.set(normalized, index);
+  });
+  const tribunalIndex = headerIndexByKey.get('tribunal');
+  const dateDepotIndex = headerIndexByKey.get('date depot');
+  if(!Number.isInteger(tribunalIndex) && !Number.isInteger(dateDepotIndex)) return;
+
+  [...tbody.querySelectorAll('tr')].forEach((row)=>{
+    const draftKey = extractAudienceDraftKeyFromRow(row);
+    if(!draftKey) return;
+    const { ci, di, procKey } = parseAudienceDraftKey(draftKey);
+    const procData = getAudienceProcedure(ci, di, procKey);
+    const draftData = audienceDraft?.[draftKey] || {};
+    const cells = [...row.children];
+
+    const enhanceCell = (cellIndex, field, placeholder, valueResolver)=>{
+      if(!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex >= cells.length) return;
+      const cell = cells[cellIndex];
+      if(!cell || cell.querySelector(`[data-field="${field}"]`)) return;
+      const currentValue = String(valueResolver(procData, draftData, cell) || '').trim();
+      cell.innerHTML = '';
+      cell.appendChild(buildAudienceInlineEnhancedInput(row, draftKey, field, currentValue, placeholder));
+    };
+
+    enhanceCell(
+      tribunalIndex,
+      'tribunal',
+      'Tribunal',
+      (proc, draft)=>String(draft?.tribunal || proc?.tribunal || '').trim()
+    );
+    enhanceCell(
+      dateDepotIndex,
+      'dateDepot',
+      'Date dépôt',
+      (proc, draft, cell)=>{
+        const text = String(draft?.dateDepot || proc?.depotLe || proc?.dateDepot || cell?.textContent || '').trim();
+        return text === '-' ? '' : text;
+      }
+    );
+  });
 }
 
 // ================== PROCEDURE DETAILS ==================

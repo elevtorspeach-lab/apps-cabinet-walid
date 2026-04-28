@@ -7,7 +7,7 @@ function AudienceSection() {
         <div className="audience-actions-row">
           <div className="audience-actions-center">
             <div className="audience-color-group">
-              <div className="audience-color-group-label">Couleur</div>
+              <div className="audience-color-group-label">Sort</div>
               <div className="color-filters">
                 <button className="color-btn all active" data-color="all">Tous</button>
                 <button className="color-btn white" data-color="white">Blanc</button>
@@ -16,19 +16,19 @@ function AudienceSection() {
                 <button className="color-btn green" data-color="green">ATT ORD</button>
                 <button className="color-btn yellow" data-color="yellow">ORD OK</button>
                 <button className="color-btn document-ok" data-color="document-ok">Document OK</button>
-                <button className="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
+                <button className="color-btn purple-dark" data-color="closed">Solde / Arret definitif</button>
               </div>
             </div>
           </div>
 
           <div className="audience-actions-right">
             <label id="audienceCheckedCount" className="audience-checked-count" htmlFor="audiencePageSelectionToggle">
-              <input id="audiencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page audience" />
-              <span className="label">Cochés</span>
+              <input id="audiencePageSelectionToggle" type="checkbox" aria-label="Cocher ou decocher toute la page audience" />
+              <span className="label">Coches</span>
               <span id="audienceCheckedCountValue" className="value">0</span>
             </label>
             <button id="undoAudienceColorBtn" className="btn-primary" type="button" disabled>
-              <i className="fa-solid fa-rotate-left"></i> Précédent
+              <i className="fa-solid fa-rotate-left"></i> Precedent
             </button>
             <button id="printAudienceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-square-check"></i> Cocher
@@ -37,7 +37,7 @@ function AudienceSection() {
               <i className="fa-solid fa-check-double"></i> Cocher page
             </button>
             <button id="clearAllPrintAudienceBtn" className="btn-primary" type="button">
-              <i className="fa-solid fa-eraser"></i> Décocher page
+              <i className="fa-solid fa-eraser"></i> Decocher page
             </button>
             <button id="exportAudienceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-file-export"></i> Exporter
@@ -46,7 +46,7 @@ function AudienceSection() {
               <i className="fa-solid fa-file-lines"></i> Export d&apos;audience
             </button>
             <button id="previewAudienceBtn" className="btn-primary" type="button">
-              <i className="fa-regular fa-eye"></i> Aperçu Excel
+              <i className="fa-regular fa-eye"></i> Apercu Excel
             </button>
           </div>
         </div>
@@ -55,7 +55,7 @@ function AudienceSection() {
           <div className="audience-search-shell">
             <div className="search-box audience-search-box">
               <i className="fa-solid fa-filter"></i>
-              <input type="text" id="filterAudience" placeholder="Filter global (date / client / réf client / réf dossier)..." autoComplete="off" />
+              <input type="text" id="filterAudience" placeholder="Filter global (date / client / ref client / ref dossier)..." autoComplete="off" />
             </div>
           </div>
 
@@ -67,12 +67,12 @@ function AudienceSection() {
               <option value="green">ATT ORD</option>
               <option value="yellow">ORD OK</option>
               <option value="document-ok">Document OK</option>
-              <option value="closed">Soldé / Arrêt définitif</option>
+              <option value="closed">Solde / Arret definitif</option>
             </select>
           </div>
 
           <div className="audience-color-filter">
-            <label htmlFor="filterAudienceProcedure">Procédure</label>
+            <label htmlFor="filterAudienceProcedure">Procedure</label>
             <select id="filterAudienceProcedure">
               <option value="all">Toutes</option>
             </select>
@@ -104,7 +104,6 @@ function AudienceSection() {
             </button>
           </div>
         </div>
-
       </div>
 
       <div id="audienceTableContainer" className="table-container">
@@ -113,15 +112,15 @@ function AudienceSection() {
             <tr>
               <th></th>
               <th>Client</th>
-              <th>Référence Client</th>
-              <th>Débiteur</th>
-              <th>Référence dossier</th>
+              <th>Reference Client</th>
+              <th>Debiteur</th>
+              <th>Reference dossier</th>
               <th>Date d&apos;audience</th>
               <th>Juge</th>
               <th>Sort</th>
               <th>Tribunal</th>
-              <th>Procédure</th>
-              <th>Date dépôt</th>
+              <th>Procedure</th>
+              <th>Date depot</th>
               <th>Statut</th>
               <th>Actions</th>
             </tr>
@@ -132,7 +131,7 @@ function AudienceSection() {
       <div id="audiencePagination" className="table-pagination"></div>
       <div id="audienceImportHistory" className="import-history-panel" style={{ display: 'none' }}></div>
     </div>
-  )
+  );
 }
 
-export default AudienceSection
+export default AudienceSection;
