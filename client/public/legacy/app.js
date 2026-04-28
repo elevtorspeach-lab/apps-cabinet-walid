@@ -5284,7 +5284,7 @@ function getAccessibleViewsForCurrentUser(){
   if(isAdmin()){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle']);
   }
-  return new Set(['dashboard', 'clients', 'suivi', 'audience', 'diligence']);
+  return new Set(['dashboard', 'suivi', 'audience', 'diligence']);
 }
 
 function getFallbackViewForCurrentUser(){

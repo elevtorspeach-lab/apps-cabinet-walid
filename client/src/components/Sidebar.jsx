@@ -117,7 +117,9 @@ function Sidebar() {
         
         <div id="dashboardLink" className="nav-link active" onClick={() => window.showView && window.showView('dashboard')}><i className="fa-solid fa-chart-pie"></i> Dashboard</div>
         
-        <div id="clientsLink" className="nav-link" onClick={() => window.showView && window.showView('clients')}><i className="fa-solid fa-users"></i> Clients</div>
+        {!isClient && (
+          <div id="clientsLink" className="nav-link" onClick={() => window.showView && window.showView('clients')}><i className="fa-solid fa-users"></i> Clients</div>
+        )}
         
         {!isClient && (
           <div id="creationLink" className="nav-link" onClick={() => window.showView && window.showView('creation')}><i className="fa-solid fa-folder-plus"></i> Création de Dossier</div>
