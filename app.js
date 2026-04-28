@@ -3942,7 +3942,7 @@ function ensureClientExcelFillControls(){
   button.id = 'fillClientExcelBtn';
   button.className = 'btn-primary';
   button.type = 'button';
-  button.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client';
+  button.innerHTML = '<i class="fa-solid fa-file-circle-plus"></i> Remplir Excel client';
 
   const input = document.createElement('input');
   input.id = 'fillClientExcelInput';
@@ -16115,7 +16115,6 @@ function setupEvents(){
   });
   $('deleteAllClientsBtn')?.addEventListener('click', deleteAllClients);
   $('importExcelBtn')?.addEventListener('click', ()=> $('importExcelInput')?.click());
-  $('fillClientExcelClientBtn')?.addEventListener('click', ()=> $('fillClientExcelClientInput')?.click());
   $('exportBackupExcelBtn')?.addEventListener('click', ()=>{
     if(!canEditData()) return alert('Accès refusé');
     exportBackupExcelImportable().catch(err=>console.error(err));
@@ -16128,11 +16127,6 @@ function setupEvents(){
       importDossiers: true,
       importAudiences: false
     }).catch(err=>console.error(err));
-    e.target.value = '';
-  });
-  $('fillClientExcelClientInput')?.addEventListener('change', (e)=>{
-    const file = e.target?.files?.[0];
-    if(file) fillClientExcelFile(file).catch(err=>console.error(err));
     e.target.value = '';
   });
   $('importAudienceExcelBtn')?.addEventListener('click', ()=> $('importAudienceExcelInput')?.click());
@@ -17032,7 +17026,7 @@ function applyRoleUI(options = {}){
   // No more manual style.display manipulations here to avoid conflicts.
   setRoleControlledVisibility(['importExcelBtn', 'importAudienceExcelBtn', 'exportBackupExcelBtn'], canImport);
   setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup'], canCreateClient);
-  setRoleControlledVisibility(['fillClientExcelBtn', 'fillClientExcelClientBtn', 'clientExcelFillGroup'], canUseClientExcelFill());
+  setRoleControlledVisibility(['fillClientExcelBtn'], canUseClientExcelFill());
   setRoleControlledVisibility([
     'selectAllSuiviBtn',
     'clearAllSuiviBtn',

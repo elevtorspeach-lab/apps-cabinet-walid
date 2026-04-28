@@ -1323,7 +1323,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card:not(.creation-priority-field) input,
 .creation-layout-card:not(.creation-priority-field) select{
   border:1.5px solid #93c5fd;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(239,246,255,.96) 100%);
+  background:#eff6ff;
   box-shadow:0 0 0 4px rgba(191,219,254,.34);
 }
 
@@ -1334,7 +1334,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-secondary-highlight-field input,
 .creation-layout-card.creation-secondary-highlight-field select{
   border:1.5px solid #4ade80;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(220,252,231,.92) 100%);
+  background:#dcfce7;
   box-shadow:0 0 0 4px rgba(134,239,172,.38);
 }
 
@@ -1382,7 +1382,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-restitution-highlight-field input,
 .creation-layout-card.creation-restitution-highlight-field select{
   border:1.5px solid #16a34a;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(220,252,231,.90) 100%);
+  background:#dcfce7;
   box-shadow:0 0 0 4px rgba(34,197,94,.26);
 }
 
@@ -1424,7 +1424,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-commandement-highlight-field input,
 .creation-layout-card.creation-commandement-highlight-field select{
   border:1.5px solid #8b5cf6;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(245,243,255,.94) 100%);
+  background:#f5f3ff;
   box-shadow:0 0 0 4px rgba(196,181,253,.34);
 }
 
@@ -1466,7 +1466,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-sanlam-highlight-field input,
 .creation-layout-card.creation-sanlam-highlight-field select{
   border:1.5px solid #334155;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(241,245,249,.94) 100%);
+  background:#f1f5f9;
   box-shadow:0 0 0 4px rgba(148,163,184,.26);
 }
 
@@ -1508,7 +1508,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-sanlam-2-field input,
 .creation-layout-card.creation-sanlam-2-field select{
   border:1.5px solid #4ade80;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(240,253,244,.95) 100%);
+  background:#f0fdf4;
   box-shadow:0 0 0 4px rgba(134,239,172,.28);
 }
 
@@ -1550,7 +1550,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-sanlam-3-field input,
 .creation-layout-card.creation-sanlam-3-field select{
   border:1.5px solid #c084fc;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(250,245,255,.95) 100%);
+  background:#faf5ff;
   box-shadow:0 0 0 4px rgba(216,180,254,.28);
 }
 
@@ -1592,7 +1592,7 @@ tr:hover{background:#f1f5f9}
 .creation-layout-card.creation-sanlam-4-field input,
 .creation-layout-card.creation-sanlam-4-field select{
   border:1.5px solid #fbbf24;
-  background:linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(255,251,235,.95) 100%);
+  background:#fffbeb;
   box-shadow:0 0 0 4px rgba(252,211,77,.28);
 }
 

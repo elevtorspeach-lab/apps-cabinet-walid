@@ -31,12 +31,6 @@ function ClientSection() {
             <i className="fa-solid fa-file-export"></i> Sauvegarde Excel
           </button>
         </div>
-        <div id="clientExcelFillGroup" className="import-excel">
-          <input type="file" id="fillClientExcelClientInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
-          <button id="fillClientExcelClientBtn" className="btn-primary" type="button">
-            <i className="fa-solid fa-wand-magic-sparkles"></i> Remplir Excel client
-          </button>
-        </div>
       </div>
       <div id="globalImportHistory" className="import-history-panel" style={{ display: 'none' }}></div>
       <div id="suiviTableContainer" className="table-container">
