@@ -8197,6 +8197,18 @@ async function serializeUploadedFiles(files){
   const result = [];
   for(const file of files){
     if(!file) continue;
+    if(file.storage === 'server' && file.id && file.name){
+      result.push({
+        storage: 'server',
+        id: String(file.id || ''),
+        storedName: String(file.storedName || ''),
+        name: String(file.name || ''),
+        size: Number(file.size || 0),
+        type: String(file.type || ''),
+        url: String(file.url || `/api/documents/${encodeURIComponent(String(file.id || ''))}`)
+      });
+      continue;
+    }
     if(file.dataUrl && file.name){
       result.push({
         name: String(file.name || ''),
@@ -8207,20 +8219,58 @@ async function serializeUploadedFiles(files){
       continue;
     }
     if(typeof File !== 'undefined' && file instanceof File){
-      const dataUrl = await fileToDataUrl(file);
-      result.push({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        dataUrl
-      });
+      result.push(await uploadDocumentFileToServer(file));
     }
   }
   return result;
 }
 
+async function uploadDocumentFileToServer(file){
+  if(!file || typeof File === 'undefined' || !(file instanceof File)){
+    throw new Error('Fichier invalide.');
+  }
+  if(!hasRemoteAuthSession()){
+    throw new Error('Connexion serveur requise pour enregistrer le document.');
+  }
+  const dataUrl = await fileToDataUrl(file);
+  const res = await fetchWithTimeout(`${API_BASE}/documents`, {
+    method: 'POST',
+    headers: buildRemoteAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      dataUrl
+    })
+  }, API_STATE_SAVE_TIMEOUT_MS);
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const payload = await res.json();
+  if(!payload?.file?.id) throw new Error('Réponse document invalide.');
+  return payload.file;
+}
+
+async function deleteServerDocument(file){
+  const id = String(file?.id || '').trim();
+  if(!id || file?.storage !== 'server' || !hasRemoteAuthSession()) return false;
+  try{
+    await fetchWithTimeout(`${API_BASE}/documents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: buildRemoteAuthHeaders()
+    }, API_STATE_SAVE_TIMEOUT_MS);
+    return true;
+  }catch(err){
+    console.warn('Suppression fichier serveur impossible', err);
+    return false;
+  }
+}
+
 function getStoredFileSource(file){
   if(!file) return '';
+  if(file.storage === 'server' && file.id){
+    const name = encodeURIComponent(String(file.name || 'document'));
+    const token = encodeURIComponent(String(remoteAuthToken || ''));
+    return `${API_BASE}/documents/${encodeURIComponent(String(file.id))}?name=${name}&token=${token}`;
+  }
   if(file.dataUrl) return String(file.dataUrl);
   if(typeof File !== 'undefined' && file instanceof File){
     return URL.createObjectURL(file);
@@ -9555,7 +9605,7 @@ function refreshPrimaryViews(options = {}){
     resetCreationForm();
   }
   if(options.showView){
-    showView(options.showView);
+    showView(options.showView, { force: options.force === true });
   }
 }
 
@@ -12051,6 +12101,11 @@ async function fetchRemoteStateFromPagedExport(remoteMeta){
     includeShared = false;
   }
 
+  const expectedDossierCount = Number(remoteMeta?.dossierCount);
+  if(Number.isFinite(expectedDossierCount) && expectedDossierCount > 0 && countPersistedStateDossiers(nextState.clients) === 0){
+    throw new Error('Chargement serveur ignore: snapshot pagine vide alors que le serveur annonce des dossiers.');
+  }
+
   return nextState;
 }
 
@@ -12246,6 +12301,10 @@ async function loadPersistedState(){
     if(parsed && typeof parsed === 'object'){
       markApiBaseHealthy(API_BASE);
       if(!remoteMeta) updateRemoteStateMetadata(parsed);
+      const expectedDossierCount = Number(remoteMeta?.dossierCount ?? parsed?.dossierCount);
+      if(Number.isFinite(expectedDossierCount) && expectedDossierCount > 0 && countPersistedStateDossiers(parsed.clients) === 0){
+        throw new Error('Chargement serveur ignore: snapshot vide alors que le serveur annonce des dossiers.');
+      }
       const normalizedState = normalizePersistedStateSource(parsed);
       if(normalizedState.signature && normalizedState.signature === lastPersistedStateSignature){
         lastRemoteStateLoadVersion = remoteStateVersion;
@@ -17619,7 +17678,7 @@ async function addDossier(){
     }
 
     paginationState.suivi = 1;
-    refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi' });
+    refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi', force: true });
   }catch(err){
     console.error(err);
     alert('Erreur pendant la sauvegarde du dossier');
@@ -17635,6 +17694,9 @@ function handleFiles(e){
     uploadedFiles.push(f);
   });
   renderFileList();
+  persistEditingDossierFilesNow().catch((err)=>{
+    console.warn('Sauvegarde document impossible', err);
+  });
 }
 
 function renderFileList(){
@@ -17692,8 +17754,39 @@ function downloadFile(index){
 }
 
 function removeFile(index){
-  uploadedFiles.splice(index, 1);
+  const [removed] = uploadedFiles.splice(index, 1);
   renderFileList();
+  deleteServerDocument(removed).catch(()=>{});
+  persistEditingDossierFilesNow().catch((err)=>{
+    console.warn('Suppression document impossible', err);
+  });
+}
+
+async function persistEditingDossierFilesNow(){
+  if(!editingDossier) return false;
+  const client = AppState.clients.find(c=>Number(c?.id) === Number(editingDossier.clientId));
+  if(!client || !Array.isArray(client.dossiers)) return false;
+  const dossierIndex = Number(editingDossier.index);
+  const previousDossier = client.dossiers[dossierIndex];
+  if(!previousDossier) return false;
+  const files = await serializeUploadedFiles(uploadedFiles);
+  uploadedFiles = files.map(file=>({ ...file }));
+  const nextDossier = {
+    ...previousDossier,
+    files
+  };
+  client.dossiers[dossierIndex] = nextDossier;
+  renderFileList();
+  handleDossierDataChange({ audience: false });
+  await persistDossierPatchNow({
+    action: 'update',
+    clientId: Number(client.id),
+    dossierIndex,
+    targetClientId: Number(client.id),
+    previousReferenceClient: String(previousDossier.referenceClient || '').trim(),
+    dossier: nextDossier
+  }, { source: 'dossier-files' });
+  return true;
 }
 
 function getSuiviBaseRowsCached(){
