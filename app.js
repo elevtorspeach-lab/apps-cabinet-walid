@@ -17654,12 +17654,6 @@ function isSuiviRowDuplicate(row){
 }
 
 function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
-  const createdAtA = Number(a?.createdAtTs || 0);
-  const createdAtB = Number(b?.createdAtTs || 0);
-  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
-    return createdAtB - createdAtA;
-  }
-
   if(pairCounts){
     const pairKeyA = a?.__suiviPairKey || buildSuiviRefDebiteurKey(a);
     const pairKeyB = b?.__suiviPairKey || buildSuiviRefDebiteurKey(b);
@@ -17673,6 +17667,12 @@ function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
       const byPair = pairKeyA.localeCompare(pairKeyB, 'fr', { numeric: true, sensitivity: 'base' });
       if(byPair !== 0) return byPair;
     }
+  }
+
+  const createdAtA = Number(a?.createdAtTs || 0);
+  const createdAtB = Number(b?.createdAtTs || 0);
+  if((createdAtA || createdAtB) && createdAtA !== createdAtB){
+    return createdAtB - createdAtA;
   }
 
   const refA = String(a?.d?.referenceClient || '').trim();
