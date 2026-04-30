@@ -15029,7 +15029,6 @@ async function applyExcelImport(payload, options = {}){
       }
     }
 
-    const sortValue = String(row.sortExecution || row.sort || '').trim();
     const importedOrdonnanceStatus = normalizeDiligenceOrdonnance(row.sortOrd || '');
     const tribunalValue = String(row.tribunal || '').trim();
     const assignProcedureMeta = (proc, refValue)=>{
@@ -15038,7 +15037,6 @@ async function applyExcelImport(payload, options = {}){
           executionNoValue
           || importedDateDepotValue
           || observationValue
-          || sortValue
           || tribunalValue
           || ((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus)
           || notificationSortValue
@@ -15053,7 +15051,6 @@ async function applyExcelImport(payload, options = {}){
       if(executionNoValue) targetDossier.procedureDetails[proc].executionNo = executionNoValue;
       if(importedDateDepotValue) targetDossier.procedureDetails[proc].dateDepot = importedDateDepotValue;
       if(observationValue) targetDossier.procedureDetails[proc].observation = observationValue;
-      if(sortValue) targetDossier.procedureDetails[proc].sort = sortValue;
       if(tribunalValue) targetDossier.procedureDetails[proc].tribunal = tribunalValue;
       if((proc === 'SFDC' || proc === 'Injonction') && importedOrdonnanceStatus){
         targetDossier.procedureDetails[proc].attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
@@ -15383,7 +15380,7 @@ async function applyExcelImport(payload, options = {}){
     }
     if(!String(p.audience || '').trim() && normalizedAudienceDate) p.audience = normalizedAudienceDate;
     if(!String(p.juge || '').trim() && row.juge) p.juge = row.juge;
-    if(!String(p.sort || '').trim() && row.sort) p.sort = row.sort;
+    if(row.sort) p.sort = row.sort;
     if(!String(p.tribunal || '').trim() && row.tribunal) p.tribunal = row.tribunal;
     // Keep "date depot" synchronized across repeated audience imports for the same ref dossier.
     const resolvedAudienceDepotDate = resolveAudienceDepotDateForRef(dossier, refKey, targetProc, row.dateDepot);
@@ -15422,7 +15419,6 @@ async function applyExcelImport(payload, options = {}){
       }
     }
     if(!p.executionNo && hint.executionNo) p.executionNo = hint.executionNo;
-    if(!p.sort && hint.sort) p.sort = hint.sort;
     p._audienceImportBatchId = audienceImportEntry ? audienceImportEntry.id : '';
     const normalizedProcedures = normalizeProcedures(dossier);
     dossier.procedureList = normalizedProcedures;

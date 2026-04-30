@@ -2,61 +2,7 @@ const { app, BrowserWindow, Menu, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_DESKTOP_APP_URL = 'http://192.168.1.11:3000/';
-
-function getDesktopAppUrlConfigCandidates() {
-  const candidates = [
-    path.join(__dirname, 'app-url.json')
-  ];
-
-  try {
-    candidates.push(path.join(path.dirname(process.execPath), 'app-url.json'));
-  } catch (_) {}
-
-  return [...new Set(candidates)];
-}
-
-function normalizeDesktopAppUrl(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    const parsed = new URL(raw);
-    return parsed.toString().replace(/\/+$/, '/') || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-function readDesktopAppUrlFromConfig() {
-  for (const configFile of getDesktopAppUrlConfigCandidates()) {
-    try {
-      if (!fs.existsSync(configFile)) continue;
-      const parsed = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-      const normalized = normalizeDesktopAppUrl(parsed?.url);
-      if (normalized) return normalized;
-    } catch (error) {
-      console.warn(`Unable to read desktop app URL config from ${configFile}.`, error);
-    }
-  }
-  return '';
-}
-
-function readDesktopAppUrlFromArgs() {
-  const match = process.argv.find((arg) => String(arg || '').startsWith('--app-url='));
-  if (!match) return '';
-  return normalizeDesktopAppUrl(match.slice('--app-url='.length));
-}
-
-function resolveDesktopAppUrl() {
-  return (
-    readDesktopAppUrlFromArgs()
-    || normalizeDesktopAppUrl(process.env.DESKTOP_APP_URL)
-    || readDesktopAppUrlFromConfig()
-    || DEFAULT_DESKTOP_APP_URL
-  );
-}
-
-const DESKTOP_APP_URL = resolveDesktopAppUrl();
+const DESKTOP_APP_URL = 'http://192.168.1.11:3000/';
 
 function configureDesktopUserDataPath() {
   const preferredPath = path.join(__dirname, '.electron-user-data');

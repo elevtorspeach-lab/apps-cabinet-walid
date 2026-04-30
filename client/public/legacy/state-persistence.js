@@ -62,16 +62,6 @@ function normalizePersistedStateSource(rawState){
   };
 }
 
-function countPersistedStateDossiers(clients){
-  return (Array.isArray(clients) ? clients : []).reduce((sum, client)=>{
-    return sum + (Array.isArray(client?.dossiers) ? client.dossiers.length : 0);
-  }, 0);
-}
-
-function countCurrentAppStateDossiers(){
-  return countPersistedStateDossiers(AppState?.clients);
-}
-
 function isPersistedStateSourceLarge(normalizedState){
   const clients = Array.isArray(normalizedState?.clients) ? normalizedState.clients : [];
   if(clients.length >= 300) return true;
@@ -128,18 +118,6 @@ function resolvePersistedStateCacheWrites(normalizedState, options = {}){
 
 async function applyPersistedStateSource(normalizedState, options = {}){
   if(!normalizedState || typeof normalizedState !== 'object') return false;
-  const nextDossierCount = countPersistedStateDossiers(normalizedState.clients);
-  const currentDossierCount = countCurrentAppStateDossiers();
-  if(options.allowEmptyDossierState !== true && currentDossierCount > 0 && nextDossierCount === 0){
-    console.warn('Etat vide ignore: conservation des dossiers actuellement affiches.', {
-      currentDossierCount,
-      source: options.source || ''
-    });
-    if(options.syncStatusMessage){
-      setSyncStatus('pending', 'Connexion ralentie - conservation des dossiers charges');
-    }
-    return false;
-  }
   const currentSignature = lastPersistedStateSignature;
   if(options.skipWhenSame && normalizedState.signature && normalizedState.signature === currentSignature){
     return false;

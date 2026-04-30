@@ -40,10 +40,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const STATE_JOURNAL_FILE = path.join(DATA_DIR, 'state.journal');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
-const DAILY_BACKUP_DIR = path.join(DATA_DIR, 'daily-backups');
-const DOCUMENTS_DIR = path.join(DATA_DIR, 'documents');
 const SERVER_BACKUP_RETENTION_COUNT = 20;
-const SERVER_DAILY_BACKUP_RETENTION_COUNT = 365;
 const SERVER_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
 const SERVER_SNAPSHOT_FLUSH_DELAY_MS = 3000;
 const SERVER_SNAPSHOT_FLUSH_MAX_PENDING = 160;
@@ -374,37 +371,6 @@ function requireApiAuth(req, res, next) {
   session.expiresAt = Date.now() + AUTH_SESSION_TTL_MS;
   req.authSession = session;
   next();
-}
-
-function sanitizeDocumentFileName(value) {
-  const cleaned = String(value || 'document')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned.slice(0, 180) || 'document';
-}
-
-function parseDataUrlPayload(dataUrl) {
-  const value = String(dataUrl || '');
-  const match = value.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,(.*)$/s);
-  if (!match) {
-    throw new Error('Invalid document payload.');
-  }
-  const mimeType = String(match[1] || 'application/octet-stream').trim() || 'application/octet-stream';
-  const base64 = String(match[2] || '').replace(/\s+/g, '');
-  if (!base64) {
-    throw new Error('Empty document payload.');
-  }
-  const buffer = Buffer.from(base64, 'base64');
-  if (!buffer.length) {
-    throw new Error('Empty document payload.');
-  }
-  return { mimeType, buffer };
-}
-
-function buildDocumentStorageName(id, originalName) {
-  const ext = path.extname(sanitizeDocumentFileName(originalName)).slice(0, 20);
-  return `${id}${ext || '.bin'}`;
 }
 
 app.use(express.json({ limit: '250mb' }));
@@ -880,11 +846,6 @@ function buildBackupFileName(ts = new Date()) {
   return `state_${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}_${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}.json`;
 }
 
-function buildDailyBackupFileName(ts = new Date()) {
-  const pad = (value) => String(value).padStart(2, '0');
-  return `state_${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}.json`;
-}
-
 async function pruneBackupFiles() {
   try {
     const entries = await fsp.readdir(BACKUP_DIR, { withFileTypes: true });
@@ -897,21 +858,6 @@ async function pruneBackupFiles() {
     await Promise.all(extras.map((name) => fsp.unlink(path.join(BACKUP_DIR, name)).catch(() => {})));
   } catch (err) {
     console.warn('Failed to prune state backups:', err);
-  }
-}
-
-async function pruneDailyBackupFiles() {
-  try {
-    const entries = await fsp.readdir(DAILY_BACKUP_DIR, { withFileTypes: true });
-    const files = entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-      .map((entry) => entry.name)
-      .sort()
-      .reverse();
-    const extras = files.slice(SERVER_DAILY_BACKUP_RETENTION_COUNT);
-    await Promise.all(extras.map((name) => fsp.unlink(path.join(DAILY_BACKUP_DIR, name)).catch(() => {})));
-  } catch (err) {
-    console.warn('Failed to prune daily state backups:', err);
   }
 }
 
@@ -933,53 +879,12 @@ async function maybeWriteBackupSnapshot(state) {
   await pruneBackupFiles();
 }
 
-async function maybeWriteDailyBackupSnapshot(state, ts = new Date()) {
-  if (countStateDossiers(state) <= 0) return null;
-  const snapshot = {
-    savedAt: ts.toISOString(),
-    backupKind: 'daily',
-    ...state
-  };
-  await fsp.mkdir(DAILY_BACKUP_DIR, { recursive: true });
-  const backupPath = path.join(DAILY_BACKUP_DIR, buildDailyBackupFileName(ts));
-  try {
-    await fsp.writeFile(backupPath, JSON.stringify(snapshot, null, 2), { encoding: 'utf8', flag: 'wx' });
-    await pruneDailyBackupFiles();
-    return backupPath;
-  } catch (err) {
-    if (err?.code === 'EEXIST') return backupPath;
-    throw err;
-  }
-}
-
 function countStateDossiers(state) {
   const clients = Array.isArray(state?.clients) ? state.clients : [];
   return clients.reduce((sum, client) => {
     const dossiers = Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
     return sum + dossiers;
   }, 0);
-}
-
-function assertSafeSnapshotReplace(previousState, nextState) {
-  const previousDossiers = countStateDossiers(previousState);
-  const nextDossiers = countStateDossiers(nextState);
-  const previousClients = Array.isArray(previousState?.clients) ? previousState.clients.length : 0;
-  const nextClients = Array.isArray(nextState?.clients) ? nextState.clients.length : 0;
-
-  if (previousDossiers > 0 && nextDossiers === 0) {
-    const error = new Error(
-      `Refusing to replace non-empty state (${previousClients} clients, ${previousDossiers} dossiers) with empty dossier snapshot (${nextClients} clients).`
-    );
-    error.code = 'EMPTY_SNAPSHOT_REJECTED';
-    error.statusCode = 409;
-    error.details = {
-      previousClients,
-      previousDossiers,
-      nextClients,
-      nextDossiers
-    };
-    throw error;
-  }
 }
 
 function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
@@ -1039,11 +944,6 @@ async function writeStateSnapshot(safeState, options = {}) {
     cachedJournalEntries = [];
   }
   setCachedState(persistedState);
-  try {
-    await maybeWriteDailyBackupSnapshot(persistedState);
-  } catch (err) {
-    console.warn('Failed to write daily state backup:', err);
-  }
   return persistedState;
 }
 
@@ -2059,68 +1959,6 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
   }
 });
 
-app.post('/api/documents', requireApiAuth, async (req, res) => {
-  try {
-    const body = getRequestBodyObject(req);
-    const originalName = sanitizeDocumentFileName(body?.name || 'document');
-    const declaredType = String(body?.type || '').trim();
-    const { mimeType, buffer } = parseDataUrlPayload(body?.dataUrl);
-    const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
-    const storedName = buildDocumentStorageName(id, originalName);
-    await fsp.mkdir(DOCUMENTS_DIR, { recursive: true });
-    await fsp.writeFile(path.join(DOCUMENTS_DIR, storedName), buffer, { flag: 'wx' });
-    return res.json({
-      ok: true,
-      file: {
-        storage: 'server',
-        id,
-        storedName,
-        name: originalName,
-        size: buffer.length,
-        type: declaredType || mimeType,
-        url: `/api/documents/${encodeURIComponent(id)}`
-      }
-    });
-  } catch (err) {
-    return sendJsonError(res, 400, 'DOCUMENT_UPLOAD_FAILED', 'Document upload failed.', err);
-  }
-});
-
-app.get('/api/documents/:id', requireApiAuth, async (req, res) => {
-  try {
-    const id = String(req.params.id || '').trim();
-    if (!/^[a-f0-9-]{16,64}$/i.test(id)) {
-      return sendJsonError(res, 400, 'INVALID_DOCUMENT_ID', 'Invalid document id.');
-    }
-    const entries = await fsp.readdir(DOCUMENTS_DIR, { withFileTypes: true }).catch(() => []);
-    const entry = entries.find((item) => item.isFile() && item.name.startsWith(`${id}.`));
-    if (!entry) {
-      return sendJsonError(res, 404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
-    }
-    const filePath = path.join(DOCUMENTS_DIR, entry.name);
-    const safeName = sanitizeDocumentFileName(String(req.query?.name || entry.name));
-    res.setHeader('Content-Disposition', `inline; filename="${safeName.replace(/"/g, '_')}"`);
-    res.sendFile(filePath);
-  } catch (err) {
-    return sendJsonError(res, 500, 'DOCUMENT_READ_FAILED', 'Document read failed.', err);
-  }
-});
-
-app.delete('/api/documents/:id', requireApiAuth, async (req, res) => {
-  try {
-    const id = String(req.params.id || '').trim();
-    if (!/^[a-f0-9-]{16,64}$/i.test(id)) {
-      return sendJsonError(res, 400, 'INVALID_DOCUMENT_ID', 'Invalid document id.');
-    }
-    const entries = await fsp.readdir(DOCUMENTS_DIR, { withFileTypes: true }).catch(() => []);
-    const matches = entries.filter((item) => item.isFile() && item.name.startsWith(`${id}.`));
-    await Promise.all(matches.map((entry) => fsp.unlink(path.join(DOCUMENTS_DIR, entry.name)).catch(() => {})));
-    return res.json({ ok: true, deleted: matches.length });
-  } catch (err) {
-    return sendJsonError(res, 500, 'DOCUMENT_DELETE_FAILED', 'Document delete failed.', err);
-  }
-});
-
 app.use('/api/state', requireApiAuth);
 
 app.get('/api/state', async (req, res) => {
@@ -2287,8 +2125,6 @@ app.post('/api/state', async (req, res) => {
       const explicitUsers = Array.isArray(statePayload.users)
         ? ensureManagerUser(statePayload.users)
         : null;
-      const normalizedPayload = normalizeStoredState(statePayload, currentState);
-      assertSafeSnapshotReplace(currentState, normalizedPayload);
       let saved = await writeState(statePayload, { previousState: currentState });
       if (explicitUsers) {
         await db.saveUsersState(explicitUsers, {
@@ -2313,9 +2149,7 @@ app.post('/api/state', async (req, res) => {
     }
     return sendVersionedOk(res, result.saved);
   } catch (err) {
-    const statusCode = Number(err?.statusCode) || 500;
-    const code = String(err?.code || 'STATE_SAVE_FAILED');
-    return sendJsonError(res, statusCode, code, 'State save failed.', err);
+    return sendJsonError(res, 500, 'STATE_SAVE_FAILED', 'State save failed.', err);
   }
 });
 
@@ -2643,12 +2477,6 @@ app.get('/', (req, res) => {
 
 ensureDataFile()
   .then(() => {
-    readState()
-      .then((state) => maybeWriteDailyBackupSnapshot(state))
-      .catch((err) => {
-        console.warn('Failed to create startup daily backup:', err);
-      });
-
     const httpServer = http.createServer(app);
     tuneServerTimeouts(httpServer);
     httpServer.listen(PORT, HOST, () => {
