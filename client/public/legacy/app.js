@@ -536,7 +536,7 @@ const CONTENT_ZOOM_MIN = 0.3;
 const CONTENT_ZOOM_MAX = 1.4;
 const CONTENT_ZOOM_STEP = 0.05;
 const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
-const REMOTE_SYNC_HEALTH_EVERY_TICKS = 18;
+const REMOTE_SYNC_HEALTH_EVERY_TICKS = 1;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
 const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
 const REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS = 45000;
@@ -12369,7 +12369,7 @@ function startRemoteSync(){
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     if(remoteSyncHealthTick === 0){
-      refreshServerConnectionStatus({ force: !remoteServerReachable }).then((connected)=>{
+      refreshServerConnectionStatus({ force: true }).then((connected)=>{
         if(connected && !remoteSyncStream){
           startRemoteSyncStream();
         }
