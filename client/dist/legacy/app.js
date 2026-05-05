@@ -2842,6 +2842,20 @@ function debounce(fn, wait = 120){
   };
 }
 
+function getFilterInputDebounceDelay(base = 160){
+  const safeBase = Math.max(0, Number(base) || 0);
+  if(typeof isVeryLargeLiveSyncMode === 'function' && isVeryLargeLiveSyncMode()){
+    return Math.max(safeBase, 520);
+  }
+  if(typeof isUltraLargeDatasetMode === 'function' && isUltraLargeDatasetMode()){
+    return Math.max(safeBase, 420);
+  }
+  if(typeof isLargeDatasetMode === 'function' && isLargeDatasetMode()){
+    return Math.max(safeBase, 280);
+  }
+  return safeBase;
+}
+
 function setElementTextIfChanged(el, text){
   if(!el) return false;
   const nextText = String(text ?? '');
@@ -16320,11 +16334,11 @@ function setupEvents(){
   });
   $('addProcedureBtn')?.addEventListener('click', addCustomProcedure);
 
-  const renderClientsDebounced = debounce(renderClients, 120);
-  const renderSuiviDebounced = debounce(renderSuivi, 120);
-  const renderAudienceDebounced = debounce(renderAudience, 220);
-  const renderDiligenceDebounced = debounce(renderDiligence, 120);
-  const filterTeamClientListDebounced = debounce(filterTeamClientList, 120);
+  const renderClientsDebounced = debounce(renderClients, getFilterInputDebounceDelay(120));
+  const renderSuiviDebounced = debounce(renderSuivi, getFilterInputDebounceDelay(180));
+  const renderAudienceDebounced = debounce(renderAudience, getFilterInputDebounceDelay(260));
+  const renderDiligenceDebounced = debounce(renderDiligence, getFilterInputDebounceDelay(180));
+  const filterTeamClientListDebounced = debounce(filterTeamClientList, getFilterInputDebounceDelay(120));
   $('audienceTableContainer')?.addEventListener('scroll', queueAudienceVirtualRender, { passive: true });
   $('suiviTableContainer')?.addEventListener('scroll', queueSuiviVirtualRender, { passive: true });
   $('diligenceTableContainer')?.addEventListener('scroll', queueDiligenceVirtualRender, { passive: true });
