@@ -126,6 +126,22 @@ function buildDossierExternalId(clientId, dossier, index) {
   return `dossier-${String(clientId || 'unknown')}-${index}-${digest}`;
 }
 
+function buildUniqueDossierExternalId(baseExternalId, usedExternalIds, clientId, index) {
+  const cleanBase = String(baseExternalId || '').trim() || `dossier-${String(clientId || 'unknown')}-${index}`;
+  if (!usedExternalIds.has(cleanBase)) {
+    usedExternalIds.add(cleanBase);
+    return cleanBase;
+  }
+  let suffix = 2;
+  let candidate = `${cleanBase}-${suffix}`;
+  while (usedExternalIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${cleanBase}-${suffix}`;
+  }
+  usedExternalIds.add(candidate);
+  return candidate;
+}
+
 async function getCurrentDatabaseName(connection) {
   const [[row]] = await runQuery(connection, 'SELECT DATABASE() AS dbName', [], 'Resolve database name');
   return String(row?.dbName || '').trim();
@@ -503,6 +519,7 @@ async function saveFullState(state) {
     }
 
     let insertedDossiers = 0;
+    const usedDossierExternalIds = new Set();
     for (const client of safeClients) {
       const clientId = normalizeDatabaseId(client?.id);
       if (clientId === null) {
@@ -520,7 +537,12 @@ async function saveFullState(state) {
       const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
       for (let index = 0; index < dossiers.length; index += 1) {
         const dossier = dossiers[index];
-        const externalId = buildDossierExternalId(clientId, dossier, index);
+        const externalId = buildUniqueDossierExternalId(
+          buildDossierExternalId(clientId, dossier, index),
+          usedDossierExternalIds,
+          clientId,
+          index
+        );
         await runQuery(
           connection,
           'INSERT INTO dossiers (externalId, clientId, referenceClient, debiteur, procedure_name, data) VALUES (?, ?, ?, ?, ?, ?)',
@@ -689,7 +711,16 @@ async function applyDossierMutation(patch, meta = {}) {
       };
       await runQuery(
         connection,
-        'INSERT INTO dossiers (externalId, clientId, referenceClient, debiteur, procedure_name, data) VALUES (?, ?, ?, ?, ?, ?)',
+        `
+          INSERT INTO dossiers (externalId, clientId, referenceClient, debiteur, procedure_name, data)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            clientId = VALUES(clientId),
+            referenceClient = VALUES(referenceClient),
+            debiteur = VALUES(debiteur),
+            procedure_name = VALUES(procedure_name),
+            data = VALUES(data)
+        `,
         [
           externalId,
           String(clientId),
@@ -710,7 +741,7 @@ async function applyDossierMutation(patch, meta = {}) {
         externalId: String(dossier.externalId || previousExternalId).trim() || previousExternalId,
         clientId: nextClientId
       };
-      await runQuery(
+      const [updateResult] = await runQuery(
         connection,
         'UPDATE dossiers SET externalId = ?, clientId = ?, referenceClient = ?, debiteur = ?, procedure_name = ?, data = ? WHERE externalId = ?',
         [
@@ -724,6 +755,30 @@ async function applyDossierMutation(patch, meta = {}) {
         ],
         `Update dossier ${previousExternalId}`
       );
+      if (!Number(updateResult?.affectedRows)) {
+        await runQuery(
+          connection,
+          `
+            INSERT INTO dossiers (externalId, clientId, referenceClient, debiteur, procedure_name, data)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              clientId = VALUES(clientId),
+              referenceClient = VALUES(referenceClient),
+              debiteur = VALUES(debiteur),
+              procedure_name = VALUES(procedure_name),
+              data = VALUES(data)
+          `,
+          [
+            String(payload.externalId),
+            String(nextClientId),
+            String(dossier.referenceClient || '').trim(),
+            String(dossier.debiteur || '').trim(),
+            String(dossier.procedure || '').trim(),
+            serializeJsonValue(payload, {})
+          ],
+          `Upsert missing dossier ${String(payload.externalId)}`
+        );
+      }
     } else if (action === 'delete') {
       if (!previousExternalId) {
         throw new Error('Invalid dossier delete payload.');

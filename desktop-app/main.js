@@ -1,8 +1,15 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const DESKTOP_APP_URL = 'http://192.168.1.11:3000/';
+const DESKTOP_APP_BASE_URL = process.env.CABINET_APP_URL || 'http://192.168.1.11:3000/';
+
+function buildDesktopAppUrl() {
+  const url = new URL(DESKTOP_APP_BASE_URL);
+  url.searchParams.set('desktop', '1');
+  url.searchParams.set('v', String(Date.now()));
+  return url.toString();
+}
 
 function configureDesktopUserDataPath() {
   const preferredPath = path.join(__dirname, '.electron-user-data');
@@ -84,6 +91,7 @@ function buildLoadErrorHtml(appUrl, detail = '') {
 async function createWindow() {
   Menu.setApplicationMenu(null);
   const windowIconPath = resolveDesktopWindowIconPath();
+  const appUrl = buildDesktopAppUrl();
 
   const win = new BrowserWindow({
     width: 1400,
@@ -102,7 +110,7 @@ async function createWindow() {
 
   win.webContents.on('did-fail-load', async (_event, errorCode, errorDescription, validatedUrl) => {
     if (String(validatedUrl || '').startsWith('data:text/html')) return;
-    const html = buildLoadErrorHtml(DESKTOP_APP_URL, `${errorCode} - ${errorDescription}`);
+    const html = buildLoadErrorHtml(DESKTOP_APP_BASE_URL, `${errorCode} - ${errorDescription}`);
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
   });
 
@@ -112,7 +120,7 @@ async function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (String(url || '').startsWith(DESKTOP_APP_URL)) {
+    if (String(url || '').startsWith(DESKTOP_APP_BASE_URL)) {
       return { action: 'allow' };
     }
     shell.openExternal(url);
@@ -120,16 +128,17 @@ async function createWindow() {
   });
 
   win.webContents.on('will-navigate', (event, url) => {
-    if (String(url || '').startsWith(DESKTOP_APP_URL)) return;
+    if (String(url || '').startsWith(DESKTOP_APP_BASE_URL)) return;
     event.preventDefault();
     shell.openExternal(url);
   });
 
   try {
-    await win.loadURL(DESKTOP_APP_URL);
+    await session.defaultSession.clearCache().catch(() => {});
+    await win.loadURL(appUrl);
   } catch (error) {
     const html = buildLoadErrorHtml(
-      DESKTOP_APP_URL,
+      DESKTOP_APP_BASE_URL,
       String(error?.message || error || 'Erreur inconnue')
     );
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);

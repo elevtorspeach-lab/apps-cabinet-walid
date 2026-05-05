@@ -1077,14 +1077,37 @@ function resolvePatchReference(body, dossier) {
   return normalizePatchReference(dossier?.referenceClient);
 }
 
-function findDossierIndexForPatch(dossiers, requestedIndex, referenceClient) {
+function normalizePatchExternalId(value) {
+  return String(value || '').trim();
+}
+
+function resolvePatchExternalId(body, dossier) {
+  const previous = normalizePatchExternalId(body?.previousExternalId);
+  if (previous) return previous;
+  const direct = normalizePatchExternalId(body?.externalId);
+  if (direct) return direct;
+  const dossierExternal = normalizePatchExternalId(dossier?.externalId);
+  if (dossierExternal) return dossierExternal;
+  return normalizePatchExternalId(dossier?.importUid || dossier?.uid || dossier?.id);
+}
+
+function findDossierIndexForPatch(dossiers, requestedIndex, referenceClient, externalId = '') {
   const normalizedReference = normalizePatchReference(referenceClient);
+  const normalizedExternalId = normalizePatchExternalId(externalId);
   const safeDossiers = Array.isArray(dossiers) ? dossiers : [];
   if (Number.isFinite(requestedIndex) && requestedIndex >= 0 && requestedIndex < safeDossiers.length) {
     const indexed = safeDossiers[requestedIndex];
-    if (!normalizedReference || normalizePatchReference(indexed?.referenceClient) === normalizedReference) {
+    const indexedExternalId = resolvePatchExternalId(null, indexed);
+    if (
+      (normalizedExternalId && indexedExternalId === normalizedExternalId)
+      || (!normalizedExternalId && (!normalizedReference || normalizePatchReference(indexed?.referenceClient) === normalizedReference))
+    ) {
       return requestedIndex;
     }
+  }
+  if (normalizedExternalId) {
+    const externalIndex = safeDossiers.findIndex((entry) => resolvePatchExternalId(null, entry) === normalizedExternalId);
+    if (externalIndex >= 0) return externalIndex;
   }
   if (!normalizedReference) return requestedIndex;
   return safeDossiers.findIndex((entry) => normalizePatchReference(entry?.referenceClient) === normalizedReference);
@@ -1104,6 +1127,7 @@ function resolveDossierPatchSnapshot(currentState, body) {
   const dossierIndex = Number(body?.dossierIndex);
   const targetClientId = Number(body?.targetClientId);
   const referenceClient = resolvePatchReference(body, body?.dossier);
+  const externalId = resolvePatchExternalId(body, body?.dossier);
   const clients = Array.isArray(currentState?.clients) ? currentState.clients : [];
 
   if (action === 'create') {
@@ -1126,17 +1150,33 @@ function resolveDossierPatchSnapshot(currentState, body) {
   const sourceClientIdx = findClientIndexById(clients, clientId);
   if (sourceClientIdx === -1) throw new Error('Source client not found.');
   const sourceDossiers = Array.isArray(clients[sourceClientIdx]?.dossiers) ? clients[sourceClientIdx].dossiers : [];
-  const resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient);
-  if (resolvedSourceDossierIndex < 0 || resolvedSourceDossierIndex >= sourceDossiers.length) {
+  let resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient, externalId);
+  let resolvedSourceClientIdx = sourceClientIdx;
+  if (resolvedSourceDossierIndex < 0 && externalId) {
+    for (let index = 0; index < clients.length; index += 1) {
+      if (index === sourceClientIdx) continue;
+      const dossiers = Array.isArray(clients[index]?.dossiers) ? clients[index].dossiers : [];
+      const matchIndex = findDossierIndexForPatch(dossiers, NaN, referenceClient, externalId);
+      if (matchIndex >= 0) {
+        resolvedSourceClientIdx = index;
+        resolvedSourceDossierIndex = matchIndex;
+        break;
+      }
+    }
+  }
+  const resolvedSourceDossiers = Array.isArray(clients[resolvedSourceClientIdx]?.dossiers)
+    ? clients[resolvedSourceClientIdx].dossiers
+    : [];
+  if (resolvedSourceDossierIndex < 0 || resolvedSourceDossierIndex >= resolvedSourceDossiers.length) {
     throw new Error('Source dossier not found.');
   }
 
-  const previousDossier = sourceDossiers[resolvedSourceDossierIndex];
+  const previousDossier = resolvedSourceDossiers[resolvedSourceDossierIndex];
   return {
     action,
-    clientId,
+    clientId: Number(clients[resolvedSourceClientIdx]?.id) || clientId,
     targetClientId: Number.isFinite(targetClientId) ? targetClientId : clientId,
-    sourceClientIdx,
+    sourceClientIdx: resolvedSourceClientIdx,
     resolvedSourceDossierIndex,
     previousDossier,
     previousExternalId: String(previousDossier?.externalId || '').trim()
@@ -1156,6 +1196,7 @@ function enrichDossierPatchBody(currentState, rawBody) {
   }
 
   body.previousExternalId = snapshot.previousExternalId;
+  body.clientId = snapshot.clientId;
   if (action === 'update') {
     body.dossier = sanitizePatchObject(body.dossier) || {};
     body.dossier.externalId = String(body.dossier.externalId || snapshot.previousExternalId).trim();
@@ -1663,6 +1704,7 @@ function applyDossierPatch(currentState, body) {
   const targetClientId = Number(body?.targetClientId);
   const dossier = sanitizePatchObject(body?.dossier);
   const referenceClient = resolvePatchReference(body, dossier);
+  const externalId = resolvePatchExternalId(body, dossier);
   const sourceClients = Array.isArray(currentState?.clients) ? currentState.clients : [];
   const clients = sourceClients.slice();
 
@@ -1696,7 +1738,7 @@ function applyDossierPatch(currentState, body) {
     : null;
   if (!sourceClient) throw new Error('Source client not found.');
   const sourceDossiers = Array.isArray(sourceClient.dossiers) ? sourceClient.dossiers.slice() : [];
-  const resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient);
+  const resolvedSourceDossierIndex = findDossierIndexForPatch(sourceDossiers, dossierIndex, referenceClient, externalId);
   sourceClient.dossiers = sourceDossiers;
   clients[sourceClientIdx] = sourceClient;
 

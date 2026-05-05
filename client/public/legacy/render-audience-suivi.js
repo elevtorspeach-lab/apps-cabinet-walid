@@ -161,6 +161,23 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const refClientDisplay = isRefClientMismatch
     ? String(row?.p?._refClientProvided || d.referenceClient || '-')
     : String(d.referenceClient || '-');
+  const groupedRefClients = Array.isArray(row?.__dedupedAudienceRows)
+    ? [...new Set(row.__dedupedAudienceRows
+        .map(item=>String(item?.d?.referenceClient || '').trim())
+        .filter(Boolean))]
+    : [];
+  const relatedGlobalRefs = typeof getAudienceRelatedGlobalReferenceClients === 'function'
+    ? getAudienceRelatedGlobalReferenceClients(row)
+    : [];
+  const mergedRefClients = [...new Set(groupedRefClients.concat(relatedGlobalRefs)
+    .map(value=>String(value || '').trim())
+    .filter(Boolean))];
+  const refClientDisplayMerged = (!isRefClientMismatch && mergedRefClients.length > 1)
+    ? mergedRefClients.join(' / ')
+    : refClientDisplay;
+  const refClientInputDisplay = mergedRefClients.length > 1
+    ? refClientDisplayMerged
+    : (draft.refClient || refClientDisplayMerged);
   const refClientErrorMessage = isMissingGlobal
     ? 'Audience introuvable dans le dossier global. Modifiez la reference client ou la reference dossier, puis appuyez sur Entree pour relancer le rapprochement.'
     : (isRefClientMismatch
@@ -186,8 +203,8 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="Référence Client" class="${refClientCellClass}">
         ${canFixRefClient
-          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
-          : escapeHtml(refClientDisplay)
+          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(refClientInputDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
+          : escapeHtml(refClientDisplayMerged)
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
@@ -235,6 +252,23 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const refClientDisplay = isRefClientMismatch
     ? String(row?.p?._refClientProvided || d.referenceClient || '-')
     : String(d.referenceClient || '-');
+  const groupedRefClients = Array.isArray(row?.__dedupedAudienceRows)
+    ? [...new Set(row.__dedupedAudienceRows
+        .map(item=>String(item?.d?.referenceClient || '').trim())
+        .filter(Boolean))]
+    : [];
+  const relatedGlobalRefs = typeof getAudienceRelatedGlobalReferenceClients === 'function'
+    ? getAudienceRelatedGlobalReferenceClients(row)
+    : [];
+  const mergedRefClients = [...new Set(groupedRefClients.concat(relatedGlobalRefs)
+    .map(value=>String(value || '').trim())
+    .filter(Boolean))];
+  const refClientDisplayMerged = (!isRefClientMismatch && mergedRefClients.length > 1)
+    ? mergedRefClients.join(' / ')
+    : refClientDisplay;
+  const refClientInputDisplay = mergedRefClients.length > 1
+    ? refClientDisplayMerged
+    : (draft.refClient || refClientDisplayMerged);
   const refClientErrorMessage = isMissingGlobal
     ? 'Audience introuvable dans le dossier global. Modifiez la reference client ou la reference dossier, puis appuyez sur Entree pour relancer le rapprochement.'
     : (isRefClientMismatch
@@ -264,8 +298,8 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="RÃ©fÃ©rence Client" class="${refClientCellClass}">
         ${canFixRefClient
-          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(draft.refClient || refClientDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
-          : escapeHtml(refClientDisplay)
+          ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(refClientInputDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
+          : escapeHtml(refClientDisplayMerged)
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
@@ -686,8 +720,9 @@ function renderAudience(options = {}){
   const finalizeAudienceRender = (allRows)=>{
     const selectionPruned = pruneAudiencePrintSelection(baseRows);
     syncAudienceFilterOptions(allRows);
-    const duplicateKeySet = getAudienceDuplicateKeySet(allRows);
-    const rows = getFilteredAudienceRows(allRows);
+    const displayRows = dedupeAudienceRowsForDisplay(allRows);
+    const duplicateKeySet = getAudienceDuplicateKeySet(displayRows);
+    const rows = getFilteredAudienceRows(displayRows);
     const pageData = paginateRows(rows, 'audience');
     const renderCacheKey = buildAudienceRenderCacheKey(pageData, audienceFilterStateKey);
     const isSameRender = renderCacheKey === lastAudienceRenderCacheKey;

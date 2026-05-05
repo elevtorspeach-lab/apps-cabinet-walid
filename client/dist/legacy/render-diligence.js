@@ -164,7 +164,9 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const isAssProcedure = isDiligenceAssProcedure(row?.procedure);
   const isCommandementProcedure = isDiligenceCommandementProcedure(row?.procedure);
   const isChecked = isDiligenceSelectedForPrint(row);
-  const refClientValue = row.dossier?.referenceClient || '';
+  const refClientValue = typeof getDiligenceGroupedReferenceClientDisplay === 'function'
+    ? getDiligenceGroupedReferenceClientDisplay(row)
+    : (row.dossier?.referenceClient || '');
   const refField = isCommandementProcedure ? 'refExpertise' : 'referenceClient';
   const refValue = getDiligenceReferenceDossierValue(row);
   const judgeValue = row.details?.juge || '';

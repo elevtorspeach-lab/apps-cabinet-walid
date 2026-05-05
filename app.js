@@ -8452,10 +8452,17 @@ function downloadImportHistoryFile(batchId){
   });
 }
 
+function clearImportHistoryRenderCaches(){
+  importHistoryPanelMarkupCache = new Map();
+  importHistoryMenuMarkupCache = new Map();
+  importHistoryOpenPanels = new Set();
+}
+
 function removeImportHistoryEntry(batchId){
   const targetId = String(batchId || '').trim();
   if(!targetId || !Array.isArray(AppState.importHistory)) return;
   AppState.importHistory = AppState.importHistory.filter(entry=>String(entry?.id || '').trim() !== targetId);
+  clearImportHistoryRenderCaches();
 }
 
 function collectRelevantImportHistoryEntries({ clientId = null, dossiers = [] } = {}){
@@ -14476,6 +14483,21 @@ async function applyExcelImport(payload, options = {}){
     return parts.length ? ` | ${parts.join(' | ')}` : '';
   };
 
+  const buildAudienceHorsGlobalExplanation = (row, refValue, reason = '')=>{
+    const parts = [
+      'Hors global: cette ligne audience a ete creee separement car aucun dossier global fiable ne correspond.'
+    ];
+    const refText = String(refValue || row?.refDossier || '').trim();
+    const refClientText = String(row?.refClient || '').trim();
+    const debiteurText = String(row?.debiteur || '').trim();
+    if(refText) parts.push(`Ref dossier audience "${refText}" introuvable dans les references du dossier global`);
+    if(refClientText) parts.push(`Ref client audience "${refClientText}"`);
+    if(debiteurText) parts.push(`Debiteur audience "${debiteurText}"`);
+    if(reason) parts.push(String(reason).trim());
+    parts.push('A verifier: ref dossier, ref client et debiteur dans le fichier global puis reimporter/corriger.');
+    return parts.filter(Boolean).join(' | ');
+  };
+
   const buildAudienceImportIssueDetails = (row, overrides = {})=>{
     const rowNumber = Number.isFinite(Number(row?.rowNumber)) ? Number(row.rowNumber) : '';
     const fallbackProcedure = formatProcedureContextFromText(overrides?.procedure || row?.procedureText || '');
@@ -15218,12 +15240,6 @@ async function applyExcelImport(payload, options = {}){
       candidates.push(candidate);
     });
     if(!candidates.length){
-      skippedAudiencesCount += 1;
-      unmatchedAudienceCount += 1;
-      addSkippedImportIssue(
-        `${rowNumberLabel}: Matching non trouvé - Réf dossier "${ref || '-'}" introuvable dans dossier global, Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${missingRefContext}`,
-        buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', context: 'Matching non trouvé dans dossier global' })
-      );
       const fallback = [];
       const fallbackSeen = new Set();
       rowRefClientKeys.forEach(key=>{
@@ -15236,11 +15252,17 @@ async function applyExcelImport(payload, options = {}){
         });
       });
       if(!fallback.length){
+        skippedAudiencesCount += 1;
+        unmatchedAudienceCount += 1;
+        addSkippedImportIssue(
+          `${rowNumberLabel}: Matching non trouvé - Réf dossier "${ref || '-'}" introuvable dans dossier global, Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${missingRefContext}`,
+          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', context: 'Matching non trouvé dans dossier global' })
+        );
         const procFallback = explicitProc && knownProcedureSet.has(explicitProc)
           ? explicitProc
           : (hintedProc && knownProcedureSet.has(hintedProc) ? hintedProc : 'ASS');
         if(audienceOnlyMode && !isAudienceProcedure(procFallback)){
-          const issueMessage = `Procédure "${procFallback}" ignorée pour import Audience`;
+          const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Procedure "${procFallback}" ignoree pour import Audience`);
           importAudienceIssueAsOrphanRow(row, 'ASS', issueMessage);
           linkedAudiencesCount += 1;
           addWarningImportIssue(
@@ -15258,9 +15280,10 @@ async function applyExcelImport(payload, options = {}){
             || normalizeReferenceValue(String(row?.refClient || '').trim()),
           rowDebiteur: String(row?.debiteur || '').trim().toLowerCase()
         }];
+        const horsGlobalExplanation = buildAudienceHorsGlobalExplanation(row, ref, `Procedure retenue: ${procFallback}`);
         addWarningImportIssue(
-          `${rowNumberLabel}: ${ref || '-'} introuvable dans dossier global (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`,
-          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', procedure: procFallback, context: 'Création ligne audience orpheline' })
+          `${rowNumberLabel}: ${horsGlobalExplanation} (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`,
+          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', procedure: procFallback, context: horsGlobalExplanation })
         );
       }else{
         candidates = fallback;
@@ -15295,7 +15318,7 @@ async function applyExcelImport(payload, options = {}){
     }
     if(!match){
       unmatchedAudienceCount += 1;
-      const issueMessage = `Aucun dossier correspondant trouvé pour Réf dossier "${ref || '-'}"`;
+      const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Aucun candidat global n'a obtenu un matching suffisant pour la procedure "${preferredIssueProc}"`);
       importAudienceIssueAsOrphanRow(row, preferredIssueProc, issueMessage);
       linkedAudiencesCount += 1;
       addWarningImportIssue(
@@ -15331,7 +15354,7 @@ async function applyExcelImport(payload, options = {}){
     if(!targetProc) targetProc = 'ASS';
     if(audienceOnlyMode && !isAudienceProcedure(targetProc)){
       if(explicitProc && !isAudienceProcedure(explicitProc)){
-        const issueMessage = `Procédure "${explicitProc}" ignorée pour import Audience`;
+        const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Procedure "${explicitProc}" ignoree pour import Audience`);
         importAudienceIssueAsOrphanRow(row, 'ASS', issueMessage);
         linkedAudiencesCount += 1;
         addWarningImportIssue(

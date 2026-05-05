@@ -8819,10 +8819,17 @@ function downloadImportHistoryFile(batchId){
   });
 }
 
+function clearImportHistoryRenderCaches(){
+  importHistoryPanelMarkupCache = new Map();
+  importHistoryMenuMarkupCache = new Map();
+  importHistoryOpenPanels = new Set();
+}
+
 function removeImportHistoryEntry(batchId){
   const targetId = String(batchId || '').trim();
   if(!targetId || !Array.isArray(AppState.importHistory)) return;
   AppState.importHistory = AppState.importHistory.filter(entry=>String(entry?.id || '').trim() !== targetId);
+  clearImportHistoryRenderCaches();
 }
 
 function collectRelevantImportHistoryEntries({ clientId = null, dossiers = [] } = {}){
@@ -14581,6 +14588,21 @@ async function applyExcelImport(payload, options = {}){
     return parts.length ? ` | ${parts.join(' | ')}` : '';
   };
 
+  const buildAudienceHorsGlobalExplanation = (row, refValue, reason = '')=>{
+    const parts = [
+      'Hors global: cette ligne audience a ete creee separement car aucun dossier global fiable ne correspond.'
+    ];
+    const refText = String(refValue || row?.refDossier || '').trim();
+    const refClientText = String(row?.refClient || '').trim();
+    const debiteurText = String(row?.debiteur || '').trim();
+    if(refText) parts.push(`Ref dossier audience "${refText}" introuvable dans les references du dossier global`);
+    if(refClientText) parts.push(`Ref client audience "${refClientText}"`);
+    if(debiteurText) parts.push(`Debiteur audience "${debiteurText}"`);
+    if(reason) parts.push(String(reason).trim());
+    parts.push('A verifier: ref dossier, ref client et debiteur dans le fichier global puis reimporter/corriger.');
+    return parts.filter(Boolean).join(' | ');
+  };
+
   const buildAudienceImportIssueDetails = (row, overrides = {})=>{
     const rowNumber = Number.isFinite(Number(row?.rowNumber)) ? Number(row.rowNumber) : '';
     const fallbackProcedure = formatProcedureContextFromText(overrides?.procedure || row?.procedureText || '');
@@ -15332,12 +15354,6 @@ async function applyExcelImport(payload, options = {}){
       candidates.push(candidate);
     });
     if(!candidates.length){
-      skippedAudiencesCount += 1;
-      unmatchedAudienceCount += 1;
-      addSkippedImportIssue(
-        `${rowNumberLabel}: Matching non trouvé - Réf dossier "${ref || '-'}" introuvable dans dossier global, Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${missingRefContext}`,
-        buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', context: 'Matching non trouvé dans dossier global' })
-      );
       const fallback = [];
       const fallbackSeen = new Set();
       rowRefClientKeys.forEach(key=>{
@@ -15350,11 +15366,17 @@ async function applyExcelImport(payload, options = {}){
         });
       });
       if(!fallback.length){
+        skippedAudiencesCount += 1;
+        unmatchedAudienceCount += 1;
+        addSkippedImportIssue(
+          `${rowNumberLabel}: Matching non trouvé - Réf dossier "${ref || '-'}" introuvable dans dossier global, Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${missingRefContext}`,
+          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', context: 'Matching non trouvé dans dossier global' })
+        );
         const procFallback = explicitProc && knownProcedureSet.has(explicitProc)
           ? explicitProc
           : (hintedProc && knownProcedureSet.has(hintedProc) ? hintedProc : 'ASS');
         if(audienceOnlyMode && !isAudienceProcedure(procFallback)){
-          const issueMessage = `Procédure "${procFallback}" ignorée pour import Audience`;
+          const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Procedure "${procFallback}" ignoree pour import Audience`);
           importAudienceIssueAsOrphanRow(row, 'ASS', issueMessage);
           linkedAudiencesCount += 1;
           addWarningImportIssue(
@@ -15372,9 +15394,10 @@ async function applyExcelImport(payload, options = {}){
             || normalizeReferenceValue(String(row?.refClient || '').trim()),
           rowDebiteur: String(row?.debiteur || '').trim().toLowerCase()
         }];
+        const horsGlobalExplanation = buildAudienceHorsGlobalExplanation(row, ref, `Procedure retenue: ${procFallback}`);
         addWarningImportIssue(
-          `${rowNumberLabel}: ${ref || '-'} introuvable dans dossier global (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`,
-          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', procedure: procFallback, context: 'Création ligne audience orpheline' })
+          `${rowNumberLabel}: ${horsGlobalExplanation} (ajouté à Audience, ligne marquée en rouge)${missingRefContext}`,
+          buildAudienceImportIssueDetails(row, { zone: 'Dossiers globaux', procedure: procFallback, context: horsGlobalExplanation })
         );
       }else{
         candidates = fallback;
@@ -15409,7 +15432,7 @@ async function applyExcelImport(payload, options = {}){
     }
     if(!match){
       unmatchedAudienceCount += 1;
-      const issueMessage = `Aucun dossier correspondant trouvé pour Réf dossier "${ref || '-'}"`;
+      const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Aucun candidat global n'a obtenu un matching suffisant pour la procedure "${preferredIssueProc}"`);
       importAudienceIssueAsOrphanRow(row, preferredIssueProc, issueMessage);
       linkedAudiencesCount += 1;
       addWarningImportIssue(
@@ -15445,7 +15468,7 @@ async function applyExcelImport(payload, options = {}){
     if(!targetProc) targetProc = 'ASS';
     if(audienceOnlyMode && !isAudienceProcedure(targetProc)){
       if(explicitProc && !isAudienceProcedure(explicitProc)){
-        const issueMessage = `Procédure "${explicitProc}" ignorée pour import Audience`;
+        const issueMessage = buildAudienceHorsGlobalExplanation(row, ref, `Procedure "${explicitProc}" ignoree pour import Audience`);
         importAudienceIssueAsOrphanRow(row, 'ASS', issueMessage);
         linkedAudiencesCount += 1;
         addWarningImportIssue(
@@ -17616,6 +17639,10 @@ async function addDossier(){
 
     paginationState.suivi = 1;
     refreshPrimaryViews({ resetCreationForm: true, showView: 'suivi' });
+    if(wasEditing){
+      showView('suivi', { force: true });
+      setTimeout(()=>showView('suivi', { force: true }), 0);
+    }
   }catch(err){
     console.error(err);
     alert('Erreur pendant la sauvegarde du dossier');
@@ -18171,8 +18198,20 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
     ...collectDeepValues(procedureData || {}),
     ...collectDeepValues(draftData || {})
   ];
+  const groupedValues = Array.isArray(row?.__dedupedAudienceRows)
+    ? row.__dedupedAudienceRows.flatMap(item=>[
+        item?.c?.name || '',
+        item?.d?.debiteur || '',
+        item?.d?.referenceClient || '',
+        getAudienceRowDraftReferenceValue(item),
+        item?.p?.referenceClient || '',
+        item?.p?.tribunal || '',
+        item?.procKey || ''
+      ])
+    : [];
+  const relatedGlobalRefs = getAudienceRelatedGlobalReferenceClients(row);
   // Audience filtering must stay scoped to the current procedure row.
-  return [...dossierValues, ...procValues]
+  return [...dossierValues, ...procValues, ...groupedValues, ...relatedGlobalRefs]
     .map(v=>normalizeCaseInsensitiveSearchText(v))
     .join(' ');
 }
@@ -18191,6 +18230,15 @@ function buildAudienceExactSearchTokens(row){
   pushRefToken(getAudienceRowDraftReferenceValue(row));
   pushRefToken(row?.d?.referenceClient || '');
   pushRefToken(row?.p?.referenceClient || '');
+  if(Array.isArray(row?.__dedupedAudienceRows)){
+    row.__dedupedAudienceRows.forEach(item=>{
+      pushRefToken(getAudienceRowDraftReferenceValue(item));
+      pushRefToken(item?.d?.referenceClient || '');
+      pushRefToken(item?.p?.referenceClient || '');
+      pushTextToken(item?.d?.debiteur || '');
+    });
+  }
+  getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
   pushTextToken(row?.d?.debiteur || '');
   pushTextToken(row?.d?.statut || '');
   pushTextToken(row?.d?.statutDetails || '');
@@ -20237,6 +20285,39 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   };
 }
 
+function getDiligenceRowByPrintKey(clientId, dossierIndex, procKey){
+  const targetKey = makeDiligencePrintKey(clientId, dossierIndex, procKey);
+  return getDiligenceRows().find(row=>makeDiligencePrintKey(row?.clientId, row?.dossierIndex, row?.procedure) === targetKey) || null;
+}
+
+function applyDiligenceGroupedFieldValue(clientId, dossierIndex, procKey, field, value){
+  const sourceRow = getDiligenceRowByPrintKey(clientId, dossierIndex, procKey);
+  const groupedRows = sourceRow ? getDiligenceGroupedRows(sourceRow) : [];
+  const rows = groupedRows.length ? groupedRows : [{ clientId, dossierIndex, procedure: procKey }];
+  const seen = new Set();
+  const changedDossiers = new Map();
+  let changed = false;
+  rows.forEach(row=>{
+    const rowKey = makeDiligencePrintKey(row?.clientId, row?.dossierIndex, row?.procedure);
+    if(seen.has(rowKey)) return;
+    seen.add(rowKey);
+    const result = applyDiligenceFieldValue(row?.clientId, row?.dossierIndex, row?.procedure, field, value);
+    if(!result.changed) return;
+    changed = true;
+    const dossier = result.dossier && typeof result.dossier === 'object' ? result.dossier : null;
+    if(!dossier) return;
+    const changeKey = `${Number(result.clientId) || 0}::${getDossierHistoryObjectId(dossier)}`;
+    changedDossiers.set(changeKey, {
+      clientId: result.clientId,
+      dossier
+    });
+  });
+  return {
+    changed,
+    changedDossiers: [...changedDossiers.values()]
+  };
+}
+
 function getCheckedDiligenceRowsForBatchUpdate(){
   if(!diligencePrintSelection.size) return [];
   const seen = new Set();
@@ -20300,12 +20381,14 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
     if(!applyDiligenceBatchValueToCheckedRows(field, value)) return;
     return;
   }
-  const result = applyDiligenceFieldValue(clientId, dossierIndex, proc, field, value);
+  const result = applyDiligenceGroupedFieldValue(clientId, dossierIndex, proc, field, value);
   const isLayoutField = field === 'notificationSort' || field === 'notifDebiteur';
   if(!result.changed && !isLayoutField) return;
   if(result.changed){
     handleDossierDataChange({ audience: true, rerenderLinked: true });
-    persistDossierReferenceNow(result.clientId, result.dossier, { source: 'diligence' }).catch(()=>{});
+    (result.changedDossiers || []).forEach((entry)=>{
+      persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'diligence' }).catch(()=>{});
+    });
   }
   if(isLayoutField && typeof renderDiligence === 'function'){
     // Invalidate all diligence caches so re-render picks up the new layout
@@ -22104,7 +22187,7 @@ function getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet){
 }
 
 function getFilteredAudienceRows(allRows = null){
-  const rows = Array.isArray(allRows) ? allRows : getAudienceRows();
+  const rows = dedupeAudienceRowsForDisplay(Array.isArray(allRows) ? allRows : getAudienceRows());
   const priorityColor = getActiveAudiencePriorityColor();
   const strictPriorityColorFilter = (!filterAudienceErrorsOnly && filterAudienceColor === 'all' && priorityColor === 'closed')
     ? priorityColor
@@ -22788,19 +22871,84 @@ function orderAudienceRowsByWhiteFirst(rows){
   return whiteRows.concat(coloredRows);
 }
 
+function normalizeAudienceDuplicateTribunalKey(value){
+  return normalizeLooseText(value).toLowerCase();
+}
+
+function getAudienceRowDuplicateTribunalValue(row){
+  return String(row?.draft?.tribunal ?? row?.p?.tribunal ?? '').trim();
+}
+
+function composeAudienceDuplicateKey({ procedure, debiteur, refDossier, tribunal }){
+  if(!procedure || !debiteur || !refDossier || !tribunal) return '';
+  return `${procedure}__${debiteur}__${refDossier}__${tribunal}`;
+}
+
+function getAudienceRowDuplicateTribunalKey(row){
+  return String(row?.__tribunalFilterKey || resolveAudienceTribunalFilterKey(getAudienceRowDuplicateTribunalValue(row)) || '').trim();
+}
+
+function isAudienceAssRow(row){
+  return getAudienceProcedureFilterKey(row?.procKey || '') === 'ASS';
+}
+
+function dossierHasAssProcedure(dossier){
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  if(Object.keys(details).some(proc=>getAudienceProcedureFilterKey(proc) === 'ASS')) return true;
+  const procedures = Array.isArray(dossier?.procedureList)
+    ? dossier.procedureList
+    : normalizeProcedures(dossier);
+  return procedures.some(proc=>getAudienceProcedureFilterKey(proc) === 'ASS');
+}
+
+function getAudienceRelatedGlobalReferenceClients(row){
+  if(!row || !isAudienceAssRow(row)) return [];
+  const debiteurKey = normalizeLooseText(row?.d?.debiteur || '').toLowerCase();
+  if(!debiteurKey) return [];
+  const client = row?.c;
+  const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+  const refs = [];
+  const seen = new Set();
+  dossiers.forEach(dossier=>{
+    if(!dossierHasAssProcedure(dossier)) return;
+    const rowDebiteurKey = normalizeLooseText(dossier?.debiteur || '').toLowerCase();
+    if(rowDebiteurKey !== debiteurKey) return;
+    const ref = String(dossier?.referenceClient || '').trim();
+    if(!ref) return;
+    const key = normalizeCaseInsensitiveSearchText(ref);
+    if(seen.has(key)) return;
+    seen.add(key);
+    refs.push(ref);
+  });
+  return refs;
+}
+
+function getAudienceAssProcedureReferenceValue(row){
+  return getAudienceRowDraftReferenceValue(row);
+}
+
+function buildAudienceDisplayDedupeKey(row){
+  const procedure = isAudienceAssRow(row)
+    ? 'ass'
+    : String(row?.procKey || '').trim().toLowerCase();
+  const refSource = isAudienceAssRow(row)
+    ? getAudienceAssProcedureReferenceValue(row)
+    : getAudienceRowDraftReferenceValue(row);
+  const refDossier = normalizeAudienceDossierLookupKey(refSource);
+  const debiteur = normalizeLooseText(row?.d?.debiteur || '').toLowerCase();
+  const tribunal = getAudienceRowDuplicateTribunalKey(row)
+    || normalizeAudienceDuplicateTribunalKey(getAudienceRowDuplicateTribunalValue(row));
+  if(isLetterOnlyClientReference(refDossier)) return '';
+  return composeAudienceDuplicateKey({ procedure, debiteur, refDossier, tribunal });
+}
+
 function buildAudienceDuplicateKey(row){
   if(typeof row?.__dupKey === 'string') return row.__dupKey;
   if(row?.p?._missingGlobal || row?.p?._audienceImportErrorMessage) return '';
-  const refDossier = normalizeAudienceDossierLookupKey(getAudienceRowDraftReferenceValue(row));
-  const procedure = String(row?.procKey || '').trim().toLowerCase();
-  const debiteur = String(row?.d?.debiteur || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-  if(isLetterOnlyClientReference(refDossier)) return '';
-  if(!refDossier || !debiteur || !procedure) return '';
-  // Audience rows are unique per procedure for the same dossier/debiteur.
-  return `${procedure}__${debiteur}__${refDossier}`;
+  // Audience rows are unique per procedure for the same dossier/debiteur/tribunal.
+  return buildAudienceDisplayDedupeKey(row);
 }
 
 function getAudienceDuplicateKeySet(rows){
@@ -22868,7 +23016,7 @@ function buildDiligenceDuplicateKey(row){
     .toLowerCase()
     .replace(/\s+/g, ' ');
   if(!procedure || !refDossier || !debiteur) return '';
-  // Keep one row per procedure for the same dossier/debiteur pair.
+  // Keep one row per procedure for the same dossier/debiteur/reference tuple.
   return `${procedure}__${debiteur}__${refDossier}`;
 }
 
@@ -22900,16 +23048,65 @@ function dedupeDiligenceRowsByReferenceAndDebiteur(rows){
     }
     const existing = map.get(key);
     if(!existing){
+      setDiligenceGroupedRows(row, [row]);
       map.set(key, row);
       return;
     }
+    const groupedRows = getDiligenceGroupedRows(existing).concat(getDiligenceGroupedRows(row));
     const existingScore = getDiligenceRowContentScore(existing);
     const nextScore = getDiligenceRowContentScore(row);
     if(nextScore > existingScore){
+      setDiligenceGroupedRows(row, groupedRows);
       map.set(key, row);
+    }else{
+      setDiligenceGroupedRows(existing, groupedRows);
     }
   });
   return [...map.values()];
+}
+
+function getDiligenceRowIdentityKey(row){
+  return [
+    row?.clientId ?? '',
+    row?.dossierIndex ?? '',
+    row?.procedure ?? ''
+  ].join('::');
+}
+
+function getDiligenceGroupedRows(row){
+  return Array.isArray(row?.__dedupedDiligenceRows) && row.__dedupedDiligenceRows.length
+    ? row.__dedupedDiligenceRows
+    : (row ? [row] : []);
+}
+
+function setDiligenceGroupedRows(row, groupedRows){
+  if(!row) return row;
+  const seen = new Set();
+  row.__dedupedDiligenceRows = (Array.isArray(groupedRows) ? groupedRows : [])
+    .filter(Boolean)
+    .filter(item=>{
+      const key = getDiligenceRowIdentityKey(item);
+      if(seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  row.__diligenceSearchValues = null;
+  return row;
+}
+
+function getDiligenceGroupedReferenceClientDisplay(row){
+  const groupedRows = getDiligenceGroupedRows(row);
+  const refs = [];
+  const seen = new Set();
+  groupedRows.forEach(item=>{
+    const ref = String(item?.dossier?.referenceClient || '').trim();
+    if(!ref) return;
+    const key = normalizeCaseInsensitiveSearchText(ref);
+    if(seen.has(key)) return;
+    seen.add(key);
+    refs.push(ref);
+  });
+  return refs.join(' / ') || String(row?.dossier?.referenceClient || '').trim();
 }
 
 function dedupeAudienceRowsByReferenceAndDebiteur(rows){
@@ -22929,6 +23126,60 @@ function dedupeAudienceRowsByReferenceAndDebiteur(rows){
     if(compareAudienceRowsForDedupe(existing, row) > 0){
       map.set(key, row);
     }
+  });
+  return [...map.values()];
+}
+
+function getAudienceRowIdentityKey(row){
+  return [
+    row?.ci ?? '',
+    row?.di ?? '',
+    row?.procKey ?? '',
+    row?.key ?? ''
+  ].join('::');
+}
+
+function getAudienceGroupedRows(row){
+  return Array.isArray(row?.__dedupedAudienceRows) && row.__dedupedAudienceRows.length
+    ? row.__dedupedAudienceRows
+    : (row ? [row] : []);
+}
+
+function setAudienceGroupedRows(row, groupedRows){
+  if(!row) return row;
+  const seen = new Set();
+  row.__dedupedAudienceRows = (Array.isArray(groupedRows) ? groupedRows : [])
+    .filter(Boolean)
+    .filter(item=>{
+      const key = getAudienceRowIdentityKey(item);
+      if(seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  row.__haystack = '';
+  row.__exactSearchTokens = null;
+  return row;
+}
+
+function dedupeAudienceRowsForDisplay(rows){
+  const map = new Map();
+  (rows || []).forEach(row=>{
+    const key = buildAudienceDisplayDedupeKey(row);
+    if(!key){
+      map.set(`__row__${map.size}`, row);
+      return;
+    }
+    const existing = map.get(key);
+    if(!existing){
+      setAudienceGroupedRows(row, [row]);
+      map.set(key, row);
+      return;
+    }
+    const groupedRows = getAudienceGroupedRows(existing).concat(getAudienceGroupedRows(row));
+    const keepNext = compareAudienceRowsForDedupe(existing, row) > 0;
+    const kept = keepNext ? row : existing;
+    setAudienceGroupedRows(kept, groupedRows);
+    map.set(key, kept);
   });
   return [...map.values()];
 }
@@ -23055,11 +23306,22 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
       const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || dossier?.referenceClient || '').trim();
       const refDossier = normalizeAudienceDossierLookupKey(draftReferenceValue);
       if(!refDossier) return;
-      const procedureNorm = String(procKey || '').trim().toLowerCase();
+      const procedureFilterKey = getAudienceProcedureFilterKey(procKey);
+      const procedureNorm = procedureFilterKey === 'ASS'
+        ? 'ass'
+        : String(procKey || '').trim().toLowerCase();
+      const duplicateRefDossier = procedureFilterKey === 'ASS'
+        ? normalizeAudienceDossierLookupKey(String(draft?.refDossier || p?.referenceClient || '').trim())
+        : refDossier;
       const debiteurNorm = String(dossier?.debiteur || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      const duplicateKey = (refDossier && procedureNorm && debiteurNorm)
-        ? `${procedureNorm}__${debiteurNorm}__${refDossier}`
-        : '';
+      const tribunalFilterKey = resolveAudienceTribunalFilterKey(draft?.tribunal ?? p?.tribunal ?? '');
+      const tribunalNorm = tribunalFilterKey || normalizeAudienceDuplicateTribunalKey(draft?.tribunal ?? p?.tribunal ?? '');
+      const duplicateKey = composeAudienceDuplicateKey({
+        procedure: procedureNorm,
+        debiteur: debiteurNorm,
+        refDossier: duplicateRefDossier,
+        tribunal: tribunalNorm
+      });
       const audienceDateDisplay = formatAudienceDateDisplayValue(draft?.dateAudience || p?.audience || '');
       const sortMeta = {
         ref: refDossier,
@@ -23078,8 +23340,8 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
         ci: clientIndex,
         di: dossierIndex,
         __dupKey: duplicateKey,
-        __procFilterKey: getAudienceProcedureFilterKey(procKey),
-        __tribunalFilterKey: resolveAudienceTribunalFilterKey(p?.tribunal || ''),
+        __procFilterKey: procedureFilterKey,
+        __tribunalFilterKey: tribunalFilterKey,
         __rowReference: refDossier,
         __sortMeta: sortMeta,
         __audienceDateDisplay: audienceDateDisplay
@@ -23126,10 +23388,10 @@ function getAudienceRowsDedupedCached(){
     return audienceRowsDedupeCache;
   }
   const rows = getAudienceRowsRawCached();
-  audienceRowsDedupeCache = rows;
+  audienceRowsDedupeCache = dedupeAudienceRowsForDisplay(rows);
   audienceRowsDedupeCacheVersion = audienceRowsRawDataVersion;
   audienceRowsDedupeCacheViewerKey = viewerKey;
-  return rows;
+  return audienceRowsDedupeCache;
 }
 
 function getAudienceRows(options = {}){
@@ -23683,11 +23945,61 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
 }
 
+const AUDIENCE_GROUP_SHARED_FIELDS = new Set(['dateAudience', 'dateDepot', 'tribunal', 'juge', 'sort']);
+
+function shouldShareAudienceFieldAcrossGroup(field){
+  return AUDIENCE_GROUP_SHARED_FIELDS.has(String(field || '').trim());
+}
+
+function getAudienceDraftKeyForRow(row){
+  return makeAudienceDraftKey(row?.ci, row?.di, row?.procKey);
+}
+
+function getAudienceRowsSharingDisplayKey(row){
+  const displayKey = buildAudienceDisplayDedupeKey(row);
+  if(!displayKey) return row ? [row] : [];
+  return getAudienceRowsRawCached()
+    .filter(candidate=>buildAudienceDisplayDedupeKey(candidate) === displayKey);
+}
+
+function getAudienceRowsSharingDraftKey(key){
+  const { ci, di, procKey } = parseAudienceDraftKey(key);
+  const row = getAudienceRowsRawCached().find(candidate=>{
+    return Number(candidate?.ci) === Number(ci)
+      && Number(candidate?.di) === Number(di)
+      && String(candidate?.procKey || '') === String(procKey || '');
+  });
+  return getAudienceRowsSharingDisplayKey(row);
+}
+
+function markAudienceGroupedDraftRows(rows, field, value, sourceKey){
+  if(!shouldShareAudienceFieldAcrossGroup(field)) return;
+  (rows || []).forEach(row=>{
+    const rowKey = getAudienceDraftKeyForRow(row);
+    if(!rowKey || rowKey === sourceKey) return;
+    if(!audienceDraft[rowKey]) audienceDraft[rowKey] = {};
+    audienceDraft[rowKey][field] = value;
+  });
+}
+
+function applyAudienceGroupedFieldValue(rows, field, value, sourceKey = ''){
+  if(!shouldShareAudienceFieldAcrossGroup(field)) return;
+  (rows || []).forEach(row=>{
+    const rowKey = getAudienceDraftKeyForRow(row);
+    if(sourceKey && rowKey === sourceKey) return;
+    applyAudienceFieldToProcedure(row?.p, field, value);
+  });
+}
+
 function updateAudienceDraft(key, field, value){
   if(!canEditData()) return;
   markAudienceRowsCacheDirty();
   if(!audienceDraft[key]) audienceDraft[key] = {};
   audienceDraft[key][field] = value;
+  const groupedRows = shouldShareAudienceFieldAcrossGroup(field)
+    ? getAudienceRowsSharingDraftKey(key)
+    : [];
+  markAudienceGroupedDraftRows(groupedRows, field, value, key);
   const { ci, di, procKey } = parseAudienceDraftKey(key);
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   const p = getAudienceProcedure(ci, di, procKey);
@@ -23709,6 +24021,7 @@ function updateAudienceDraft(key, field, value){
     refreshAudienceRefClientMismatchFlags(dossier);
   }else{
     applyAudienceFieldToProcedure(p, field, value);
+    applyAudienceGroupedFieldValue(groupedRows, field, value, key);
   }
   const after = field === 'refClient'
     ? String(dossier?.referenceClient || '')
@@ -23917,6 +24230,41 @@ function saveAudienceDraftEntry(key, options = {}){
   const client = AppState.clients?.[ci];
   const dossier = AppState.clients?.[ci]?.dossiers?.[di];
   const p = getAudienceProcedure(ci, di, procKey);
+  const groupedRows = getAudienceRowsSharingDraftKey(safeKey);
+  const groupedDossierChanges = new Map();
+  const rememberGroupedDossierChange = (row)=>{
+    if(!row?.c || !row?.d) return;
+    const changeKey = `${Number(row.c.id) || 0}::${Number(row.di)}`;
+    groupedDossierChanges.set(changeKey, {
+      clientId: row.c.id,
+      dossier: row.d
+    });
+  };
+  const applyGroupedSavedField = (field, value)=>{
+    if(!shouldShareAudienceFieldAcrossGroup(field)) return;
+    groupedRows.forEach(row=>{
+      const rowKey = getAudienceDraftKeyForRow(row);
+      if(rowKey === safeKey) return;
+      const before = getAudienceProcedureFieldValue(row?.p, field);
+      applyAudienceFieldToProcedure(row?.p, field, value);
+      const after = getAudienceProcedureFieldValue(row?.p, field);
+      if(before !== after){
+        detachAudienceImportBatchOwnership(row?.p);
+        queueDossierHistoryEntry(row?.d, {
+          source: 'audience',
+          field: fieldMap[field],
+          procedure: row?.procKey,
+          before,
+          after
+        });
+        rememberGroupedDossierChange(row);
+      }
+      const rowDraftKey = getAudienceDraftKeyForRow(row);
+      if(clearDraft && rowDraftKey && Object.prototype.hasOwnProperty.call(audienceDraft, rowDraftKey)){
+        delete audienceDraft[rowDraftKey];
+      }
+    });
+  };
   let previousReferenceClientForPersist = '';
   if(!client || !dossier){
     if(clearDraft && Object.prototype.hasOwnProperty.call(audienceDraft, safeKey)){
@@ -23925,6 +24273,16 @@ function saveAudienceDraftEntry(key, options = {}){
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
     return false;
   }
+
+  const fieldMap = {
+    refClient: 'referenceClient',
+    refDossier: 'procedureDetails.referenceClient',
+    dateAudience: 'procedureDetails.audience',
+    dateDepot: 'procedureDetails.dateDepot',
+    tribunal: 'procedureDetails.tribunal',
+    juge: 'procedureDetails.juge',
+    sort: 'procedureDetails.sort'
+  };
 
   if(data && typeof data === 'object'){
     if(data.refDossier !== undefined){
@@ -23943,6 +24301,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(data.dateAudience !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'dateAudience');
       applyAudienceFieldToProcedure(p, 'dateAudience', data.dateAudience);
+      applyGroupedSavedField('dateAudience', data.dateAudience);
       const after = getAudienceProcedureFieldValue(p, 'dateAudience');
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
@@ -23955,6 +24314,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(data.dateDepot !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'dateDepot');
       applyAudienceFieldToProcedure(p, 'dateDepot', data.dateDepot);
+      applyGroupedSavedField('dateDepot', data.dateDepot);
       const after = getAudienceProcedureFieldValue(p, 'dateDepot');
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
@@ -23967,6 +24327,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(data.tribunal !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'tribunal');
       applyAudienceFieldToProcedure(p, 'tribunal', data.tribunal);
+      applyGroupedSavedField('tribunal', data.tribunal);
       const after = getAudienceProcedureFieldValue(p, 'tribunal');
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
@@ -23979,6 +24340,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(data.juge !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'juge');
       applyAudienceFieldToProcedure(p, 'juge', data.juge);
+      applyGroupedSavedField('juge', data.juge);
       const after = getAudienceProcedureFieldValue(p, 'juge');
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
@@ -23991,6 +24353,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(data.sort !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'sort');
       applyAudienceFieldToProcedure(p, 'sort', data.sort);
+      applyGroupedSavedField('sort', data.sort);
       const after = getAudienceProcedureFieldValue(p, 'sort');
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
@@ -24022,7 +24385,7 @@ function saveAudienceDraftEntry(key, options = {}){
     clearTimeout(audienceAutoSaveTimer);
     audienceAutoSaveTimer = null;
   }
-  if(reconciliation.matchedDossiers > 0){
+  if(groupedDossierChanges.size > 0 || reconciliation.matchedDossiers > 0){
     queuePersistAppState();
   }else{
     persistDossierReferenceNow(client.id, dossier, {
