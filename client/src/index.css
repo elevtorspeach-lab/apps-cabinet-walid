@@ -4978,6 +4978,59 @@ th{
   gap:8px;
 }
 
+.audience-jugement-add{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  min-width:92px;
+}
+
+.audience-jugement-btn{
+  min-width:42px;
+  min-height:34px;
+  padding:7px 10px;
+  border:1px solid #cbd5e1;
+  border-radius:999px;
+  color:#111827;
+  background:linear-gradient(180deg,#ffffff,#f8fafc);
+  font-size:12px;
+  font-weight:900;
+  line-height:1;
+  box-shadow:0 8px 16px rgba(15,23,42,.16);
+}
+
+.audience-jugement-btn.is-ok{
+  border-color:#cbd5e1;
+}
+
+.audience-jugement-btn.is-att{
+  border-color:#cbd5e1;
+}
+
+.audience-jugement-btn.is-ok.is-active{
+  color:#fff;
+  background:linear-gradient(135deg,#16a34a,#15803d);
+  border-color:#15803d;
+}
+
+.audience-jugement-btn.is-att.is-active{
+  color:#fff;
+  background:linear-gradient(135deg,#2563eb,#1d4ed8);
+  border-color:#1d4ed8;
+}
+
+.audience-jugement-btn.is-active{
+  outline:3px solid rgba(255,255,255,.8);
+  box-shadow:0 0 0 2px rgba(15,23,42,.16),0 10px 18px rgba(15,23,42,.2);
+}
+
+.audience-jugement-btn:disabled{
+  cursor:not-allowed;
+  opacity:.55;
+  filter:grayscale(.2);
+}
+
 .table-actions .btn-primary,
 td[data-label="Actions"] .btn-primary,
 td[data-label="Actions"] .btn-danger{

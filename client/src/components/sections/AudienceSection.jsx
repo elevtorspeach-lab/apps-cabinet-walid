@@ -67,6 +67,8 @@ function AudienceSection() {
               <option value="green">ATT ORD</option>
               <option value="yellow">ORD OK</option>
               <option value="document-ok">Document OK</option>
+              <option value="jugement-ok">ADD J OK</option>
+              <option value="jugement-att">J ATT ADD</option>
               <option value="closed">Soldé / Arrêt définitif</option>
             </select>
           </div>
@@ -123,6 +125,7 @@ function AudienceSection() {
               <th>Procédure</th>
               <th>Date dépôt</th>
               <th>Statut</th>
+              <th>Jugement ADD</th>
               <th>Actions</th>
             </tr>
           </thead>

@@ -93,6 +93,10 @@ function getAudienceRowEffectiveColor(row){
 function audienceRowMatchesColorFilter(row, color){
   const targetColor = String(color || '').trim();
   if(!targetColor || targetColor === 'all') return true;
+  if(targetColor === 'jugement-ok' || targetColor === 'jugement-att'){
+    const expectedValue = targetColor === 'jugement-ok' ? 'ok' : 'att';
+    return String(row?.p?.jugementAdd || '').trim().toLowerCase() === expectedValue;
+  }
   if(targetColor === 'closed'){
     return !!getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   }

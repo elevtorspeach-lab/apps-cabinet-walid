@@ -4,7 +4,7 @@ const AUDIENCE_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contacte
 const SUIVI_EMPTY_MESSAGE = 'Aucun dossier trouvé avec ces filtres.';
 const SUIVI_LOADING_MESSAGE = 'Recherche dossier en cours...';
 const SUIVI_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
-const AUDIENCE_TABLE_COL_COUNT = 13;
+const AUDIENCE_TABLE_COL_COUNT = 14;
 const SUIVI_TABLE_COL_COUNT = 11;
 
 function getAudienceVirtualWindow(rowsLength){
@@ -190,6 +190,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
+  const jugementAddValue = String(draft.jugementAdd || p.jugementAdd || '').trim().toLowerCase();
   return `
     <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
       <td data-label="Sélection">
@@ -220,6 +221,12 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
       <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
+      <td data-label="Jugement ADD">
+        <div class="audience-jugement-add">
+          <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
+          <button type="button" class="audience-jugement-btn is-att${jugementAddValue === 'att' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','att')"` : 'disabled'}>ATT</button>
+        </div>
+      </td>
       <td data-label="Actions">
         <div class="table-actions">
           <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>
@@ -285,6 +292,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const dateDepotValue = displayDateDepot === '-' ? '' : displayDateDepot;
   const audienceDateInvalid = parseStrictAudienceDateValue(audienceDateValue).invalid;
   const dateDepotInvalid = parseStrictAudienceDateValue(dateDepotValue).invalid;
+  const jugementAddValue = String(draft.jugementAdd || p.jugementAdd || '').trim().toLowerCase();
   return `
     <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
       <td data-label="SÃ©lection">
@@ -325,6 +333,12 @@ function renderAudienceRowHtml(row, duplicateKeySet){
         </div>
       </td>
       <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
+      <td data-label="Jugement ADD">
+        <div class="audience-jugement-add">
+          <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
+          <button type="button" class="audience-jugement-btn is-att${jugementAddValue === 'att' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','att')"` : 'disabled'}>ATT</button>
+        </div>
+      </td>
       <td data-label="Actions">
         <div class="table-actions">
           <button type="button" class="btn-primary" ${canView ? `onclick="openDossierDetails(${Number(row.c.id)}, ${Number(row.di)})"` : 'disabled'}>

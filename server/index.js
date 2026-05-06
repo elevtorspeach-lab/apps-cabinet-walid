@@ -459,10 +459,26 @@ async function readState() {
     setCachedState(state);
     return state;
   } catch (err) {
-    console.error('Failed to read state from MySQL, falling back to default:', err);
-    setCachedState({ ...DEFAULT_STATE });
-    return cachedState;
+    console.error('Failed to read state from MySQL:', err);
+    const unavailableError = new Error('State store unavailable.');
+    unavailableError.code = 'STATE_STORE_UNAVAILABLE';
+    unavailableError.cause = err;
+    throw unavailableError;
   }
+}
+
+function isStateStoreUnavailableError(err) {
+  return String(err?.code || '').trim() === 'STATE_STORE_UNAVAILABLE';
+}
+
+function sendStateStoreUnavailable(res, err = null) {
+  return sendJsonError(
+    res,
+    503,
+    'STATE_STORE_UNAVAILABLE',
+    'State store unavailable. Please retry when the database connection is back.',
+    err
+  );
 }
 
 function buildBackupSignature(state) {
@@ -885,6 +901,17 @@ function countStateDossiers(state) {
     const dossiers = Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
     return sum + dossiers;
   }, 0);
+}
+
+function isDangerousEmptyStateReplace(currentState, nextState) {
+  const currentClients = Array.isArray(currentState?.clients) ? currentState.clients.length : 0;
+  const currentDossiers = countStateDossiers(currentState);
+  if (!currentClients && !currentDossiers) return false;
+  if (!nextState || typeof nextState !== 'object') return true;
+  const hasClientsProperty = Object.prototype.hasOwnProperty.call(nextState, 'clients');
+  const nextClients = Array.isArray(nextState?.clients) ? nextState.clients.length : 0;
+  const nextDossiers = countStateDossiers(nextState);
+  return hasClientsProperty && nextClients === 0 && nextDossiers === 0;
 }
 
 function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
@@ -2004,49 +2031,65 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
 app.use('/api/state', requireApiAuth);
 
 app.get('/api/state', async (req, res) => {
-  await ensureDataFile();
-  const state = await readState();
-  const scopedState = getStateForSession(state, req.authSession);
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  const acceptEncoding = String(req.headers['accept-encoding'] || '').toLowerCase();
-  if (acceptEncoding.includes('gzip')) {
-    res.setHeader('Content-Encoding', 'gzip');
-    res.setHeader('Vary', 'Accept-Encoding');
-    res.send(await getGzipSerializedStateForSession(state, req.authSession));
-    return;
+  try {
+    await ensureDataFile();
+    const state = await readState();
+    const scopedState = getStateForSession(state, req.authSession);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    const acceptEncoding = String(req.headers['accept-encoding'] || '').toLowerCase();
+    if (acceptEncoding.includes('gzip')) {
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.send(await getGzipSerializedStateForSession(state, req.authSession));
+      return;
+    }
+    res.send(scopedState === state ? getSerializedState(state) : getSerializedStateForSession(state, req.authSession));
+  } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
+    return sendJsonError(res, 500, 'STATE_LOAD_FAILED', 'State load failed.', err);
   }
-  res.send(scopedState === state ? getSerializedState(state) : getSerializedStateForSession(state, req.authSession));
 });
 
 app.get('/api/state/meta', async (req, res) => {
-  await ensureDataFile();
-  const state = await readState();
-  const scopedState = getStateForSession(state, req.authSession);
-  res.json({
-    ok: true,
-    ...(
-      scopedState === state
-        ? buildStateExportMetadata(state)
-        : buildStateExportMetadataForSession(state, req.authSession)
-    )
-  });
+  try {
+    await ensureDataFile();
+    const state = await readState();
+    const scopedState = getStateForSession(state, req.authSession);
+    res.json({
+      ok: true,
+      ...(
+        scopedState === state
+          ? buildStateExportMetadata(state)
+          : buildStateExportMetadataForSession(state, req.authSession)
+      )
+    });
+  } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
+    return sendJsonError(res, 500, 'STATE_META_FAILED', 'State metadata load failed.', err);
+  }
 });
 
 app.get('/api/state/export-page', async (req, res) => {
-  await ensureDataFile();
-  const state = await readState();
-  const includeSharedState = String(req.query.includeShared || '1').trim().toLowerCase() !== '0';
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.send(getPagedStateExportJson(state, req.authSession, {
-    offset: req.query.offset,
-    limit: req.query.limit,
-    includeSharedState
-  }));
+  try {
+    await ensureDataFile();
+    const state = await readState();
+    const includeSharedState = String(req.query.includeShared || '1').trim().toLowerCase() !== '0';
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(getPagedStateExportJson(state, req.authSession, {
+      offset: req.query.offset,
+      limit: req.query.limit,
+      includeSharedState
+    }));
+  } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
+    return sendJsonError(res, 500, 'STATE_EXPORT_PAGE_FAILED', 'State export page load failed.', err);
+  }
 });
 
 app.get('/api/state/changes', async (req, res) => {
-  await ensureDataFile();
-  const currentState = await readState();
+  try {
+    await ensureDataFile();
+    const currentState = await readState();
   const currentVersion = Number(currentState?.version) || 0;
   const sinceVersionRaw = Number(req.query.sinceVersion);
   const sinceVersion = Number.isFinite(sinceVersionRaw) && sinceVersionRaw >= 0
@@ -2148,6 +2191,10 @@ app.get('/api/state/changes', async (req, res) => {
     snapshotRequired: false,
     changes
   });
+  } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
+    return sendJsonError(res, 500, 'STATE_CHANGES_FAILED', 'State changes load failed.', err);
+  }
 });
 
 app.post('/api/state', async (req, res) => {
@@ -2164,6 +2211,9 @@ app.post('/api/state', async (req, res) => {
       const statePayload = { ...body };
       delete statePayload._sourceId;
       delete statePayload._baseVersion;
+      if (isDangerousEmptyStateReplace(currentState, statePayload)) {
+        return { emptyReplaceRejected: true, state: currentState };
+      }
       const explicitUsers = Array.isArray(statePayload.users)
         ? ensureManagerUser(statePayload.users)
         : null;
@@ -2189,8 +2239,17 @@ app.post('/api/state', async (req, res) => {
     if (result?.conflict) {
       return sendConflictJson(res, result.state);
     }
+    if (result?.emptyReplaceRejected) {
+      return sendJsonError(
+        res,
+        409,
+        'EMPTY_STATE_REPLACE_REJECTED',
+        'Refusing to replace existing cabinet data with an empty state snapshot.'
+      );
+    }
     return sendVersionedOk(res, result.saved);
   } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
     return sendJsonError(res, 500, 'STATE_SAVE_FAILED', 'State save failed.', err);
   }
 });
@@ -2265,6 +2324,9 @@ app.post('/api/state/upload-chunk', async (req, res) => {
       const nextState = session.mode === 'merge'
         ? mergeImportedState(currentState, statePayload)
         : statePayload;
+      if (session.mode !== 'merge' && isDangerousEmptyStateReplace(currentState, nextState)) {
+        return { emptyReplaceRejected: true, state: currentState };
+      }
       const saved = await writeState(nextState, { previousState: currentState });
       broadcastStateUpdated({ ...saved, sourceId: session.sourceId });
       return { saved };
@@ -2272,8 +2334,17 @@ app.post('/api/state/upload-chunk', async (req, res) => {
     if (result?.conflict) {
       return sendConflictJson(res, result.state);
     }
+    if (result?.emptyReplaceRejected) {
+      return sendJsonError(
+        res,
+        409,
+        'EMPTY_STATE_REPLACE_REJECTED',
+        'Refusing to replace existing cabinet data with an empty state snapshot.'
+      );
+    }
     return sendVersionedOk(res, result.saved, { complete: true });
   } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
     return sendJsonError(res, 500, 'UPLOAD_FINALIZE_FAILED', 'Failed to finalize chunked upload.', err);
   }
 });

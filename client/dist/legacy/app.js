@@ -1281,6 +1281,7 @@ function getAudienceProcedureFieldValue(procData, draftField){
   if(draftField === 'tribunal') return procData.tribunal;
   if(draftField === 'juge') return procData.juge;
   if(draftField === 'sort') return procData.sort;
+  if(draftField === 'jugementAdd') return procData.jugementAdd;
   return procData[draftField];
 }
 
@@ -3840,8 +3841,8 @@ function getSelectedSuiviRowsForExport(){
   return out;
 }
 
-function buildSuiviSelectedExportDatasetBase(){
-  const rows = getSelectedSuiviRowsForExport();
+function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
+  const rows = Array.isArray(rowsOverride) ? rowsOverride : getSelectedSuiviRowsForExport();
   const omitWwAndMarque = shouldOmitSuiviWwAndMarqueColumns(rows);
   const omitCaution = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.caution);
   const omitCautionAdresse = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionAdresse);
@@ -3993,8 +3994,8 @@ function buildSuiviExportTableRows(rows, options = {}){
   });
 }
 
-function buildSuiviSelectedExportDataset(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
+function buildSuiviSelectedExportDataset(rowsOverride = null){
+  const dataset = buildSuiviSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: buildSuiviExportTableRows(dataset.rows, {
@@ -4005,8 +4006,8 @@ function buildSuiviSelectedExportDataset(){
   };
 }
 
-async function buildSuiviSelectedExportDatasetAsync(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
+async function buildSuiviSelectedExportDatasetAsync(rowsOverride = null){
+  const dataset = buildSuiviSelectedExportDatasetBase(rowsOverride);
   const rowGroups = await mapChunked(dataset.rows, async (row)=>{
     return buildSuiviExportTableRows([row], {
       omitWwAndMarque: dataset.omitWwAndMarque,
@@ -4558,6 +4559,57 @@ async function exportSuiviSelectedXLS(options = {}){
         items: dataset.tableRows,
         mapRow: (row)=>row,
         progressLabel: 'Export suivi CSV',
+        chunkSize: 120
+      });
+      await saveBlobDirectOrDownload(csvBlob, 'suivi_export.csv', {
+        openAfterExport: options?.openAfterExport === true,
+        browserDownloadTarget: options?.browserDownloadTarget || null,
+        browserOpenInline: options?.browserOpenInline === true,
+        preferredFileHandle: options?.preferredFileHandle || null
+      });
+      return;
+    }
+    await exportAudienceWorkbookXlsxStyled({
+      headers: dataset.headers,
+      rows: dataset.tableRows,
+      subtitle: '',
+      sheetName: 'Suivi',
+      colWidths: dataset.colWidths,
+      filename: 'suivis dossier.xlsx',
+      layoutPreset: 'suivi-reference',
+      wrapColumnIndexes: dataset.wrapColumnIndexes,
+      openAfterExport: options?.openAfterExport === true,
+      browserDownloadTarget: options?.browserDownloadTarget || null,
+      browserOpenInline: options?.browserOpenInline === true,
+      preferredFileHandle: options?.preferredFileHandle || null
+    });
+  });
+}
+
+function getSuiviRowsForSelectedAudienceExport(){
+  const selectedAudienceRows = getSelectedAudienceRowsForExport();
+  if(!selectedAudienceRows.length) return [];
+  const selectedDossierKeys = new Set(
+    selectedAudienceRows.map(row=>makeSuiviPrintKey(row?.c?.id, row?.di))
+  );
+  return getAllSuiviRows().filter(row=>selectedDossierKeys.has(makeSuiviPrintKey(row?.c?.id, row?.index)));
+}
+
+async function exportAudienceAsSuiviSelectedXLS(options = {}){
+  if(!canExportData()) return alert('Acces refuse');
+  return runWithHeavyUiOperation(async ()=>{
+    const suiviRows = getSuiviRowsForSelectedAudienceExport();
+    const dataset = await buildSuiviSelectedExportDatasetAsync(suiviRows);
+    if(!dataset.tableRows.length){
+      alert('Cochez au moins une ligne audience pour exporter.');
+      return;
+    }
+    if(shouldPreferSelectedExportCsvPath(dataset.tableRows.length)){
+      const csvBlob = await createMappedCsvBlobChunked({
+        headers: dataset.headers,
+        items: dataset.tableRows,
+        mapRow: (row)=>row,
+        progressLabel: 'Export audience suivi CSV',
         chunkSize: 120
       });
       await saveBlobDirectOrDownload(csvBlob, 'suivi_export.csv', {
@@ -14136,7 +14188,7 @@ function showExcelImportResult(summary, issuesText, options = {}){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
+  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed', 'jugement-ok', 'jugement-att'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
@@ -14148,7 +14200,7 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed', 'jugement-ok', 'jugement-att']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
@@ -16616,7 +16668,7 @@ function setupEvents(){
   $('selectAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(true));
   $('clearAllPrintAudienceBtn')?.addEventListener('click', ()=>setAllVisibleAudienceRowsForPrint(false));
   $('audiencePageSelectionToggle')?.addEventListener('change', (e)=>setAllFilteredAudienceRowsForPrint(!!e.target?.checked));
-  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceRegularXLS({ openAfterExport: true, browserOpenInline: true }));
+  $('exportAudienceBtn')?.addEventListener('click', ()=>exportAudienceAsSuiviSelectedXLS({ openAfterExport: true, browserOpenInline: true }));
   $('exportAudienceDetailBtn')?.addEventListener('click', ()=>{
     return exportAudienceXLS({
       blankSort: true
@@ -23956,10 +24008,15 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
   if(field === 'sort'){
     p.sort = value;
+    return;
+  }
+  if(field === 'jugementAdd'){
+    const normalized = String(value || '').trim().toLowerCase();
+    p.jugementAdd = normalized === 'ok' || normalized === 'att' ? normalized : '';
   }
 }
 
-const AUDIENCE_GROUP_SHARED_FIELDS = new Set(['dateAudience', 'dateDepot', 'tribunal', 'juge', 'sort']);
+const AUDIENCE_GROUP_SHARED_FIELDS = new Set(['dateAudience', 'dateDepot', 'tribunal', 'juge', 'sort', 'jugementAdd']);
 
 function shouldShareAudienceFieldAcrossGroup(field){
   return AUDIENCE_GROUP_SHARED_FIELDS.has(String(field || '').trim());
@@ -24053,7 +24110,8 @@ function updateAudienceDraft(key, field, value){
     dateDepot: 'procedureDetails.dateDepot',
     tribunal: 'procedureDetails.tribunal',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    jugementAdd: 'procedureDetails.jugementAdd'
   };
   if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
@@ -24295,7 +24353,8 @@ function saveAudienceDraftEntry(key, options = {}){
     dateDepot: 'procedureDetails.dateDepot',
     tribunal: 'procedureDetails.tribunal',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    jugementAdd: 'procedureDetails.jugementAdd'
   };
 
   if(data && typeof data === 'object'){
@@ -24377,6 +24436,19 @@ function saveAudienceDraftEntry(key, options = {}){
         after
       });
     }
+    if(data.jugementAdd !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'jugementAdd');
+      applyAudienceFieldToProcedure(p, 'jugementAdd', data.jugementAdd);
+      applyGroupedSavedField('jugementAdd', data.jugementAdd);
+      const after = getAudienceProcedureFieldValue(p, 'jugementAdd');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.jugementAdd',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
   }
 
   const shouldReconcileAudienceRefs = !!(
@@ -24436,6 +24508,14 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   if(typeof inputEl.blur === 'function'){
     inputEl.blur();
   }
+}
+
+function setAudienceJugementAddFromEncoded(keyEncoded, value){
+  const key = decodeURIComponent(String(keyEncoded));
+  const normalized = String(value || '').trim().toLowerCase();
+  if(normalized !== 'ok' && normalized !== 'att') return;
+  updateAudienceDraft(key, 'jugementAdd', normalized);
+  saveAudienceDraftEntry(key, { clearDraft: true, rerender: true });
 }
 
 function saveAllAudience(options = {}){
@@ -24555,6 +24635,18 @@ function saveAllAudience(options = {}){
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
         field: 'procedureDetails.sort',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.jugementAdd!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'jugementAdd');
+      applyAudienceFieldToProcedure(p, 'jugementAdd', data.jugementAdd);
+      const after = getAudienceProcedureFieldValue(p, 'jugementAdd');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.jugementAdd',
         procedure: procKey,
         before,
         after
