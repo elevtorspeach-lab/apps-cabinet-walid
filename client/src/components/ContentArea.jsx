@@ -8,6 +8,7 @@ import ClientSection from './sections/ClientSection'
 import CreationSection from './sections/CreationSection'
 import SuiviSection from './sections/SuiviSection'
 import RecycleSection from './sections/RecycleSection'
+import FactureSection from './sections/FactureSection'
 
 function ContentArea() {
   return (

@@ -44,8 +44,35 @@ i.fa-folder-plus::before{content:"📁";}
 i.fa-folder-open::before{content:"📂";}
 i.fa-list-check::before{content:"☑";}
 i.fa-door-open::before{content:"🚪";}
-i.fa-file-invoice::before{content:"🧾";}
-i.fa-receipt::before{content:"🧾";}
+i.fa-file-invoice,
+i.fa-receipt{
+  position:relative;
+}
+i.fa-file-invoice::before,
+i.fa-receipt::before{
+  content:"";
+  width:0.92em;
+  height:1.08em;
+  border:0.12em solid currentColor;
+  border-radius:0.16em;
+  background:
+    linear-gradient(currentColor,currentColor) 50% 35%/58% 0.1em no-repeat,
+    linear-gradient(currentColor,currentColor) 50% 55%/58% 0.1em no-repeat,
+    linear-gradient(currentColor,currentColor) 50% 75%/44% 0.1em no-repeat;
+  box-shadow:inset -0.22em 0.22em 0 -0.12em currentColor;
+}
+i.fa-file-invoice::after,
+i.fa-receipt::after{
+  content:"";
+  position:absolute;
+  top:0.12em;
+  right:0.12em;
+  width:0.28em;
+  height:0.28em;
+  border-left:0.1em solid currentColor;
+  border-bottom:0.1em solid currentColor;
+  background:transparent;
+}
 i.fa-user-group::before{content:"👪";}
 i.fa-trash-arrow-up::before{content:"↩";}
 i.fa-right-from-bracket::before{content:"⇦";}

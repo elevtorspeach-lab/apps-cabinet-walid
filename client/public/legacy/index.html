@@ -215,8 +215,6 @@
           <option value="green">ATT ORD</option>
           <option value="yellow">ORD OK</option>
           <option value="document-ok">Document OK</option>
-          <option value="jugement-ok">ADD J OK</option>
-          <option value="jugement-att">J ATT ADD</option>
           <option value="closed">Soldé / Arrêt définitif</option>
         </select>
       </div>
@@ -273,7 +271,6 @@
           <th>Procédure</th>
           <th>Date dépôt</th>
           <th>Statut</th>
-          <th>Jugement ADD</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -448,7 +445,7 @@
         </div>
       </div>
     </div>
-    <!-- EQUIPE -->
+    <!-- FACTURE -->
     <div id="factureSection" class="section" style="display:none;">
       <h1><i class="fa-solid fa-file-invoice"></i> Facture</h1>
       <div class="pro-card facture-card">
@@ -487,7 +484,7 @@
               <label for="factureDocumentTypeSelect">Type document</label>
               <select id="factureDocumentTypeSelect">
                 <option value="">Choisir type</option>
-                <option value="Procès-verbal">Procès-verbal</option>
+                <option value="Proces-verbal">Proces-verbal</option>
                 <option value="Jugement">Jugement</option>
               </select>
             </div>
@@ -502,6 +499,7 @@
       </div>
     </div>
 
+    <!-- EQUIPE -->
     <div id="equipeSection" class="section" style="display:none;">
       <h1><i class="fa-solid fa-user-group"></i> Equipe</h1>
       <div id="teamLocked" class="diligence-empty" style="display:none;">
@@ -1062,7 +1060,7 @@
 <div id="factureDocumentPreviewModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card facture-document-preview-card">
     <div class="modal-head">
-      <h2><i class="fa-solid fa-file-invoice"></i> Aperçu facture</h2>
+      <h2><i class="fa-solid fa-file-invoice"></i> Apercu facture</h2>
       <div class="preview-modal-actions">
         <button id="exportFactureDocumentExcelBtn" class="btn-success" type="button">
           <i class="fa-regular fa-file-excel"></i> Exporter Excel
@@ -1127,9 +1125,9 @@
 
 <script src="state-persistence.js"></script>
 <script src="audience-ui-helpers.js"></script>
-<script src="render-audience-suivi.js?v=import-delete-fix-20260507"></script>
+<script src="render-audience-suivi.js?v=audience-shared-fields-20260505"></script>
 <script src="render-diligence.js"></script>
 <script src="render-dashboard.js"></script>
-<script src="app.js?v=import-delete-fix-20260507"></script>
+<script src="app.js?v=audience-shared-fields-20260505"></script>
 </body>
 </html>

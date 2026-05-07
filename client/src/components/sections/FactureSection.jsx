@@ -32,13 +32,13 @@ function FactureSection() {
             <div className="facture-selected-title" id="factureSelectedDossierTitle"></div>
             <div className="form-group creation-layout-card facture-honoraire-card">
               <label htmlFor="factureTranchesHonoraireInput">Tranches d&apos;honoraire</label>
-              <textarea id="factureTranchesHonoraireInput" rows="6" placeholder="Tranches d'honoraire"></textarea>
+              <textarea id="factureTranchesHonoraireInput" rows="6" placeholder="Tranches d&apos;honoraire"></textarea>
             </div>
             <div className="form-group creation-layout-card facture-document-card">
               <label htmlFor="factureDocumentTypeSelect">Type document</label>
               <select id="factureDocumentTypeSelect">
                 <option value="">Choisir type</option>
-                <option value="Procès-verbal">Procès-verbal</option>
+                <option value="Proces-verbal">Proces-verbal</option>
                 <option value="Jugement">Jugement</option>
               </select>
             </div>
