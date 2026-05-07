@@ -139,6 +139,8 @@ let filterSalle = 'all';
 let filterSalleTribunal = 'all';
 let filterSalleAudienceDate = '';
 let selectedSalleDay = 'lundi';
+let selectedFactureClientId = '';
+let selectedFactureDossierIndex = -1;
 let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
@@ -432,6 +434,7 @@ const DEFERRED_RENDER_SECTION_IDS = {
   audience: 'audienceSection',
   diligence: 'diligenceSection',
   salle: 'salleSection',
+  facture: 'factureSection',
   equipe: 'equipeSection',
   recycle: 'recycleSection'
 };
@@ -443,6 +446,7 @@ const deferredRenderDirtyState = {
   audience: true,
   diligence: true,
   salle: true,
+  facture: true,
   equipe: true,
   recycle: true,
   clientDropdown: true
@@ -475,6 +479,8 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   efNumber: 'TF N°',
   conservation: 'Conservation',
   metrage: 'Métrage',
+  tranchesHonoraire: 'Tranches d\'honoraire',
+  factureDocumentType: 'Type document facture',
   note: 'Note',
   avancement: 'Avancement',
   statut: 'Statut',
@@ -522,6 +528,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
 };
 const DOSSIER_HISTORY_SOURCE_LABELS = {
   form: 'Modifier dossier',
+  facture: 'Facture',
   audience: 'Audience',
   diligence: 'Diligence'
 };
@@ -1940,6 +1947,7 @@ function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
     }
     markRemoteSyncSectionsRendered(['salle']);
   }
+  if(shouldRender('facture')) runSectionRenderSafely('facture', ()=>renderFacture(), { delayMs: 80 });
   if(shouldRender('equipe')) runSectionRenderSafely('equipe', ()=>renderEquipe(), { delayMs: 80 });
   if(shouldRender('recycle')) runSectionRenderSafely('recycle', ()=>renderRecycleBin(), { delayMs: 80 });
   if(shouldRender('creation')) updateClientDropdown();
@@ -2400,6 +2408,7 @@ function buildRemoteDossierRefreshOptions(meta){
     secondarySections.add('salle');
   }else{
     sections.add('suivi');
+    secondarySections.add('facture');
     const sourceClientId = Number(patchMeta.sourceClientId);
     const targetClientId = Number(patchMeta.targetClientId);
     const movedAcrossClients =
@@ -2444,7 +2453,7 @@ function getRemoteSliceRefreshOptions(patchKind){
   if(kind === 'clients'){
     return {
       audience: true,
-      sections: ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'equipe', 'recycle']
+      sections: ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']
     };
   }
   if(kind === 'users'){
@@ -3426,6 +3435,7 @@ function getRenderForSection(section){
   if(section === 'audience') return renderAudience;
   if(section === 'suivi') return renderSuivi;
   if(section === 'diligence') return renderDiligence;
+  if(section === 'facture') return renderFacture;
   if(section === 'recycle') return renderRecycleBin;
   return null;
 }
@@ -5316,13 +5326,13 @@ function syncViewerReadOnlyUiObserver(){
 
 function getAccessibleViewsForCurrentUser(){
   if(!currentUser){
-    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'equipe', 'recycle']);
+    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']);
   }
   if(isManager()){
-    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'equipe', 'recycle']);
+    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']);
   }
   if(isAdmin()){
-    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle']);
+    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture']);
   }
   return new Set(['dashboard', 'suivi', 'audience', 'diligence']);
 }
@@ -9030,7 +9040,19 @@ function syncUsersWithVisibleClients(){
   }));
 }
 
-function deleteGlobalImportBatch(batchId){
+async function persistImportDeleteBatchNow(importType, batchId){
+  queuedPersistPayload = null;
+  if(persistTimer){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  return persistRemoteRequestNow('/state/import-delete', {
+    importType: importType === 'audience' ? 'audience' : 'global',
+    batchId: String(batchId || '').trim()
+  }, { source: 'import-delete' });
+}
+
+async function deleteGlobalImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import global');
   const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import global introuvable.');
@@ -9057,12 +9079,19 @@ function deleteGlobalImportBatch(batchId){
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
   handleDossierDataChange({ audience: true });
-  queuePersistAppState();
+  await persistImportDeleteBatchNow('global', batch.id).catch((err)=>{
+    console.error('Erreur pendant la sauvegarde suppression import global', err);
+    alert('Import supprimÃ© de lâ€™Ã©cran, mais la sauvegarde serveur a Ã©chouÃ©. RafraÃ®chissez puis rÃ©essayez.');
+  });
+  if(false){
+    console.error('Erreur pendant la sauvegarde suppression import global', err);
+    alert('Import supprimé de l’écran, mais la sauvegarde serveur a échoué. Rafraîchissez puis réessayez.');
+  }
   refreshPrimaryViews({ includeSalle: true });
   alert(`Import global supprimé.\nDossiers retirés: ${removedDossiers}`);
 }
 
-function deleteAudienceImportBatch(batchId){
+async function deleteAudienceImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import audience');
   const batch = getImportHistoryEntriesByType('audience').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import audience introuvable.');
@@ -9132,7 +9161,14 @@ function deleteAudienceImportBatch(batchId){
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
   handleDossierDataChange({ audience: true });
-  queuePersistAppState();
+  await persistImportDeleteBatchNow('audience', batch.id).catch((err)=>{
+    console.error('Erreur pendant la sauvegarde suppression import audience', err);
+    alert('Import supprimÃ© de lâ€™Ã©cran, mais la sauvegarde serveur a Ã©chouÃ©. RafraÃ®chissez puis rÃ©essayez.');
+  });
+  if(false){
+    console.error('Erreur pendant la sauvegarde suppression import audience', err);
+    alert('Import supprimé de l’écran, mais la sauvegarde serveur a échoué. Rafraîchissez puis réessayez.');
+  }
   refreshPrimaryViews({ includeSalle: true });
   alert(`Import audience supprimé.\nProcédures restaurées: ${restoredProcedures}\nProcédures manuelles conservées: ${preservedManualProcedures}\nDossiers hors global retirés: ${removedOrphanDossiers}`);
 }
@@ -9573,6 +9609,7 @@ function getPrimaryViewDeferredRenderDelay(key){
   if(safeKey === 'audience') return 70;
   if(safeKey === 'diligence') return 70;
   if(safeKey === 'salle') return 80;
+  if(safeKey === 'facture') return 80;
   return 0;
 }
 
@@ -9583,7 +9620,7 @@ function refreshDeferredSectionIfNeeded(key, renderFn, options = {}){
   const include = options.include === true;
   const shouldDefer = !force
     && (isLargeDatasetMode() || importInProgress || heavyUiOperationCount > 0)
-    && ['dashboard', 'clients', 'suivi', 'audience', 'diligence', 'salle'].includes(safeKey);
+    && ['dashboard', 'clients', 'suivi', 'audience', 'diligence', 'salle', 'facture'].includes(safeKey);
   if(force || include || isDeferredRenderSectionVisible(key)){
     if(shouldDefer){
       const scheduled = scheduleDeferredSectionRender(safeKey, ()=>runSectionRenderSafely(safeKey, ()=>renderFn({}), {
@@ -9621,6 +9658,7 @@ function refreshPrimaryViews(options = {}){
   refreshDeferredSectionIfNeeded('suivi', renderSuivi, { force: options.force === true });
   refreshDeferredSectionIfNeeded('audience', renderAudience, { force: options.force === true });
   refreshDeferredSectionIfNeeded('diligence', renderDiligence, { force: options.force === true });
+  refreshDeferredSectionIfNeeded('facture', renderFacture, { force: options.force === true });
   refreshDeferredSectionIfNeeded('equipe', renderEquipe, { force: options.force === true });
   refreshDeferredSectionIfNeeded('salle', renderSalle, { force: options.force === true, include: options.includeSalle === true });
   refreshDeferredSectionIfNeeded('recycle', renderRecycleBin, { force: options.force === true, include: options.includeRecycle === true });
@@ -13560,6 +13598,299 @@ function closeExportPreviewModal(){
   if(modal) modal.style.display = 'none';
 }
 
+function closeFactureDocumentPreviewModal(){
+  const modal = $('factureDocumentPreviewModal');
+  const content = $('factureDocumentPreviewContent');
+  if(content) content.innerHTML = '';
+  if(modal) modal.style.display = 'none';
+}
+
+function getFactureDocumentAmount(value){
+  const text = String(value || '').replace(/\s+/g, ' ');
+  const match = text.match(/(\d[\d\s.,]*\d|\d+)/);
+  if(!match) return '';
+  return match[1].replace(/\s+/g, '').replace(',', '.');
+}
+
+function formatFactureMoney(value){
+  return Number(value || 0).toLocaleString('fr-FR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function getFactureProcesVerbalData(){
+  const { client, dossier } = getFactureSelectedDossier();
+  const tranches = String($('factureTranchesHonoraireInput')?.value || dossier?.tranchesHonoraire || '').trim();
+  const amountText = getFactureDocumentAmount(tranches) || String(dossier?.montant || '').trim() || '0';
+  const amount = Number(String(amountText).replace(/\s+/g, '').replace(',', '.')) || 0;
+  const tva = amount * 0.2;
+  const totalTtc = amount + tva;
+  const invoiceRef = dossier?.referenceClient || dossier?.nRef || `Dossier ${Number(selectedFactureDossierIndex) + 1}`;
+  const today = typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(new Date()) : new Date().toLocaleDateString('fr-FR');
+  return {
+    client,
+    dossier,
+    tranches,
+    amount,
+    tva,
+    totalTtc,
+    invoiceRef,
+    today,
+    clientName: client?.name || '-',
+    debiteur: dossier?.debiteur || '-',
+    objet: tranches || dossier?.procedure || 'ProcÃ¨s-verbal'
+  };
+}
+
+function buildFactureProcesVerbalPreviewHtml(){
+  const { client, dossier } = getFactureSelectedDossier();
+  const tranches = String($('factureTranchesHonoraireInput')?.value || dossier?.tranchesHonoraire || '').trim();
+  const amountText = getFactureDocumentAmount(tranches) || String(dossier?.montant || '').trim() || '0';
+  const amount = Number(String(amountText).replace(/\s+/g, '').replace(',', '.')) || 0;
+  const tva = amount * 0.2;
+  const totalTtc = amount + tva;
+  const invoiceRef = dossier?.referenceClient || dossier?.nRef || `Dossier ${Number(selectedFactureDossierIndex) + 1}`;
+  const today = typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(new Date()) : new Date().toLocaleDateString('fr-FR');
+  const clientName = client?.name || '-';
+  const debiteur = dossier?.debiteur || '-';
+  const objet = tranches || dossier?.procedure || 'Procès-verbal';
+  const formatMoney = (value)=>Number(value || 0).toLocaleString('fr-FR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+
+  return `
+    <div class="facture-sheet">
+      <div class="facture-sheet-head">
+        <div class="facture-city-date">Casablanca le ${escapeHtml(today)}</div>
+        <div class="facture-brand">
+          <strong>SANLAM</strong>
+          <span>216 Boulevard Zerktouni Casablanca</span>
+          <span>ICE 000230054000034</span>
+        </div>
+      </div>
+      <div class="facture-sheet-title">Facture N° ${escapeHtml(invoiceRef)}</div>
+      <table class="facture-sheet-meta">
+        <tbody>
+          <tr><th>Date</th><td>${escapeHtml(today)}</td></tr>
+          <tr><th>N°</th><td>${escapeHtml(invoiceRef)}</td></tr>
+          <tr><th>Client</th><td>${escapeHtml(clientName)}</td></tr>
+          <tr><th>Débiteur</th><td>${escapeHtml(debiteur)}</td></tr>
+          <tr><th>Objet</th><td>${escapeHtml(objet)}</td></tr>
+        </tbody>
+      </table>
+      <table class="facture-sheet-lines">
+        <thead>
+          <tr>
+            <th>Désignation</th>
+            <th>Quantité</th>
+            <th>Prix unitaire</th>
+            <th>Montant</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Procès-verbal</td>
+            <td>1</td>
+            <td>${escapeHtml(formatMoney(amount))}</td>
+            <td>${escapeHtml(formatMoney(amount))}</td>
+          </tr>
+          <tr class="facture-total-row">
+            <td colspan="3">Total</td>
+            <td>${escapeHtml(formatMoney(amount))}</td>
+          </tr>
+          <tr>
+            <td colspan="3">TVA 20%</td>
+            <td>${escapeHtml(formatMoney(tva))}</td>
+          </tr>
+          <tr class="facture-total-row facture-ttc-row">
+            <td colspan="3">Total TTC</td>
+            <td>${escapeHtml(formatMoney(totalTtc))}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="facture-sheet-signature">WALID ARAQI HOUSSAIN</div>
+    </div>
+  `;
+}
+
+async function exportFactureProcesVerbalExcel(){
+  if(!canExportData()) return alert('AccÃ¨s refusÃ©');
+  const { dossier } = getFactureSelectedDossier();
+  if(!dossier) return alert('Choisir dossier');
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
+  if(!excelReady || typeof ExcelJS === 'undefined') return alert('Export Excel indisponible.');
+
+  const data = getFactureProcesVerbalData();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Cabinet Walid Araqi';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Facture', {
+    pageSetup: {
+      paperSize: 9,
+      orientation: 'portrait',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 1,
+      margins: { left: 0.35, right: 0.35, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
+    },
+    views: [{ showGridLines: false }]
+  });
+
+  sheet.columns = [
+    { width: 15 },
+    { width: 18 },
+    { width: 18 },
+    { width: 14 },
+    { width: 18 },
+    { width: 18 }
+  ];
+  for(let rowIndex = 1; rowIndex <= 28; rowIndex += 1){
+    sheet.getRow(rowIndex).height = 24;
+  }
+
+  const borderThin = {
+    top: { style: 'thin', color: { argb: 'FF111827' } },
+    left: { style: 'thin', color: { argb: 'FF111827' } },
+    bottom: { style: 'thin', color: { argb: 'FF111827' } },
+    right: { style: 'thin', color: { argb: 'FF111827' } }
+  };
+  const borderMedium = {
+    top: { style: 'medium', color: { argb: 'FF111827' } },
+    left: { style: 'medium', color: { argb: 'FF111827' } },
+    bottom: { style: 'medium', color: { argb: 'FF111827' } },
+    right: { style: 'medium', color: { argb: 'FF111827' } }
+  };
+  const navy = 'FF002060';
+  const peach = 'FFF4B183';
+  const softBlue = 'FFEAF2FF';
+
+  const merge = (range)=>sheet.mergeCells(range);
+  const styleRange = (range, style = {})=>{
+    const [start, end] = range.split(':');
+    const startCell = sheet.getCell(start);
+    const endCell = sheet.getCell(end || start);
+    for(let row = startCell.row; row <= endCell.row; row += 1){
+      for(let col = startCell.col; col <= endCell.col; col += 1){
+        Object.assign(sheet.getCell(row, col), style);
+      }
+    }
+  };
+
+  merge('D2:F2');
+  sheet.getCell('D2').value = `Casablanca le ${data.today}`;
+  sheet.getCell('D2').alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getCell('D2').font = { name: 'Cambria', size: 11 };
+
+  merge('D3:F3');
+  merge('D4:F4');
+  merge('D5:F5');
+  sheet.getCell('D3').value = 'SANLAM';
+  sheet.getCell('D4').value = '216 Boulevard Zerktouni Casablanca';
+  sheet.getCell('D5').value = 'ICE 000230054000034';
+  ['D3', 'D4', 'D5'].forEach((cellAddress)=>{
+    const cell = sheet.getCell(cellAddress);
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.font = { name: 'Arial', size: cellAddress === 'D3' ? 14 : 10, bold: true, underline: cellAddress === 'D3' };
+  });
+  styleRange('D3:F5', { border: borderMedium });
+
+  merge('B8:E8');
+  sheet.getCell('B8').value = `Facture NÂ° ${data.invoiceRef}`;
+  sheet.getCell('B8').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: peach } };
+  sheet.getCell('B8').font = { name: 'Cambria', bold: true, size: 13 };
+  sheet.getCell('B8').alignment = { horizontal: 'center', vertical: 'middle' };
+
+  const metaRows = [
+    ['Date', data.today],
+    ['NÂ°', data.invoiceRef],
+    ['Client', data.clientName],
+    ['DÃ©biteur', data.debiteur],
+    ['Objet', data.objet]
+  ];
+  metaRows.forEach((row, index)=>{
+    const rowNumber = 10 + index;
+    sheet.getCell(rowNumber, 1).value = row[0];
+    sheet.getCell(rowNumber, 2).value = row[1];
+    merge(`B${rowNumber}:F${rowNumber}`);
+    sheet.getCell(rowNumber, 1).font = { name: 'Cambria', bold: true, color: { argb: navy } };
+    sheet.getCell(rowNumber, 2).font = { name: 'Cambria', size: 11 };
+    sheet.getCell(rowNumber, 1).alignment = { vertical: 'middle' };
+    sheet.getCell(rowNumber, 2).alignment = { vertical: 'middle', wrapText: true };
+  });
+  styleRange('A10:F14', { border: borderThin });
+
+  const headerRow = 16;
+  sheet.getRow(headerRow).values = ['DÃ©signation', '', '', 'QuantitÃ©', 'Prix unitaire', 'Montant'];
+  merge('A16:C16');
+  ['A16', 'D16', 'E16', 'F16'].forEach((cellAddress)=>{
+    const cell = sheet.getCell(cellAddress);
+    cell.font = { name: 'Cambria', bold: true, color: { argb: navy } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softBlue } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+
+  merge('A17:C17');
+  sheet.getCell('A17').value = 'ProcÃ¨s-verbal';
+  sheet.getCell('D17').value = 1;
+  sheet.getCell('E17').value = data.amount;
+  sheet.getCell('F17').value = data.amount;
+  ['E17', 'F17'].forEach((cellAddress)=>{ sheet.getCell(cellAddress).numFmt = '#,##0.00'; });
+
+  merge('A18:E18');
+  sheet.getCell('A18').value = 'Total';
+  sheet.getCell('F18').value = data.amount;
+  sheet.getCell('F18').numFmt = '#,##0.00';
+  merge('A19:E19');
+  sheet.getCell('A19').value = 'TVA 20%';
+  sheet.getCell('F19').value = data.tva;
+  sheet.getCell('F19').numFmt = '#,##0.00';
+  merge('A20:E20');
+  sheet.getCell('A20').value = 'Total TTC';
+  sheet.getCell('F20').value = data.totalTtc;
+  sheet.getCell('F20').numFmt = '#,##0.00';
+  ['A18', 'F18', 'A20', 'F20'].forEach((cellAddress)=>{
+    sheet.getCell(cellAddress).font = { name: 'Cambria', bold: true };
+  });
+  ['D17', 'E17', 'F17', 'F18', 'F19', 'F20'].forEach((cellAddress)=>{
+    sheet.getCell(cellAddress).alignment = { horizontal: 'right', vertical: 'middle' };
+  });
+  styleRange('A16:F20', { border: borderThin });
+
+  merge('A24:F24');
+  sheet.getCell('A24').value = 'WALID ARAQI HOUSSAIN';
+  sheet.getCell('A24').font = { name: 'Cambria', bold: true, size: 11 };
+  sheet.getCell('A24').alignment = { horizontal: 'center', vertical: 'middle' };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const safeRef = String(data.invoiceRef || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+  await saveBlobDirectOrDownload(blob, `Facture_${safeRef}.xlsx`);
+}
+
+function openFactureDocumentPreviewModal(){
+  const modal = $('factureDocumentPreviewModal');
+  const content = $('factureDocumentPreviewContent');
+  if(!modal || !content) return;
+  const { dossier } = getFactureSelectedDossier();
+  if(!dossier){
+    alert('Choisir dossier');
+    return;
+  }
+  content.innerHTML = buildFactureProcesVerbalPreviewHtml();
+  modal.style.display = 'flex';
+}
+
+function handleFactureDocumentTypeChange(){
+  const value = String($('factureDocumentTypeSelect')?.value || '').trim();
+  if(value === 'Procès-verbal'){
+    openFactureDocumentPreviewModal();
+  }
+}
+
 function setExportPreviewModalState({ title = '', subtitle = '', rows = [], onExport = null, exportLabel = 'Exporter Excel', metaHtml = '' } = {}){
   const modal = $('exportPreviewModal');
   const titleNode = $('exportPreviewTitle');
@@ -16139,6 +16470,7 @@ async function initApplication(){
     'audience',
     'diligence',
     'salle',
+    'facture',
     'equipe',
     'recycle',
     'clientDropdown'
@@ -16238,6 +16570,7 @@ function setupEvents(){
     showView('diligence');
   });
   $('salleLink')?.addEventListener('click', ()=>showView('salle'));
+  $('factureLink')?.addEventListener('click', ()=>showView('facture'));
   $('equipeLink')?.addEventListener('click', ()=>showView('equipe'));
   $('recycleLink')?.addEventListener('click', ()=>showView('recycle'));
 
@@ -16256,8 +16589,33 @@ function setupEvents(){
   $('closeDossierModalBtn')?.addEventListener('click', closeDossierModal);
   $('closeImportResultModalBtn')?.addEventListener('click', closeImportResultModal);
   $('closeExportPreviewModalBtn')?.addEventListener('click', closeExportPreviewModal);
+  $('closeFactureDocumentPreviewModalBtn')?.addEventListener('click', closeFactureDocumentPreviewModal);
+  $('exportFactureDocumentExcelBtn')?.addEventListener('click', ()=>{
+    exportFactureProcesVerbalExcel().catch((err)=>{
+      console.error(err);
+      alert('Erreur pendant export facture Excel');
+    });
+  });
   $('exportPreviewExcelBtn')?.addEventListener('click', handleExportPreviewExcel);
   $('printExportPreviewBtn')?.addEventListener('click', handlePrintExportPreview);
+  $('factureClientSelect')?.addEventListener('change', handleFactureClientChange);
+  $('factureDocumentTypeSelect')?.addEventListener('change', handleFactureDocumentTypeChange);
+  $('factureDossierSearchInput')?.addEventListener('input', ()=>{
+    selectedFactureDossierIndex = -1;
+    renderFactureDossierResults();
+    renderFactureHonorairePanel();
+  });
+  $('factureDossierResults')?.addEventListener('click', (event)=>{
+    const item = event.target?.closest?.('.facture-dossier-item');
+    if(!item) return;
+    selectFactureDossier(item.dataset.index);
+  });
+  $('saveFactureHonoraireBtn')?.addEventListener('click', ()=>{
+    saveFactureHonoraire().catch((err)=>{
+      console.error(err);
+      alert('Erreur pendant la sauvegarde facture');
+    });
+  });
   $('exportImportErrorsBtn')?.addEventListener('click', ()=>{
     exportImportErrorsExcelRobust().catch(err=>console.error(err));
   });
@@ -16271,11 +16629,15 @@ function setupEvents(){
   $('exportPreviewModal')?.addEventListener('click', (e)=>{
     if(e.target?.id === 'exportPreviewModal') closeExportPreviewModal();
   });
+  $('factureDocumentPreviewModal')?.addEventListener('click', (e)=>{
+    if(e.target?.id === 'factureDocumentPreviewModal') closeFactureDocumentPreviewModal();
+  });
   document.addEventListener('keydown', (e)=>{
     if(e.key !== 'Escape') return;
     closeDossierModal();
     closeImportResultModal();
     closeExportPreviewModal();
+    closeFactureDocumentPreviewModal();
   });
   $('addClientBtn')?.addEventListener('click', ()=>addClient($('clientName').value));
   $('selectClient')?.addEventListener('change', ()=>{
@@ -16803,6 +17165,7 @@ function showView(v, options = {}){
     setVisible('audienceSection', nextView==='audience');
     setVisible('diligenceSection', nextView==='diligence');
     setVisible('salleSection', nextView==='salle');
+    setVisible('factureSection', nextView==='facture');
     setVisible('equipeSection', nextView==='equipe');
     setVisible('recycleSection', nextView==='recycle');
 
@@ -16822,6 +17185,7 @@ function showView(v, options = {}){
     }
     if(nextView === 'diligence') runSectionRenderSafely('diligence', ()=>renderDiligence(sectionRenderOptions), { delayMs: 70 });
     if(nextView === 'salle') runSectionRenderSafely('salle', ()=>renderSalle(sectionRenderOptions), { delayMs: 80 });
+    if(nextView === 'facture') runSectionRenderSafely('facture', ()=>renderFacture(sectionRenderOptions), { delayMs: 80 });
     if(nextView === 'equipe') runSectionRenderSafely('equipe', ()=>renderEquipe(sectionRenderOptions), { delayMs: 80 });
     if(nextView === 'recycle') runSectionRenderSafely('recycle', ()=>renderRecycleBin(sectionRenderOptions), { delayMs: 80 });
   }
@@ -16982,6 +17346,7 @@ async function login(){
       audience: 'audienceSection',
       diligence: 'diligenceSection',
       salle: 'salleSection',
+      facture: 'factureSection',
       equipe: 'equipeSection',
       recycle: 'recycleSection'
     };
@@ -16996,6 +17361,7 @@ async function login(){
         'audienceSection',
         'diligenceSection',
         'salleSection',
+        'factureSection',
         'equipeSection',
         'recycleSection'
       ];
@@ -17070,6 +17436,7 @@ async function login(){
       'audience',
       'diligence',
       'salle',
+      'facture',
       'equipe',
       'recycle',
       'clientDropdown'
@@ -17780,9 +18147,58 @@ function downloadFile(index){
   downloadStoredFile(f);
 }
 
+function getEditingDossierForFilePersist(){
+  if(!editingDossier) return null;
+  const dossierIndex = Number(editingDossier.index);
+  if(!Number.isInteger(dossierIndex)) return null;
+  const client = AppState.clients.find(c=>String(c.id) === String(editingDossier.clientId));
+  const dossier = client?.dossiers?.[dossierIndex];
+  if(!client || !dossier) return null;
+  return { client, dossier, dossierIndex };
+}
+
+function cancelQueuedFullStatePersistForDossierFiles(){
+  queuedPersistPayload = null;
+  if(persistTimer){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+}
+
+async function persistUploadedFilesForEditingDossier(){
+  const record = getEditingDossierForFilePersist();
+  if(!record) return;
+  const { client, dossier, dossierIndex } = record;
+  cancelQueuedFullStatePersistForDossierFiles();
+  dossier.files = await serializeUploadedFiles(uploadedFiles);
+  handleDossierDataChange({ audience: false });
+  const patch = {
+    action: 'update',
+    clientId: Number(client.id),
+    targetClientId: Number(client.id),
+    dossierIndex: Number(dossierIndex),
+    previousReferenceClient: String(dossier.referenceClient || '').trim(),
+    externalId: String(dossier.externalId || '').trim(),
+    dossier
+  };
+  queueDeferredLocalStateSnapshot(null, { source: 'dossier-files', signature: '' });
+  await flushQueuedDossierPatchesNow();
+  await enqueueSyncAction('/state/dossiers', patch);
+  cancelQueuedFullStatePersistForDossierFiles();
+}
+
 function removeFile(index){
-  uploadedFiles.splice(index, 1);
+  const fileIndex = Number(index);
+  if(!Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= uploadedFiles.length) return;
+  const removedFiles = uploadedFiles.splice(fileIndex, 1);
   renderFileList();
+  if(!editingDossier) return;
+  persistUploadedFilesForEditingDossier().catch((err)=>{
+    console.error('Erreur pendant la suppression du fichier dossier', err);
+    uploadedFiles.splice(fileIndex, 0, ...removedFiles);
+    renderFileList();
+    alert('Erreur pendant la suppression du fichier');
+  });
 }
 
 function getSuiviBaseRowsCached(){
@@ -21244,6 +21660,197 @@ function deleteTeamUser(userId){
   if(editingTeamUserId === userId) resetTeamForm();
 }
 
+function getFactureSelectedClient(){
+  const clientId = String(selectedFactureClientId || $('factureClientSelect')?.value || '').trim();
+  if(!clientId) return null;
+  return getVisibleClients().find(client=>String(client?.id || '') === clientId) || null;
+}
+
+function getFactureSelectedDossier(){
+  const client = getFactureSelectedClient();
+  const dossierIndex = Number(selectedFactureDossierIndex);
+  const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+  if(!client || !Number.isInteger(dossierIndex) || dossierIndex < 0 || dossierIndex >= dossiers.length){
+    return { client: null, dossier: null, dossierIndex: -1 };
+  }
+  return { client, dossier: dossiers[dossierIndex], dossierIndex };
+}
+
+function buildFactureDossierSearchText(dossier, client){
+  return [
+    client?.name,
+    dossier?.referenceClient,
+    dossier?.debiteur,
+    dossier?.nRef,
+    dossier?.procedure,
+    dossier?.dateAffectation,
+    dossier?.montant,
+    dossier?.ville,
+    dossier?.statut
+  ].map(value=>String(value || '').trim()).filter(Boolean).join(' ').toLowerCase();
+}
+
+function renderFactureClientOptions(){
+  const select = $('factureClientSelect');
+  if(!select) return;
+  const visibleClients = getVisibleClients();
+  const hasSelected = visibleClients.some(client=>String(client?.id || '') === String(selectedFactureClientId || ''));
+  if(!hasSelected){
+    selectedFactureClientId = '';
+    selectedFactureDossierIndex = -1;
+  }
+  select.innerHTML = '<option value="">Choisir client</option>' + visibleClients
+    .map(client=>`<option value="${escapeAttr(client.id)}">${escapeHtml(client.name || '-')}</option>`)
+    .join('');
+  select.value = selectedFactureClientId || '';
+}
+
+function renderFactureDossierResults(){
+  const results = $('factureDossierResults');
+  const searchInput = $('factureDossierSearchInput');
+  const panel = $('factureHonorairePanel');
+  if(!results || !searchInput) return;
+  const client = getFactureSelectedClient();
+  const query = String(searchInput.value || '').trim().toLowerCase();
+  if(!client || !query){
+    results.style.display = 'none';
+    results.innerHTML = '';
+    if(panel) panel.style.display = 'none';
+    selectedFactureDossierIndex = -1;
+    return;
+  }
+  const dossiers = Array.isArray(client.dossiers) ? client.dossiers : [];
+  const selectedIndex = Number(selectedFactureDossierIndex);
+  const hasSelectedDossier = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < dossiers.length;
+  const matches = hasSelectedDossier
+    ? [{ dossier: dossiers[selectedIndex], index: selectedIndex }]
+    : dossiers
+      .map((dossier, index)=>({ dossier, index }))
+      .filter(({ dossier })=>buildFactureDossierSearchText(dossier, client).includes(query))
+      .slice(0, 60);
+  results.style.display = '';
+  if(!matches.length){
+    results.innerHTML = '<div class="facture-empty">Aucun dossier trouvé.</div>';
+    if(panel) panel.style.display = 'none';
+    selectedFactureDossierIndex = -1;
+    return;
+  }
+  results.innerHTML = matches.map(({ dossier, index })=>{
+    const active = Number(selectedFactureDossierIndex) === Number(index) ? ' is-active' : '';
+    const title = dossier?.referenceClient || dossier?.debiteur || `Dossier ${index + 1}`;
+    const subtitle = [
+      dossier?.debiteur,
+      dossier?.procedure,
+      dossier?.dateAffectation
+    ].map(value=>String(value || '').trim()).filter(Boolean).join(' | ') || '-';
+    return `
+      <button type="button" class="facture-dossier-item${active}" data-index="${index}">
+        <span class="facture-dossier-title">${escapeHtml(title)}</span>
+        <span class="facture-dossier-subtitle">${escapeHtml(subtitle)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderFactureHonorairePanel(){
+  const panel = $('factureHonorairePanel');
+  const title = $('factureSelectedDossierTitle');
+  const input = $('factureTranchesHonoraireInput');
+  const documentTypeSelect = $('factureDocumentTypeSelect');
+  if(!panel || !title || !input) return;
+  const { client, dossier } = getFactureSelectedDossier();
+  if(!client || !dossier){
+    panel.style.display = 'none';
+    title.textContent = '';
+    input.value = '';
+    if(documentTypeSelect) documentTypeSelect.value = '';
+    return;
+  }
+  panel.style.display = '';
+  title.textContent = [
+    client.name || '-',
+    dossier.referenceClient || dossier.debiteur || 'Dossier'
+  ].filter(Boolean).join(' - ');
+  input.value = String(dossier.tranchesHonoraire || '');
+  if(documentTypeSelect) documentTypeSelect.value = String(dossier.factureDocumentType || '');
+}
+
+function selectFactureDossier(index){
+  selectedFactureDossierIndex = Number(index);
+  renderFactureDossierResults();
+  renderFactureHonorairePanel();
+}
+
+function handleFactureClientChange(){
+  selectedFactureClientId = String($('factureClientSelect')?.value || '').trim();
+  selectedFactureDossierIndex = -1;
+  const wrap = $('factureDossierSearchWrap');
+  const input = $('factureDossierSearchInput');
+  const results = $('factureDossierResults');
+  const panel = $('factureHonorairePanel');
+  if(wrap) wrap.style.display = selectedFactureClientId ? '' : 'none';
+  if(input) input.value = '';
+  if(results){
+    results.style.display = 'none';
+    results.innerHTML = '';
+  }
+  if(panel) panel.style.display = 'none';
+  if(input && selectedFactureClientId) input.focus();
+}
+
+async function saveFactureHonoraire(){
+  if(!canEditData()) return alert('Accès refusé');
+  const { client, dossier, dossierIndex } = getFactureSelectedDossier();
+  if(!client || !dossier) return alert('Choisir dossier');
+  const input = $('factureTranchesHonoraireInput');
+  const documentTypeSelect = $('factureDocumentTypeSelect');
+  const before = String(dossier.tranchesHonoraire || '');
+  const after = String(input?.value || '').trim();
+  const documentTypeBefore = String(dossier.factureDocumentType || '');
+  const documentTypeAfter = String(documentTypeSelect?.value || '').trim();
+  dossier.tranchesHonoraire = after;
+  dossier.factureDocumentType = documentTypeAfter;
+  queueDossierHistoryEntry(dossier, {
+    source: 'facture',
+    field: 'tranchesHonoraire',
+    before,
+    after
+  }, { immediate: true });
+  if(documentTypeBefore !== documentTypeAfter){
+    queueDossierHistoryEntry(dossier, {
+      source: 'facture',
+      field: 'factureDocumentType',
+      before: documentTypeBefore,
+      after: documentTypeAfter
+    }, { immediate: true });
+  }
+  handleDossierDataChange({ audience: false });
+  await persistDossierPatchNow({
+    action: 'update',
+    clientId: Number(client.id),
+    dossierIndex: Number(dossierIndex),
+    dossier
+  }, { source: 'facture' });
+  const feedback = $('factureSaveFeedback');
+  if(feedback){
+    feedback.textContent = 'Enregistré.';
+    feedback.className = 'audience-save-feedback success';
+    feedback.style.display = '';
+    setTimeout(()=>{ feedback.style.display = 'none'; }, 1800);
+  }
+  markDeferredRenderDirty('suivi');
+}
+
+function renderFacture(options = {}){
+  if(!shouldRenderDeferredSection('facture', options)) return;
+  renderFactureClientOptions();
+  const wrap = $('factureDossierSearchWrap');
+  const selected = !!selectedFactureClientId;
+  if(wrap) wrap.style.display = selected ? '' : 'none';
+  renderFactureDossierResults();
+  renderFactureHonorairePanel();
+}
+
 function renderEquipe(options = {}){
   if(!shouldRenderDeferredSection('equipe', options)) return;
   const panel = $('teamManagerPanel');
@@ -24131,7 +24738,7 @@ function updateAudienceDraftFromEncoded(keyEncoded, field, value){
   updateAudienceDraft(decodeURIComponent(String(keyEncoded)), field, value);
 }
 
-function parseStrictAudienceDateValue(value){
+function parseStrictAudienceDateValueLegacyUnused(value){
   const text = String(value || '')
     .trim()
     .replace(/[٠-٩]/g, d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
@@ -24152,7 +24759,7 @@ function parseStrictAudienceDateValue(value){
   };
 }
 
-function setAudienceDateInputValidationState(inputEl){
+function setAudienceDateInputValidationStateLegacyUnused(inputEl){
   if(!inputEl) return false;
   const errorEl = inputEl.parentElement?.querySelector('.date-inline-error');
   const { invalid } = parseStrictAudienceDateValue(inputEl.value);
@@ -24164,13 +24771,13 @@ function setAudienceDateInputValidationState(inputEl){
   return invalid;
 }
 
-function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
+function handleAudienceDateInputFromEncodedLegacyUnused(keyEncoded, field, inputEl){
   if(!inputEl) return;
   updateAudienceDraftFromEncoded(keyEncoded, field, inputEl.value);
   setAudienceDateInputValidationState(inputEl);
 }
 
-function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDraftInputFromEncodedLegacyUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24190,7 +24797,7 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   return true;
 }
 
-function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDepotDraftInputFromEncodedLegacyUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24249,7 +24856,7 @@ function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
   setAudienceDateInputValidationState(inputEl);
 }
 
-function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDraftInputFromEncodedInlineUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24270,7 +24877,7 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   return true;
 }
 
-function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDepotDraftInputFromEncodedInlineUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();

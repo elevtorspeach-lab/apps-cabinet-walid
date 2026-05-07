@@ -928,6 +928,10 @@ function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
     return action === 'delete';
   }
 
+  if (type === 'import-delete') {
+    return true;
+  }
+
   if (type === 'users') {
     const previousCount = Array.isArray(currentState?.users) ? currentState.users.length : 0;
     const nextCount = Array.isArray(nextState?.users) ? nextState.users.length : 0;
@@ -1560,6 +1564,131 @@ function applyClientPatch(currentState, body) {
   throw new Error('Unsupported client patch action.');
 }
 
+function isProtectedManualDossierForImportDelete(dossier) {
+  if (!dossier || typeof dossier !== 'object') return false;
+  if (dossier.isManualEntry === true) return true;
+  if (dossier.isAudienceOrphanImport === true) return false;
+  const globalBatchId = String(dossier.importGlobalBatchId || '').trim();
+  const audienceBatchId = String(dossier.importAudienceBatchId || '').trim();
+  return !globalBatchId && !audienceBatchId;
+}
+
+function hasManualAudienceChangesAfterImportForServer(dossier, procKey, importCreatedAt) {
+  const targetProcKey = String(procKey || '').trim();
+  if (!dossier || !targetProcKey) return false;
+  const importTime = Date.parse(String(importCreatedAt || '').trim() || '');
+  if (!Number.isFinite(importTime)) return false;
+  const historyEntries = Array.isArray(dossier.history) ? dossier.history : [];
+  return historyEntries.some((entry) => {
+    if (String(entry?.procedure || '').trim() !== targetProcKey) return false;
+    const source = String(entry?.source || '').trim();
+    if (source !== 'audience' && source !== 'form') return false;
+    const entryTime = Date.parse(String(entry?.at || '').trim() || '');
+    if (!Number.isFinite(entryTime) || entryTime < importTime) return false;
+    return String(entry?.field || '').trim().startsWith('procedureDetails.');
+  });
+}
+
+function normalizeProceduresForImportDelete(dossier) {
+  const list = Array.isArray(dossier?.procedureList)
+    ? dossier.procedureList
+    : String(dossier?.procedure || '').split(',');
+  return [...new Set(list
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+}
+
+function applyImportDeletePatch(currentState, body) {
+  const importType = String(body?.importType || body?.type || '').trim() === 'audience' ? 'audience' : 'global';
+  const batchId = String(body?.batchId || '').trim();
+  if (!batchId) throw new Error('Missing import batch id.');
+  const importHistory = Array.isArray(currentState?.importHistory) ? currentState.importHistory : [];
+  const batch = importHistory.find((entry) => (
+    String(entry?.id || '').trim() === batchId
+    && String(entry?.type || '').trim() === importType
+  ));
+  const clients = (Array.isArray(currentState?.clients) ? currentState.clients : []).map((client) => ({
+    ...client,
+    dossiers: Array.isArray(client?.dossiers) ? client.dossiers.map((dossier) => deepCloneJson(dossier)) : []
+  }));
+
+  let nextClients = clients;
+  if (importType === 'global') {
+    const createdClientIds = new Set((Array.isArray(batch?.createdClientIds) ? batch.createdClientIds : [])
+      .map((value) => Number(value))
+      .filter(Number.isFinite));
+    nextClients = clients.filter((client) => {
+      const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+      const keptDossiers = dossiers.filter((dossier) => {
+        if (isProtectedManualDossierForImportDelete(dossier)) return true;
+        return String(dossier?.importGlobalBatchId || '').trim() !== batchId;
+      });
+      client.dossiers = keptDossiers;
+      if (keptDossiers.length) return true;
+      return !createdClientIds.has(Number(client?.id));
+    });
+  } else {
+    const operationMap = new Map((Array.isArray(batch?.operations) ? batch.operations : [])
+      .map((op) => [`${String(op?.dossierUid || '').trim()}::${String(op?.procKey || '').trim()}`, op]));
+    const orphanClientIds = new Set((Array.isArray(batch?.createdOrphanClientIds) ? batch.createdOrphanClientIds : [])
+      .map((value) => Number(value))
+      .filter(Number.isFinite));
+    const orphanDossierUids = new Set((Array.isArray(batch?.createdOrphanDossierUids) ? batch.createdOrphanDossierUids : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean));
+    nextClients = clients.filter((client) => {
+      const dossiers = (Array.isArray(client?.dossiers) ? client.dossiers : []).filter((dossier) => {
+        const dossierUid = String(dossier?.importUid || '').trim();
+        if (orphanDossierUids.has(dossierUid) && String(dossier?.importAudienceBatchId || '').trim() === batchId) {
+          return false;
+        }
+        const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+          ? dossier.procedureDetails
+          : {};
+        Object.keys(details).forEach((procKey) => {
+          const proc = details[procKey];
+          if (String(proc?._audienceImportBatchId || '').trim() !== batchId) return;
+          if (hasManualAudienceChangesAfterImportForServer(dossier, procKey, batch?.createdAt)) {
+            delete proc._audienceImportBatchId;
+            return;
+          }
+          const op = operationMap.get(`${dossierUid}::${procKey}`);
+          if (op && op.beforeProc && typeof op.beforeProc === 'object') {
+            details[procKey] = deepCloneJson(op.beforeProc);
+          } else if (op && op.beforeProc === null) {
+            delete details[procKey];
+          } else {
+            ['referenceClient', 'audience', 'juge', 'sort', 'tribunal', 'depotLe', 'dateDepot', 'executionNo', 'instruction', 'color', 'attOrdOrOrdOk'].forEach((field) => {
+              delete proc[field];
+            });
+            delete proc._missingGlobal;
+            delete proc._refClientMismatch;
+            delete proc._refClientProvided;
+            delete proc._refClientExpected;
+            delete proc._audienceImportBatchId;
+            if (!Object.keys(proc).length) delete details[procKey];
+          }
+        });
+        dossier.procedureDetails = details;
+        const nextProcedures = normalizeProceduresForImportDelete(dossier);
+        dossier.procedureList = nextProcedures;
+        dossier.procedure = nextProcedures.join(', ');
+        return true;
+      });
+      client.dossiers = dossiers;
+      if (dossiers.length) return true;
+      return !orphanClientIds.has(Number(client?.id));
+    });
+  }
+
+  return {
+    ...currentState,
+    clients: nextClients,
+    audienceDraft: {},
+    importHistory: importHistory.filter((entry) => String(entry?.id || '').trim() !== batchId)
+  };
+}
+
 function applyMutationToState(currentState, mutation) {
   const safeCurrentState = currentState && typeof currentState === 'object'
     ? currentState
@@ -1606,6 +1735,10 @@ function applyMutationToState(currentState, mutation) {
       ...safeCurrentState,
       clients: applyDossierPatch(safeCurrentState, body)
     }, safeCurrentState);
+  }
+
+  if (type === 'import-delete') {
+    return normalizeStoredState(applyImportDeletePatch(safeCurrentState, body), safeCurrentState);
   }
 
   if (type === 'clients') {
@@ -2485,6 +2618,39 @@ app.post('/api/state/audience-draft', async (req, res) => {
     return sendVersionedOk(res, result.saved);
   } catch (err) {
     return sendJsonError(res, 500, 'AUDIENCE_DRAFT_SAVE_FAILED', 'Audience draft save failed.', err);
+  }
+});
+
+app.post('/api/state/import-delete', async (req, res) => {
+  try {
+    const result = await enqueueStateMutation(async () => {
+      await ensureDataFile();
+      const body = getRequestBodyObject(req);
+      const sourceId = String(body?._sourceId || '').trim();
+      const patch = {
+        importType: String(body?.importType || body?.type || '').trim() === 'audience' ? 'audience' : 'global',
+        batchId: String(body?.batchId || '').trim()
+      };
+      if (!patch.batchId) throw new Error('Missing import batch id.');
+      const saved = await persistJournalMutation({
+        type: 'import-delete',
+        body: patch
+      }, {
+        patchKind: 'import-delete',
+        patch
+      });
+      broadcastStateUpdated({
+        ...saved,
+        sourceId,
+        patchKind: 'import-delete',
+        patch
+      });
+      return { saved, patch };
+    });
+    return sendVersionedOk(res, result.saved, { patch: result.patch });
+  } catch (err) {
+    if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
+    return sendJsonError(res, 400, 'INVALID_IMPORT_DELETE', 'Invalid import delete request.', err);
   }
 });
 

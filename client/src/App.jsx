@@ -6,6 +6,7 @@ import ImportResultModal from './components/modals/ImportResultModal'
 import ExportPreviewModal from './components/modals/ExportPreviewModal'
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
+import FactureDocumentPreviewModal from './components/modals/FactureDocumentPreviewModal'
 
 const LEGACY_SCRIPTS = [
   '/legacy/state-persistence.js',
@@ -86,6 +87,7 @@ function App() {
       <DossierModal />
       <ImportResultModal />
       <ExportPreviewModal />
+      <FactureDocumentPreviewModal />
       <ImportProgressModal />
       <PasswordSetupModal />
     </>

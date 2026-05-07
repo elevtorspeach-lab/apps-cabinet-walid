@@ -140,6 +140,12 @@ function Sidebar() {
             <i className="fa-solid fa-door-open"></i> Salle
           </div>
         )}
+
+        {!isClient && (
+          <div id="factureLink" className="nav-link" onClick={() => window.showView && window.showView('facture')}>
+            <i className="fa-solid fa-file-invoice"></i> Facture
+          </div>
+        )}
         
         {!isClient && (
           <div id="equipeLink" className="nav-link" onClick={() => window.showView && window.showView('equipe')}>

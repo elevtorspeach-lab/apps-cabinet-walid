@@ -77,6 +77,9 @@
     <div id="salleLink" class="nav-link">
         <i class="fa-solid fa-door-open"></i> Salle
       </div>
+    <div id="factureLink" class="nav-link">
+        <i class="fa-solid fa-file-invoice"></i> Facture
+      </div>
     <div id="equipeLink" class="nav-link">
         <i class="fa-solid fa-user-group"></i> Equipe
       </div>
@@ -446,6 +449,59 @@
       </div>
     </div>
     <!-- EQUIPE -->
+    <div id="factureSection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-file-invoice"></i> Facture</h1>
+      <div class="pro-card facture-card">
+        <div class="pro-header">
+          <div class="pro-title">
+            <i class="fa-solid fa-receipt"></i> Honoraires
+          </div>
+        </div>
+        <div class="pro-body facture-body">
+          <div class="facture-picker-grid">
+            <div class="form-group creation-layout-card facture-field-card">
+              <label for="factureClientSelect">Client</label>
+              <select id="factureClientSelect">
+                <option value="">Choisir client</option>
+              </select>
+            </div>
+
+            <div id="factureDossierSearchWrap" class="form-group creation-layout-card facture-field-card" style="display:none;">
+              <label for="factureDossierSearchInput">Recherche dossier</label>
+              <div class="search-box facture-search-box">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="factureDossierSearchInput" type="text" placeholder="Filtrer dossier..." autocomplete="off">
+              </div>
+            </div>
+          </div>
+
+          <div id="factureDossierResults" class="facture-dossier-results" style="display:none;"></div>
+
+          <div id="factureHonorairePanel" class="facture-honoraire-panel" style="display:none;">
+            <div class="facture-selected-title" id="factureSelectedDossierTitle"></div>
+            <div class="form-group creation-layout-card facture-honoraire-card">
+              <label for="factureTranchesHonoraireInput">Tranches d'honoraire</label>
+              <textarea id="factureTranchesHonoraireInput" rows="6" placeholder="Tranches d'honoraire"></textarea>
+            </div>
+            <div class="form-group creation-layout-card facture-document-card">
+              <label for="factureDocumentTypeSelect">Type document</label>
+              <select id="factureDocumentTypeSelect">
+                <option value="">Choisir type</option>
+                <option value="Procès-verbal">Procès-verbal</option>
+                <option value="Jugement">Jugement</option>
+              </select>
+            </div>
+            <div class="facture-actions">
+              <button id="saveFactureHonoraireBtn" class="btn-success" type="button">
+                <i class="fa-solid fa-floppy-disk"></i> Enregistrer
+              </button>
+              <span id="factureSaveFeedback" class="audience-save-feedback" aria-live="polite" style="display:none;"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="equipeSection" class="section" style="display:none;">
       <h1><i class="fa-solid fa-user-group"></i> Equipe</h1>
       <div id="teamLocked" class="diligence-empty" style="display:none;">
@@ -1002,6 +1058,26 @@
   </div>
 </div>
 
+<!-- FACTURE DOCUMENT PREVIEW MODAL -->
+<div id="factureDocumentPreviewModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card facture-document-preview-card">
+    <div class="modal-head">
+      <h2><i class="fa-solid fa-file-invoice"></i> Aperçu facture</h2>
+      <div class="preview-modal-actions">
+        <button id="exportFactureDocumentExcelBtn" class="btn-success" type="button">
+          <i class="fa-regular fa-file-excel"></i> Exporter Excel
+        </button>
+        <button id="closeFactureDocumentPreviewModalBtn" class="btn-danger" type="button">
+          <i class="fa-solid fa-xmark"></i> Fermer
+        </button>
+      </div>
+    </div>
+    <div class="modal-body facture-document-preview-body">
+      <div id="factureDocumentPreviewContent" class="facture-document-preview-content"></div>
+    </div>
+  </div>
+</div>
+
 <!-- IMPORT PROGRESS MODAL -->
 <div id="importProgressModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card import-progress-card">
@@ -1051,9 +1127,9 @@
 
 <script src="state-persistence.js"></script>
 <script src="audience-ui-helpers.js"></script>
-<script src="render-audience-suivi.js?v=audience-shared-fields-20260505"></script>
+<script src="render-audience-suivi.js?v=import-delete-fix-20260507"></script>
 <script src="render-diligence.js"></script>
 <script src="render-dashboard.js"></script>
-<script src="app.js?v=audience-shared-fields-20260505"></script>
+<script src="app.js?v=import-delete-fix-20260507"></script>
 </body>
 </html>

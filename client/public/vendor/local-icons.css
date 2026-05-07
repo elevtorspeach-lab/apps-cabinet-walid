@@ -44,6 +44,8 @@ i.fa-folder-plus::before{content:"📁";}
 i.fa-folder-open::before{content:"📂";}
 i.fa-list-check::before{content:"☑";}
 i.fa-door-open::before{content:"🚪";}
+i.fa-file-invoice::before{content:"🧾";}
+i.fa-receipt::before{content:"🧾";}
 i.fa-user-group::before{content:"👪";}
 i.fa-trash-arrow-up::before{content:"↩";}
 i.fa-right-from-bracket::before{content:"⇦";}

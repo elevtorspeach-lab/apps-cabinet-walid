@@ -4793,6 +4793,250 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   margin-top:8px;
 }
 
+.facture-body{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+}
+
+.facture-picker-grid{
+  display:grid;
+  grid-template-columns:minmax(220px,320px) minmax(280px,1fr);
+  gap:16px;
+  align-items:end;
+}
+
+.facture-field-card{
+  margin:0;
+}
+
+.facture-search-box{
+  min-height:48px;
+  box-shadow:none;
+}
+
+.facture-search-box input{
+  width:100%;
+  min-width:0;
+}
+
+.facture-dossier-results{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+  gap:10px;
+}
+
+.facture-dossier-item{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:5px;
+  min-height:78px;
+  padding:12px 14px;
+  border:1px solid #dbe4f0;
+  border-radius:8px;
+  background:#fff;
+  color:#0f172a;
+  text-align:left;
+  box-shadow:0 8px 16px #0f172a0f;
+}
+
+.facture-dossier-item:hover,
+.facture-dossier-item.is-active{
+  border-color:#2563eb;
+  background:#eff6ff;
+  color:#0f172a;
+}
+
+.facture-dossier-title{
+  font-weight:900;
+  line-height:1.25;
+}
+
+.facture-dossier-subtitle{
+  font-size:12px;
+  color:#64748b;
+  line-height:1.3;
+}
+
+.facture-empty{
+  padding:14px;
+  border:1px dashed #cbd5e1;
+  border-radius:8px;
+  background:#f8fafc;
+  color:#64748b;
+  font-weight:800;
+}
+
+.facture-honoraire-panel{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.facture-selected-title{
+  font-weight:900;
+  color:#1e3a8a;
+}
+
+.facture-honoraire-card{
+  margin:0;
+}
+
+.facture-honoraire-card textarea{
+  width:100%;
+  min-height:150px;
+  resize:vertical;
+}
+
+.facture-document-card{
+  margin:0;
+  max-width:320px;
+}
+
+.facture-document-card select{
+  width:100%;
+}
+
+.facture-actions{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.facture-document-preview-card{
+  width:min(900px,96vw);
+}
+
+.facture-document-preview-body{
+  background:#f8fafc;
+}
+
+.facture-document-preview-content{
+  display:flex;
+  justify-content:center;
+  overflow:auto;
+}
+
+.facture-sheet{
+  width:min(720px,100%);
+  min-height:620px;
+  padding:34px 38px;
+  background:#fff;
+  color:#111827;
+  border:1px solid #cbd5e1;
+  box-shadow:0 18px 44px #0f172a1f;
+  font-family:"Times New Roman",serif;
+}
+
+.facture-sheet-head{
+  width:310px;
+  margin:0 0 34px auto;
+}
+
+.facture-brand{
+  border:4px solid #111827;
+  text-align:center;
+  font-size:13px;
+  line-height:1.35;
+  font-family:Arial,sans-serif;
+}
+
+.facture-brand strong{
+  display:block;
+  border-bottom:2px solid #111827;
+  padding:5px 6px 4px;
+  font-size:18px;
+  text-decoration:underline;
+}
+
+.facture-brand span{
+  display:block;
+  padding:7px 6px;
+  font-weight:800;
+  border-bottom:2px solid #111827;
+}
+
+.facture-brand span:last-child{
+  border-bottom:0;
+}
+
+.facture-city-date{
+  margin-bottom:6px;
+  font-size:12px;
+  color:#111827;
+  font-family:"Times New Roman",serif;
+  text-align:left;
+}
+
+.facture-sheet-title{
+  width:60%;
+  margin:0 auto 14px;
+  padding:7px 10px;
+  text-align:center;
+  font-weight:800;
+  background:#ffc28b;
+  color:#111827;
+}
+
+.facture-sheet-meta,
+.facture-sheet-lines{
+  width:100%;
+  border-collapse:collapse;
+  margin-bottom:18px;
+}
+
+.facture-sheet-meta th,
+.facture-sheet-meta td,
+.facture-sheet-lines th,
+.facture-sheet-lines td{
+  border:1px solid #111827;
+  padding:7px 9px;
+  white-space:normal;
+  font-size:13px;
+}
+
+.facture-sheet-meta th{
+  width:130px;
+  text-align:left;
+  background:#f8fafc;
+}
+
+.facture-sheet-lines th{
+  text-align:center;
+  background:#f8fafc;
+}
+
+.facture-sheet-lines td:not(:first-child){
+  text-align:center;
+}
+
+.facture-total-row td{
+  font-weight:800;
+  background:#e5e7eb;
+}
+
+.facture-ttc-row td{
+  background:#d1d5db;
+}
+
+.facture-sheet-signature{
+  margin-top:52px;
+  text-align:center;
+  font-weight:800;
+  text-decoration:underline;
+}
+
+@media (max-width: 800px){
+  .facture-picker-grid{
+    grid-template-columns:1fr;
+  }
+  .facture-dossier-results{
+    grid-template-columns:1fr;
+  }
+}
+
 /* ================== UI POLISH OVERRIDES ================== */
 .section{
   overflow:hidden;
