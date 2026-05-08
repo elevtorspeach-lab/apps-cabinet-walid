@@ -30,6 +30,13 @@ function SuiviSection() {
           <datalist id="filterSuiviTribunalOptions">
           </datalist>
         </div>
+        <div className="audience-color-filter">
+          <label htmlFor="filterSuiviFacture">Facture</label>
+          <select id="filterSuiviFacture">
+            <option value="all">Toutes</option>
+            <option value="with">Avec facture</option>
+          </select>
+        </div>
         <label id="suiviCheckedCount" className="audience-checked-count" htmlFor="suiviPageSelectionToggle">
           <input id="suiviPageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page suivi" />
           <span className="label">Cochés</span>

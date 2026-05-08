@@ -32,6 +32,7 @@ function getSuiviFilterCacheKey(query){
     query,
     filterSuiviProcedure,
     filterSuiviTribunal,
+    filterSuiviFacture,
     filterSuiviStatus,
     filterSuiviAttDepotOnly ? 'att-depot' : 'all'
   ].join('||');
@@ -143,7 +144,7 @@ let lastSuiviRenderCacheKey = '';
 let lastAudienceRenderIdentityKey = '';
 let lastSuiviRenderIdentityKey = '';
 
-function renderAudienceRowHtml(row, duplicateKeySet){
+function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
   const { c, d, procKey, p, key, draft } = row;
   const canEdit = canEditClient(c) && canEditData();
   const canView = Number.isFinite(Number(row?.c?.id)) && Number.isFinite(Number(row?.di));
@@ -528,6 +529,7 @@ function renderSuivi(options = {}){
   suiviTribunalAliasMap = base.tribunalState.aliasMap;
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noFactureFilter = filterSuiviFacture === 'all';
   const noStatusFilter = filterSuiviStatus === 'all';
   const noAttDepotFilter = filterSuiviAttDepotOnly !== true;
   const noSearchFilter = !q;
@@ -586,7 +588,7 @@ function renderSuivi(options = {}){
   let sortedRows = [];
   if(base === suiviFilteredRowsCacheSource && suiviFilterCacheKey === suiviFilteredRowsCacheKey){
     sortedRows = suiviFilteredRowsCacheOutput;
-  }else if(noProcedureFilter && noTribunalFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
+  }else if(noProcedureFilter && noTribunalFilter && noFactureFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
     sortedRows = base.sortedDefaultRows;
     suiviFilteredRowsCacheSource = base;
     suiviFilteredRowsCacheKey = suiviFilterCacheKey;
@@ -596,6 +598,7 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+      if(!noFactureFilter && !matchesSuiviFactureFilter(row)) return false;
       if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return false;
       if(!noAttDepotFilter && row?.hasPendingDepot !== true) return false;
       return true;
@@ -661,6 +664,7 @@ function renderSuivi(options = {}){
       const tribunalKeys = row.tribunalKeys || [];
       if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return;
       if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return;
+      if(!noFactureFilter && !matchesSuiviFactureFilter(row)) return;
       if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return;
       if(!noAttDepotFilter && row?.hasPendingDepot !== true) return;
       if(!noSearchFilter){
@@ -734,9 +738,9 @@ function renderAudience(options = {}){
   const finalizeAudienceRender = (allRows)=>{
     const selectionPruned = pruneAudiencePrintSelection(baseRows);
     syncAudienceFilterOptions(allRows);
-    const displayRows = dedupeAudienceRowsForDisplay(allRows);
+    const displayRows = allRows;
     const duplicateKeySet = getAudienceDuplicateKeySet(displayRows);
-    const rows = getFilteredAudienceRows(displayRows);
+    const rows = getFilteredAudienceRows(displayRows, { alreadyDeduped: true, duplicateKeySet });
     const pageData = paginateRows(rows, 'audience');
     const renderCacheKey = buildAudienceRenderCacheKey(pageData, audienceFilterStateKey);
     const isSameRender = renderCacheKey === lastAudienceRenderCacheKey;

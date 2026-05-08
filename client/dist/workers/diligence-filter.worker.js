@@ -24,6 +24,8 @@ self.addEventListener('message', (event)=>{
   }else{
     filteredIndexes = collectFiniteIndexes(
       items.filter(item=>{
+        const haystack = String(item?.haystack || '');
+        if(haystack) return matchesWorkerQuery(haystack, query);
         const values = Array.isArray(item?.values) ? item.values : [];
         return values.some(value=>matchesWorkerQuery(value, query));
       })

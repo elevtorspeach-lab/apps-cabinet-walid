@@ -593,6 +593,10 @@ function getStateScopeKeyForSession(session) {
   return clientIds.length ? `client:${clientIds.join(',')}` : 'client:none';
 }
 
+function canSessionReplaceFullState(session) {
+  return getStateScopeKeyForSession(session) === 'all';
+}
+
 function buildScopedStatePayloadEntry(state, session) {
   const scopeKey = getStateScopeKeyForSession(session);
   if (scopeKey === 'all') return null;
@@ -906,12 +910,14 @@ function countStateDossiers(state) {
 function isDangerousEmptyStateReplace(currentState, nextState) {
   const currentClients = Array.isArray(currentState?.clients) ? currentState.clients.length : 0;
   const currentDossiers = countStateDossiers(currentState);
-  if (!currentClients && !currentDossiers) return false;
   if (!nextState || typeof nextState !== 'object') return true;
   const hasClientsProperty = Object.prototype.hasOwnProperty.call(nextState, 'clients');
   const nextClients = Array.isArray(nextState?.clients) ? nextState.clients.length : 0;
   const nextDossiers = countStateDossiers(nextState);
-  return hasClientsProperty && nextClients === 0 && nextDossiers === 0;
+  if (!hasClientsProperty || nextClients > 0 || nextDossiers > 0) return false;
+  const currentImportHistory = Array.isArray(currentState?.importHistory) ? currentState.importHistory.length : 0;
+  const currentUsers = Array.isArray(currentState?.users) ? currentState.users.length : 0;
+  return currentClients > 0 || currentDossiers > 0 || currentImportHistory > 0 || currentUsers > 1;
 }
 
 function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
@@ -2332,6 +2338,9 @@ app.get('/api/state/changes', async (req, res) => {
 
 app.post('/api/state', async (req, res) => {
   try {
+    if (!canSessionReplaceFullState(req.authSession)) {
+      return sendJsonError(res, 403, 'FULL_STATE_REPLACE_FORBIDDEN', 'Full state replacement requires full cabinet access.');
+    }
     const result = await enqueueStateMutation(async () => {
       await ensureDataFile();
       const body = getRequestBodyObject(req);
@@ -2346,6 +2355,9 @@ app.post('/api/state', async (req, res) => {
       delete statePayload._baseVersion;
       if (isDangerousEmptyStateReplace(currentState, statePayload)) {
         return { emptyReplaceRejected: true, state: currentState };
+      }
+      if (shouldCreateSafetyBackup(currentState, { type: 'replace', body: statePayload }, statePayload)) {
+        await maybeWriteBackupSnapshot(currentState);
       }
       const explicitUsers = Array.isArray(statePayload.users)
         ? ensureManagerUser(statePayload.users)
@@ -2388,6 +2400,9 @@ app.post('/api/state', async (req, res) => {
 });
 
 app.post('/api/state/upload-chunk', async (req, res) => {
+  if (!canSessionReplaceFullState(req.authSession)) {
+    return sendJsonError(res, 403, 'FULL_STATE_REPLACE_FORBIDDEN', 'Full state replacement requires full cabinet access.');
+  }
   cleanupChunkedUploads();
   const body = getRequestBodyObject(req);
   const uploadId = String(body.uploadId || '').trim();
@@ -2459,6 +2474,9 @@ app.post('/api/state/upload-chunk', async (req, res) => {
         : statePayload;
       if (session.mode !== 'merge' && isDangerousEmptyStateReplace(currentState, nextState)) {
         return { emptyReplaceRejected: true, state: currentState };
+      }
+      if (session.mode !== 'merge' && shouldCreateSafetyBackup(currentState, { type: 'replace', body: nextState }, nextState)) {
+        await maybeWriteBackupSnapshot(currentState);
       }
       const saved = await writeState(nextState, { previousState: currentState });
       broadcastStateUpdated({ ...saved, sourceId: session.sourceId });

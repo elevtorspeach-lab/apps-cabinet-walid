@@ -26,20 +26,30 @@ function FactureSection() {
             </div>
           </div>
 
+          <div className="facture-tracking-card">
+            <div className="facture-tracking-head">
+              <div>
+                <strong>Suivi des factures</strong>
+                <span id="factureTrackingCount">0 facture</span>
+              </div>
+              <button id="refreshFactureTrackingBtn" className="btn-primary" type="button">
+                <i className="fa-solid fa-rotate"></i> Actualiser
+              </button>
+            </div>
+            <div id="factureTrackingList" className="facture-tracking-list"></div>
+          </div>
+
           <div id="factureDossierResults" className="facture-dossier-results" style={{ display: 'none' }}></div>
 
           <div id="factureHonorairePanel" className="facture-honoraire-panel" style={{ display: 'none' }}>
             <div className="facture-selected-title" id="factureSelectedDossierTitle"></div>
-            <div className="form-group creation-layout-card facture-honoraire-card">
-              <label htmlFor="factureTranchesHonoraireInput">Tranches d&apos;honoraire</label>
-              <textarea id="factureTranchesHonoraireInput" rows="6" placeholder="Tranches d&apos;honoraire"></textarea>
-            </div>
             <div className="form-group creation-layout-card facture-document-card">
-              <label htmlFor="factureDocumentTypeSelect">Type document</label>
-              <select id="factureDocumentTypeSelect">
-                <option value="">Choisir type</option>
-                <option value="Proces-verbal">Proces-verbal</option>
-                <option value="Jugement">Jugement</option>
+              <label htmlFor="factureDocumentTypeSelect">Tranches d&apos;honoraire</label>
+              <select id="factureDocumentTypeSelect" aria-label="Tranches d'honoraire">
+                <option value="Tranche 1">Tranche 1</option>
+                <option value="Tranche 2">Tranche 2</option>
+                <option value="Tranche 3">Tranche 3</option>
+                <option value="Tranche 4">Tranche 4</option>
               </select>
             </div>
             <div className="facture-actions">

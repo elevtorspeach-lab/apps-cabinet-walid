@@ -107,6 +107,7 @@ let audienceAutocompleteActiveIndex = -1;
 let audienceAutocompleteHideTimer = null;
 let filterSuiviProcedure = 'all';
 let filterSuiviTribunal = 'all';
+let filterSuiviFacture = 'all';
 let filterSuiviStatus = 'all';
 let filterSuiviAttDepotOnly = false;
 let filterSuiviCheckedFirst = false;
@@ -141,6 +142,12 @@ let filterSalleAudienceDate = '';
 let selectedSalleDay = 'lundi';
 let selectedFactureClientId = '';
 let selectedFactureDossierIndex = -1;
+let selectedFactureDossierIndexes = new Set();
+let selectedFactureProcedure = '';
+let selectedFactureProceduresByDossier = new Map();
+let currentFactureInvoiceKey = '';
+let currentFactureInvoiceNumber = '';
+let currentFacturePreviewRecord = null;
 let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
@@ -217,8 +224,11 @@ let lastRemoteStateLoadVersion = 0;
 let lastRemoteStateLoadUpdatedAt = '';
 let remoteStateVersion = 0;
 let remoteStateUpdatedAt = '';
+let lastKnownRemoteClientCount = 0;
+let lastKnownRemoteDossierCount = 0;
 let remoteRefreshPending = false;
 let remoteRefreshInFlight = false;
+let suppressStateConflictUntil = 0;
 let lastRemoteRefreshStartedAt = 0;
 let lastRemoteRefreshCompletedAt = 0;
 let deferredLocalSnapshotTimer = null;
@@ -2147,6 +2157,17 @@ function matchesSuiviStatusFilter(dossier, statusFilter = filterSuiviStatus){
   return true;
 }
 
+function hasDossierGeneratedFacture(dossier){
+  return Array.isArray(dossier?.factureInvoices)
+    && dossier.factureInvoices.some(record=>record && typeof record === 'object' && String(record.id || '').trim());
+}
+
+function matchesSuiviFactureFilter(row, factureFilter = filterSuiviFacture){
+  const filter = String(factureFilter || 'all').trim();
+  if(filter !== 'with') return true;
+  return hasDossierGeneratedFacture(row?.d);
+}
+
 function getDossierCreatedAtSortValue(dossier){
   const raw = String(dossier?.createdAt || '').trim();
   if(!raw) return 0;
@@ -3589,6 +3610,7 @@ function getSuiviRenderStateKey(){
     q,
     filterSuiviProcedure,
     filterSuiviTribunal,
+    filterSuiviFacture,
     filterSuiviStatus,
     filterSuiviAttDepotOnly ? 'att-depot' : 'all'
   ].join('||');
@@ -3785,24 +3807,27 @@ function getFilteredSuiviRowsForSelection(){
     q,
     filterSuiviProcedure,
     filterSuiviTribunal,
+    filterSuiviFacture,
     filterSuiviStatus,
     filterSuiviAttDepotOnly ? 'att-depot' : 'all'
   ].join('||');
   const noProcedureFilter = filterSuiviProcedure === 'all';
   const noTribunalFilter = filterSuiviTribunal === 'all';
+  const noFactureFilter = filterSuiviFacture === 'all';
   const noStatusFilter = filterSuiviStatus === 'all';
   const noAttDepotFilter = filterSuiviAttDepotOnly !== true;
   const noSearchFilter = !q;
   if(base === suiviFilteredRowsCacheSource && suiviFilterKey === suiviFilteredRowsCacheKey){
     return suiviFilteredRowsCacheOutput;
   }
-  if(noProcedureFilter && noTribunalFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
+  if(noProcedureFilter && noTribunalFilter && noFactureFilter && noStatusFilter && noAttDepotFilter && noSearchFilter){
     return base.sortedDefaultRows;
   }
   return base.rawRows.filter(row=>{
     const tribunalKeys = row.tribunalKeys || [];
     if(!noProcedureFilter && !row.procSet.has(filterSuiviProcedure)) return false;
     if(!noTribunalFilter && !tribunalKeys.includes(filterSuiviTribunal)) return false;
+    if(!noFactureFilter && !matchesSuiviFactureFilter(row)) return false;
     if(!noStatusFilter && !matchesSuiviStatusFilter(row?.d, filterSuiviStatus)) return false;
     if(!noAttDepotFilter && row?.hasPendingDepot !== true) return false;
     if(noSearchFilter) return true;
@@ -8975,7 +9000,24 @@ function syncUsersWithVisibleClients(){
   }));
 }
 
-function deleteGlobalImportBatch(batchId){
+async function persistImportDeleteBatchNow(importType, batchId){
+  queuedPersistPayload = null;
+  if(persistTimer){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  if(audienceAutoSaveTimer){
+    clearTimeout(audienceAutoSaveTimer);
+    audienceAutoSaveTimer = null;
+  }
+  suppressStateConflictUntil = Date.now() + 5000;
+  return persistRemoteRequestNow('/state/import-delete', {
+    importType: importType === 'audience' ? 'audience' : 'global',
+    batchId: String(batchId || '').trim()
+  }, { source: 'import-delete' });
+}
+
+async function deleteGlobalImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import global');
   const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import global introuvable.');
@@ -9002,12 +9044,15 @@ function deleteGlobalImportBatch(batchId){
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
   handleDossierDataChange({ audience: true });
-  queuePersistAppState();
+  await persistImportDeleteBatchNow('global', batch.id).catch((err)=>{
+    console.error('Erreur pendant la sauvegarde suppression import global', err);
+    alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
+  });
   refreshPrimaryViews({ includeSalle: true });
   alert(`Import global supprimé.\nDossiers retirés: ${removedDossiers}`);
 }
 
-function deleteAudienceImportBatch(batchId){
+async function deleteAudienceImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import audience');
   const batch = getImportHistoryEntriesByType('audience').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import audience introuvable.');
@@ -9077,7 +9122,10 @@ function deleteAudienceImportBatch(batchId){
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
   handleDossierDataChange({ audience: true });
-  queuePersistAppState();
+  await persistImportDeleteBatchNow('audience', batch.id).catch((err)=>{
+    console.error('Erreur pendant la sauvegarde suppression import audience', err);
+    alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
+  });
   refreshPrimaryViews({ includeSalle: true });
   alert(`Import audience supprimé.\nProcédures restaurées: ${restoredProcedures}\nProcédures manuelles conservées: ${preservedManualProcedures}\nDossiers hors global retirés: ${removedOrphanDossiers}`);
 }
@@ -10475,6 +10523,31 @@ function updateRemoteStateMetadata(source){
   const versionNum = Number(source?.version);
   remoteStateVersion = Number.isFinite(versionNum) && versionNum >= 0 ? versionNum : 0;
   remoteStateUpdatedAt = String(source?.updatedAt || '');
+  const clientCount = Number(source?.clientCount);
+  const dossierCount = Number(source?.dossierCount);
+  if(Number.isFinite(clientCount) && clientCount >= 0) lastKnownRemoteClientCount = clientCount;
+  if(Number.isFinite(dossierCount) && dossierCount >= 0) lastKnownRemoteDossierCount = dossierCount;
+  if(Array.isArray(source?.clients)){
+    const clients = source.clients;
+    lastKnownRemoteClientCount = clients.length;
+    lastKnownRemoteDossierCount = clients.reduce((sum, client)=>sum + (Array.isArray(client?.dossiers) ? client.dossiers.length : 0), 0);
+  }
+}
+
+function getAppStatePayloadCounts(payload){
+  const clients = Array.isArray(payload?.clients) ? payload.clients : [];
+  return {
+    clients: clients.length,
+    dossiers: clients.reduce((sum, client)=>sum + (Array.isArray(client?.dossiers) ? client.dossiers.length : 0), 0)
+  };
+}
+
+function shouldBlockDangerousEmptyFullStatePayload(payload){
+  if(!payload || typeof payload !== 'object') return false;
+  if(!Object.prototype.hasOwnProperty.call(payload, 'clients')) return false;
+  const counts = getAppStatePayloadCounts(payload);
+  if(counts.clients > 0 || counts.dossiers > 0) return false;
+  return lastKnownRemoteClientCount > 0 || lastKnownRemoteDossierCount > 0;
 }
 
 function shouldThrottleRemoteStateRefresh(options = {}){
@@ -11684,13 +11757,13 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
       const timeoutMs = getRemoteSaveTimeoutMs(pathname, body);
       try{
         const res = await fetchWithTimeout(`${API_BASE}${pathname}`, requestOptions, timeoutMs);
-        saveResult = await handlePersistRemoteResponse(res);
+        saveResult = await handlePersistRemoteResponse(res, { pathname: safePath });
         if(!saveResult) return false;
       }catch(err){
         if(!shouldRetryPersistRequest(pathname, body, err)) throw err;
         await waitForMs(180);
         const retryRes = await fetchWithTimeout(`${API_BASE}${pathname}`, requestOptions, timeoutMs);
-        saveResult = await handlePersistRemoteResponse(retryRes);
+        saveResult = await handlePersistRemoteResponse(retryRes, { pathname: safePath });
         if(!saveResult) return false;
       }
     }
@@ -11733,7 +11806,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
   }
 }
 
-async function handlePersistRemoteResponse(res){
+async function handlePersistRemoteResponse(res, context = {}){
   if(res.status === 401){
     handleUnauthorizedRemoteSession();
     return null;
@@ -11741,6 +11814,14 @@ async function handlePersistRemoteResponse(res){
   if(res.status === 409){
     const conflictPayload = await res.json().catch(()=>({}));
     updateRemoteStateMetadata(conflictPayload);
+    if(String(context?.pathname || '') === '/state/audience-draft'){
+      setSyncStatus('ok', 'Modification enregistree');
+      return null;
+    }
+    if(String(context?.pathname || '') === '/state' && Date.now() < suppressStateConflictUntil){
+      setSyncStatus('ok', 'Synchronisation ajustee apres suppression import');
+      return null;
+    }
     remoteRefreshPending = true;
     setSyncStatus('conflict', 'Conflit: serveur plus recent, rechargement...');
     queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
@@ -11778,7 +11859,7 @@ async function persistChunkedRemoteStateNow(payload, serializedPayload){
         _baseVersion: payload?._baseVersion
       })
     }, API_STATE_SAVE_TIMEOUT_MS);
-    const result = await handlePersistRemoteResponse(res);
+    const result = await handlePersistRemoteResponse(res, { pathname: '/state/upload-chunk' });
     if(!result) return null;
     finalResult = result;
   }
@@ -13510,6 +13591,7 @@ function closeExportPreviewModal(){
 function closeFactureDocumentPreviewModal(){
   const modal = $('factureDocumentPreviewModal');
   const content = $('factureDocumentPreviewContent');
+  currentFacturePreviewRecord = null;
   if(content) content.innerHTML = '';
   if(modal) modal.style.display = 'none';
 }
@@ -13521,6 +13603,128 @@ function getFactureDocumentAmount(value){
   return match[1].replace(/\s+/g, '').replace(',', '.');
 }
 
+function findFactureProcedureDetails(dossier, procedureName){
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  const wanted = normalizeProcedureName(String(procedureName || '').trim());
+  if(!wanted) return null;
+  if(details[procedureName] && typeof details[procedureName] === 'object') return details[procedureName];
+  const matchedKey = Object.keys(details).find(key=>normalizeProcedureName(key) === wanted);
+  return matchedKey && typeof details[matchedKey] === 'object' ? details[matchedKey] : null;
+}
+
+function getFactureSelectedProcedure(dossier){
+  const procedures = getFactureDossierProcedures(dossier);
+  const selected = String(selectedFactureProcedure || '').trim();
+  if(selected && procedures.some(proc=>normalizeProcedureName(proc) === normalizeProcedureName(selected))){
+    return selected;
+  }
+  return procedures[0] || String(dossier?.procedure || '').split(',').map(value=>value.trim()).filter(Boolean)[0] || '';
+}
+
+function getFactureProcedureChoiceForDossier(dossier, dossierIndex){
+  const selected = String(selectedFactureProceduresByDossier.get(Number(dossierIndex)) || '').trim();
+  const procedures = getFactureDossierProcedures(dossier);
+  if(selected && procedures.some(proc=>normalizeProcedureName(proc) === normalizeProcedureName(selected))){
+    return selected;
+  }
+  return procedures[0] || String(dossier?.procedure || '').split(',').map(value=>value.trim()).filter(Boolean)[0] || '';
+}
+
+function getFactureProcedureReference(dossier, procedureName, dossierIndex = selectedFactureDossierIndex){
+  const details = findFactureProcedureDetails(dossier, procedureName);
+  return String(
+    details?.referenceClient
+    || dossier?.referenceClient
+    || dossier?.nRef
+    || `Dossier ${Number(dossierIndex) + 1}`
+  ).trim();
+}
+
+function getFactureProcedureAmountText(dossier, procedureName){
+  const wanted = normalizeProcedureName(String(procedureName || '').trim());
+  const groups = Array.isArray(dossier?.montantByProcedure) ? dossier.montantByProcedure : [];
+  const matchedGroup = groups.find(group=>
+    Array.isArray(group?.procedures)
+    && group.procedures.some(proc=>normalizeProcedureName(proc) === wanted)
+    && String(group?.montant || '').trim()
+  );
+  return String(matchedGroup?.montant || dossier?.montant || '').trim();
+}
+
+function getFactureProcesVerbalLineEntries(){
+  const selectedEntries = getFactureSelectedDossierEntries();
+  const fallback = getFactureSelectedDossier();
+  const targetEntries = selectedEntries.length ? selectedEntries : (
+    fallback.client && fallback.dossier ? [fallback] : []
+  );
+  return targetEntries.map(entry=>{
+    const procedure = getFactureProcedureChoiceForDossier(entry.dossier, entry.dossierIndex);
+    const reference = getFactureProcedureReference(entry.dossier, procedure, entry.dossierIndex);
+    const amountText = getFactureProcedureAmountText(entry.dossier, procedure) || '0';
+    const amount = Number(String(amountText).replace(/\s+/g, '').replace(',', '.')) || 0;
+    const taxe = amount;
+    const vignette = 0;
+    const med = 0;
+    const fraisTimbrage = 0;
+    const huissierAudience = 200;
+    const deplacement = 0;
+    return {
+      client: entry.client,
+      dossier: entry.dossier,
+      dossierIndex: entry.dossierIndex,
+      type: entry.dossier?.type || '-',
+      refClient: entry.dossier?.referenceClient || entry.dossier?.nRef || '-',
+      nom: entry.dossier?.debiteur || '-',
+      procedure,
+      reference,
+      amount,
+      taxe,
+      vignette,
+      med,
+      fraisTimbrage,
+      huissierAudience,
+      deplacement,
+      frais: vignette + med + fraisTimbrage + huissierAudience + deplacement,
+      debiteur: entry.dossier?.debiteur || '-',
+      ville: entry.dossier?.ville || '',
+      designation: `Proces-verbal ${procedure || ''}${reference ? ` - Ref ${reference}` : ''}`.trim()
+    };
+  }).filter(line=>line.dossier);
+}
+
+function buildFactureInvoiceKey(lines, tranche){
+  const clientId = String(lines?.[0]?.client?.id || selectedFactureClientId || '').trim();
+  const parts = (Array.isArray(lines) ? lines : []).map(line=>[
+    line.dossierIndex,
+    line.refClient,
+    line.procedure,
+    line.reference
+  ].map(value=>String(value || '').trim()).join(':'));
+  return [clientId, tranche, ...parts].join('|');
+}
+
+function generateFactureInvoiceNumber(lines, tranche){
+  const year = new Date().getFullYear();
+  const key = buildFactureInvoiceKey(lines, tranche);
+  if(currentFactureInvoiceKey === key && currentFactureInvoiceNumber){
+    return currentFactureInvoiceNumber;
+  }
+  const storageKey = `cabinet-facture-invoice-seq-${year}`;
+  let nextNumber = 1;
+  try{
+    const previous = Number(localStorage.getItem(storageKey) || '0') || 0;
+    nextNumber = previous + 1;
+    localStorage.setItem(storageKey, String(nextNumber));
+  }catch(err){
+    nextNumber = Math.max(1, Number(String(Date.now()).slice(-4)) || 1);
+  }
+  currentFactureInvoiceKey = key;
+  currentFactureInvoiceNumber = `${nextNumber}/${year}`;
+  return currentFactureInvoiceNumber;
+}
+
 function formatFactureMoney(value){
   return Number(value || 0).toLocaleString('fr-FR', {
     minimumFractionDigits: 2,
@@ -13528,83 +13732,638 @@ function formatFactureMoney(value){
   });
 }
 
+function hashFactureTrackingValue(value){
+  const text = String(value || '');
+  let hash = 2166136261;
+  for(let index = 0; index < text.length; index += 1){
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function buildFactureTrackingRecord(data, tranche){
+  const lines = Array.isArray(data?.lines) ? data.lines : [];
+  const normalizedTranche = String(tranche || 'Tranche 1').trim() || 'Tranche 1';
+  const invoiceRef = String(data?.invoiceRef || '').trim();
+  const signature = [
+    data?.client?.id || selectedFactureClientId || '',
+    normalizedTranche,
+    invoiceRef,
+    ...lines.map(line=>[
+      line.dossierIndex,
+      line.refClient,
+      line.nom,
+      line.procedure,
+      line.reference
+    ].map(value=>String(value || '').trim()).join(':'))
+  ].join('|');
+  return {
+    id: `facture-${hashFactureTrackingValue(signature || `${Date.now()}`)}`,
+    invoiceRef,
+    tranche: normalizedTranche,
+    amount: Number(data?.amount) || 0,
+    totalTtc: Number(data?.totalTtc) || Number(data?.amount) || 0,
+    clientName: String(data?.clientName || '').trim(),
+    objet: String(data?.objet || '').trim(),
+    createdAt: new Date().toISOString(),
+    status: 'unpaid',
+    paidAt: '',
+    lines: lines.map(line=>({
+      dossierIndex: Number(line.dossierIndex),
+      type: String(line.type || '').trim(),
+      refClient: String(line.refClient || '').trim(),
+      nom: String(line.nom || '').trim(),
+      procedure: String(line.procedure || '').trim(),
+      reference: String(line.reference || '').trim(),
+      ville: String(line.ville || '').trim(),
+      amount: Number(line.amount) || 0
+    }))
+  };
+}
+
+function normalizeFactureTrackingRecord(record){
+  if(!record || typeof record !== 'object') return null;
+  const id = String(record.id || '').trim();
+  if(!id) return null;
+  return {
+    ...record,
+    id,
+    invoiceRef: String(record.invoiceRef || '').trim(),
+    tranche: String(record.tranche || 'Tranche 1').trim() || 'Tranche 1',
+    amount: Number(record.amount) || 0,
+    totalTtc: Number(record.totalTtc) || Number(record.amount) || 0,
+    createdAt: String(record.createdAt || '').trim(),
+    status: String(record.status || '').trim() === 'paid' ? 'paid' : 'unpaid',
+    paidAt: String(record.paidAt || '').trim(),
+    lines: Array.isArray(record.lines) ? record.lines : []
+  };
+}
+
+function getFactureTrackingRecordById(invoiceId){
+  const id = String(invoiceId || '').trim();
+  if(!id) return null;
+  return collectFactureTrackingRecords().find(record=>record.id === id) || null;
+}
+
+function buildFactureDataFromTrackingRecord(record){
+  const normalized = normalizeFactureTrackingRecord(record);
+  if(!normalized) return null;
+  const client = getFactureSelectedClient();
+  const lines = normalized.lines.map((line, index)=>{
+    const amount = Number(line.amount) || 0;
+    return {
+      client,
+      dossier: null,
+      dossierIndex: Number.isInteger(Number(line.dossierIndex)) ? Number(line.dossierIndex) : index,
+      type: String(line.type || '-').trim() || '-',
+      refClient: String(line.refClient || '-').trim() || '-',
+      nom: String(line.nom || '-').trim() || '-',
+      procedure: String(line.procedure || '').trim(),
+      reference: String(line.reference || '').trim(),
+      amount,
+      taxe: amount,
+      vignette: 0,
+      med: 0,
+      fraisTimbrage: 0,
+      huissierAudience: /^Tranche\s*1$/i.test(normalized.tranche) ? 200 : 0,
+      deplacement: 0,
+      frais: /^Tranche\s*1$/i.test(normalized.tranche) ? 200 : 0,
+      debiteur: String(line.nom || '').trim(),
+      ville: String(line.ville || '').trim(),
+      designation: `Facture ${normalized.tranche}${line.reference ? ` - Ref ${line.reference}` : ''}`.trim()
+    };
+  });
+  const amount = Number(normalized.amount) || lines.reduce((sum, line)=>sum + (Number(line.amount) || 0), 0);
+  const tva = /^Tranche\s*[23]$/i.test(normalized.tranche)
+    ? Math.max(0, Number(normalized.totalTtc || 0) - amount) || amount * 0.2
+    : amount * 0.2;
+  const totalTtc = Number(normalized.totalTtc) || amount + tva;
+  const taxeTotal = lines.reduce((sum, line)=>sum + (Number(line.taxe) || 0), 0);
+  const huissierAudienceTotal = lines.reduce((sum, line)=>sum + (Number(line.huissierAudience) || 0), 0);
+  const date = normalized.createdAt ? new Date(normalized.createdAt) : new Date();
+  const today = date && !Number.isNaN(date.getTime())
+    ? (typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(date) : date.toLocaleDateString('fr-FR'))
+    : (typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(new Date()) : new Date().toLocaleDateString('fr-FR'));
+  return {
+    client,
+    dossier: null,
+    lines,
+    tranches: '',
+    tranche: normalized.tranche,
+    amount,
+    taxeTotal,
+    vignetteTotal: 0,
+    medTotal: 0,
+    fraisTimbrageTotal: 0,
+    huissierAudienceTotal,
+    deplacementTotal: 0,
+    fraisTotal: huissierAudienceTotal,
+    netAPayer: taxeTotal + huissierAudienceTotal,
+    tva,
+    totalTtc,
+    invoiceRef: normalized.invoiceRef,
+    today,
+    clientName: normalized.clientName || client?.name || '-',
+    debiteur: lines.map(line=>line.nom).filter(Boolean).join(' | ') || '-',
+    objet: normalized.objet || lines.map(line=>`${line.procedure || 'Procedure'}${line.reference ? ` (${line.reference})` : ''}`).join(' | '),
+    selectedProcedure: lines[0]?.procedure || ''
+  };
+}
+
+function upsertFactureTrackingRecord(dossier, record){
+  if(!dossier || typeof dossier !== 'object' || !record?.id) return false;
+  const records = Array.isArray(dossier.factureInvoices)
+    ? dossier.factureInvoices.map(normalizeFactureTrackingRecord).filter(Boolean)
+    : [];
+  const existingIndex = records.findIndex(item=>String(item.id || '') === String(record.id || ''));
+  if(existingIndex === -1){
+    dossier.factureInvoices = [record, ...records];
+    return true;
+  }
+  const existing = records[existingIndex];
+  records[existingIndex] = {
+    ...existing,
+    ...record,
+    status: existing.status || record.status || 'unpaid',
+    paidAt: existing.paidAt || record.paidAt || '',
+    createdAt: existing.createdAt || record.createdAt || new Date().toISOString()
+  };
+  dossier.factureInvoices = records;
+  return true;
+}
+
+function collectFactureTrackingRecords(client = getFactureSelectedClient()){
+  const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+  const byId = new Map();
+  dossiers.forEach((dossier, dossierIndex)=>{
+    const records = Array.isArray(dossier?.factureInvoices) ? dossier.factureInvoices : [];
+    records.forEach(rawRecord=>{
+      const record = normalizeFactureTrackingRecord(rawRecord);
+      if(!record) return;
+      const existing = byId.get(record.id) || {
+        ...record,
+        dossierIndexes: new Set(),
+        dossierLabels: new Set()
+      };
+      existing.status = existing.status === 'paid' || record.status === 'paid' ? 'paid' : 'unpaid';
+      existing.paidAt = existing.paidAt || record.paidAt || '';
+      existing.amount = Number(existing.amount || record.amount) || 0;
+      existing.totalTtc = Number(existing.totalTtc || record.totalTtc) || 0;
+      existing.dossierIndexes.add(dossierIndex);
+      existing.dossierLabels.add(String(dossier?.referenceClient || dossier?.debiteur || `Dossier ${dossierIndex + 1}`).trim());
+      byId.set(record.id, existing);
+    });
+  });
+  return [...byId.values()]
+    .map(record=>({
+      ...record,
+      dossierIndexes: [...record.dossierIndexes],
+      dossierLabels: [...record.dossierLabels].filter(Boolean)
+    }))
+    .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+function formatFactureTrackingDate(value){
+  const date = value ? new Date(value) : null;
+  if(date && !Number.isNaN(date.getTime())){
+    return typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(date) : date.toLocaleDateString('fr-FR');
+  }
+  return '-';
+}
+
+function renderFactureTracking(){
+  const list = $('factureTrackingList');
+  const count = $('factureTrackingCount');
+  if(!list) return;
+  const client = getFactureSelectedClient();
+  const records = collectFactureTrackingRecords(client);
+  if(count) count.textContent = `${records.length} facture${records.length > 1 ? 's' : ''}`;
+  if(!client){
+    list.innerHTML = '<div class="facture-tracking-empty">Choisir client pour voir le suivi.</div>';
+    return;
+  }
+  if(!records.length){
+    list.innerHTML = '<div class="facture-tracking-empty">Aucune facture enregistree pour ce client.</div>';
+    return;
+  }
+  list.innerHTML = records.map(record=>{
+    const paid = record.status === 'paid';
+    const statusLabel = paid ? 'Payee' : 'Non payee';
+    const statusClass = paid ? ' is-paid' : ' is-unpaid';
+    const dossierLabels = record.dossierLabels.join(' | ') || '-';
+    const amount = /^Tranche\s*[14]$/i.test(record.tranche)
+      ? record.amount
+      : record.totalTtc;
+    return `
+      <div class="facture-tracking-item${statusClass}" data-invoice-id="${escapeAttr(record.id)}">
+        <div class="facture-tracking-main">
+          <div class="facture-tracking-title">
+            <span>${escapeHtml(record.tranche)}</span>
+            <strong>Facture ${escapeHtml(record.invoiceRef || '-')}</strong>
+          </div>
+          <div class="facture-tracking-meta">
+            <span>${escapeHtml(formatFactureTrackingDate(record.createdAt))}</span>
+            <span>${escapeHtml(dossierLabels)}</span>
+            <span>${escapeHtml(formatFactureMoney(amount))}</span>
+          </div>
+        </div>
+        <button class="facture-paid-toggle${statusClass}" type="button" data-invoice-id="${escapeAttr(record.id)}" title="Double click pour changer le paiement" ${canEditData() ? '' : 'disabled'}>
+          <i class="fa-solid ${paid ? 'fa-circle-check' : 'fa-clock'}"></i> ${statusLabel}
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function toggleFactureInvoicePaid(invoiceId){
+  if(!canEditData()) return alert('Acces refuse');
+  const client = getFactureSelectedClient();
+  const id = String(invoiceId || '').trim();
+  if(!client || !id) return;
+  const records = collectFactureTrackingRecords(client);
+  const current = records.find(record=>record.id === id);
+  if(!current) return;
+  const nextStatus = current.status === 'paid' ? 'unpaid' : 'paid';
+  const dossiers = Array.isArray(client.dossiers) ? client.dossiers : [];
+  const changedEntries = [];
+  dossiers.forEach((dossier, dossierIndex)=>{
+    const invoiceRecords = Array.isArray(dossier?.factureInvoices) ? dossier.factureInvoices : [];
+    let changed = false;
+    const nextRecords = invoiceRecords.map(rawRecord=>{
+      const record = normalizeFactureTrackingRecord(rawRecord);
+      if(!record || record.id !== id) return rawRecord;
+      changed = true;
+      return {
+        ...record,
+        status: nextStatus,
+        paidAt: nextStatus === 'paid' ? new Date().toISOString() : ''
+      };
+    });
+    if(changed){
+      dossier.factureInvoices = nextRecords;
+      changedEntries.push({ client, dossier, dossierIndex });
+    }
+  });
+  if(!changedEntries.length) return;
+  handleDossierDataChange({ audience: false });
+  for(const entry of changedEntries){
+    await persistDossierPatchNow({
+      action: 'update',
+      clientId: Number(entry.client.id),
+      dossierIndex: Number(entry.dossierIndex),
+      dossier: entry.dossier
+    }, { source: 'facture-paid-status' });
+  }
+  renderFactureTracking();
+}
+
 function getFactureProcesVerbalData(){
+  if(currentFacturePreviewRecord){
+    const trackingData = buildFactureDataFromTrackingRecord(currentFacturePreviewRecord);
+    if(trackingData) return trackingData;
+  }
   const { client, dossier } = getFactureSelectedDossier();
-  const tranches = String($('factureTranchesHonoraireInput')?.value || dossier?.tranchesHonoraire || '').trim();
-  const amountText = getFactureDocumentAmount(tranches) || String(dossier?.montant || '').trim() || '0';
-  const amount = Number(String(amountText).replace(/\s+/g, '').replace(',', '.')) || 0;
+  const selectedProcedure = getFactureSelectedProcedure(dossier);
+  const lines = getFactureProcesVerbalLineEntries();
+  const currentTranche = String($('factureDocumentTypeSelect')?.value || 'Tranche 1').trim() || 'Tranche 1';
+  const invoiceRef = generateFactureInvoiceNumber(lines, currentTranche);
+  const tranches = '';
+  const amount = lines.reduce((sum, line)=>sum + (Number(line.amount) || 0), 0);
+  const taxeTotal = lines.reduce((sum, line)=>sum + (Number(line.taxe) || 0), 0);
+  const vignetteTotal = lines.reduce((sum, line)=>sum + (Number(line.vignette) || 0), 0);
+  const medTotal = lines.reduce((sum, line)=>sum + (Number(line.med) || 0), 0);
+  const fraisTimbrageTotal = lines.reduce((sum, line)=>sum + (Number(line.fraisTimbrage) || 0), 0);
+  const huissierAudienceTotal = lines.reduce((sum, line)=>sum + (Number(line.huissierAudience) || 0), 0);
+  const deplacementTotal = lines.reduce((sum, line)=>sum + (Number(line.deplacement) || 0), 0);
+  const fraisTotal = vignetteTotal + medTotal + fraisTimbrageTotal + huissierAudienceTotal + deplacementTotal;
   const tva = amount * 0.2;
   const totalTtc = amount + tva;
-  const invoiceRef = dossier?.referenceClient || dossier?.nRef || `Dossier ${Number(selectedFactureDossierIndex) + 1}`;
   const today = typeof formatDateDDMMYYYY === 'function' ? formatDateDDMMYYYY(new Date()) : new Date().toLocaleDateString('fr-FR');
+  const clientName = lines[0]?.client?.name || client?.name || '-';
+  const debiteurs = [...new Set(lines.map(line=>line.debiteur).filter(Boolean))].join(' | ') || dossier?.debiteur || '-';
+  const objet = lines.map(line=>`${line.procedure || 'Procedure'}${line.reference ? ` (${line.reference})` : ''}`).join(' | ')
+    || selectedProcedure || tranches || dossier?.procedure || 'Proces-verbal';
   return {
     client,
     dossier,
+    lines,
     tranches,
+    tranche: currentTranche,
     amount,
+    taxeTotal,
+    vignetteTotal,
+    medTotal,
+    fraisTimbrageTotal,
+    huissierAudienceTotal,
+    deplacementTotal,
+    fraisTotal,
+    netAPayer: taxeTotal + fraisTotal,
     tva,
     totalTtc,
     invoiceRef,
     today,
-    clientName: client?.name || '-',
-    debiteur: dossier?.debiteur || '-',
-    objet: tranches || dossier?.procedure || 'Proces-verbal'
+    clientName,
+    debiteur: debiteurs,
+    objet,
+    selectedProcedure
   };
 }
 
 function buildFactureProcesVerbalPreviewHtml(){
   const data = getFactureProcesVerbalData();
-  return `
-    <div class="facture-sheet">
-      <div class="facture-sheet-head">
-        <div class="facture-city-date">Casablanca le ${escapeHtml(data.today)}</div>
-        <div class="facture-brand">
-          <strong>SANLAM</strong>
-          <span>216 Boulevard Zerktouni Casablanca</span>
-          <span>ICE 000230054000034</span>
+  const lines = data.lines?.length ? data.lines : [];
+  const currentTranche = String(data.tranche || $('factureDocumentTypeSelect')?.value || 'Tranche 1').trim() || 'Tranche 1';
+  const factureNumber = data.invoiceRef || `${String(new Date().getFullYear()).slice(-2)}/${new Date().getFullYear()}`;
+  if(/^Tranche\s*4$/i.test(currentTranche)){
+    return `
+      <div class="facture-sheet facture-sheet-pro facture-sheet-tranche4">
+        <div class="facture-pro-client">${escapeHtml(data.clientName)}</div>
+        <div class="facture-pro-ice">ICE ${escapeHtml(data.client?.ice || data.client?.ICE || '001655642000019')}</div>
+        <div class="facture-pro-date">Casablanca le ${escapeHtml(data.today)}</div>
+        <div class="facture-pro-title">Facture N°${escapeHtml(factureNumber)}</div>
+        <div class="facture-pro-tranche">${escapeHtml(currentTranche)}</div>
+        <table class="facture-pro-table facture-tranche4-table">
+          <colgroup>
+            <col class="facture-t4-col-type">
+            <col class="facture-t4-col-ref-client">
+            <col class="facture-t4-col-nom">
+            <col class="facture-t4-col-procedure">
+            <col class="facture-t4-col-ref-dossier">
+            <col class="facture-t4-col-frais">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>TYPE</th>
+              <th>REF CLIENT</th>
+              <th>NOM</th>
+              <th>PROCEDURE</th>
+              <th>Réf dossier</th>
+              <th>FRAIS JUGEMENT</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lines.map(line=>`
+              <tr>
+                <td>${escapeHtml(line.type)}</td>
+                <td>${escapeHtml(line.refClient)}</td>
+                <td>${escapeHtml(line.nom)}</td>
+                <td>${escapeHtml(line.procedure)}</td>
+                <td>${escapeHtml(line.reference)}</td>
+                <td>${escapeHtml(formatFactureMoney(line.amount))}</td>
+              </tr>
+            `).join('')}
+            <tr class="facture-pro-total-row">
+              <td colspan="5"></td>
+              <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
+            </tr>
+          </tbody>
+        </table>
+        <table class="facture-pro-summary">
+          <tbody>
+            <tr><th>FRAIS JUGEMENT</th><td>${escapeHtml(formatFactureMoney(data.amount))}</td></tr>
+            <tr><th>TOTAL</th><td>${escapeHtml(formatFactureMoney(data.amount))}</td></tr>
+          </tbody>
+        </table>
+        <div class="facture-pro-footer">
+          <strong>WALID ARAQI HOUSSAINI</strong>
+          <span>Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3</span>
+          <span>Site internet : www.walidaraqi.com</span>
+          <span>Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com</span>
         </div>
       </div>
-      <div class="facture-sheet-title">Facture N ${escapeHtml(data.invoiceRef)}</div>
-      <table class="facture-sheet-meta">
-        <tbody>
-          <tr><th>Date</th><td>${escapeHtml(data.today)}</td></tr>
-          <tr><th>N</th><td>${escapeHtml(data.invoiceRef)}</td></tr>
-          <tr><th>Client</th><td>${escapeHtml(data.clientName)}</td></tr>
-          <tr><th>Debiteur</th><td>${escapeHtml(data.debiteur)}</td></tr>
-          <tr><th>Objet</th><td>${escapeHtml(data.objet)}</td></tr>
-        </tbody>
-      </table>
-      <table class="facture-sheet-lines">
+    `;
+  }
+  if(/^Tranche\s*3$/i.test(currentTranche)){
+    return `
+      <div class="facture-sheet facture-sheet-pro facture-sheet-tranche3">
+        <div class="facture-pro-client">${escapeHtml(data.clientName)}</div>
+        <div class="facture-pro-ice">ICE ${escapeHtml(data.client?.ice || data.client?.ICE || '001655642000019')}</div>
+        <div class="facture-pro-date">Casablanca le ${escapeHtml(data.today)}</div>
+        <div class="facture-pro-title">Facture N°${escapeHtml(factureNumber)}</div>
+        <div class="facture-pro-tranche">${escapeHtml(currentTranche)}</div>
+        <table class="facture-pro-table facture-tranche3-table">
+          <colgroup>
+            <col class="facture-t3-col-type">
+            <col class="facture-t3-col-ref-client">
+            <col class="facture-t3-col-nom">
+            <col class="facture-t3-col-procedure">
+            <col class="facture-t3-col-ref-dossier">
+            <col class="facture-t3-col-execution">
+            <col class="facture-t3-col-dossier-execution">
+            <col class="facture-t3-col-money">
+            <col class="facture-t3-col-money">
+            <col class="facture-t3-col-money">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>TYPE</th>
+              <th>REF CLIENT</th>
+              <th>NOM</th>
+              <th>PROCEDURE</th>
+              <th>Réf dossier</th>
+              <th>EXECUTION</th>
+              <th>DOSSIER EXECUTION</th>
+              <th>HONORAIRE 50%</th>
+              <th>TVA</th>
+              <th>TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lines.map(line=>{
+              const honoraire = Number(line.amount) || 0;
+              const tvaLine = honoraire * 0.2;
+              return `
+                <tr>
+                  <td>${escapeHtml(line.type)}</td>
+                  <td>${escapeHtml(line.refClient)}</td>
+                  <td>${escapeHtml(line.nom)}</td>
+                  <td>${escapeHtml(line.procedure)}</td>
+                  <td>${escapeHtml(line.reference)}</td>
+                  <td></td>
+                  <td></td>
+                  <td>${escapeHtml(formatFactureMoney(honoraire))}</td>
+                  <td>${escapeHtml(formatFactureMoney(tvaLine))}</td>
+                  <td>${escapeHtml(formatFactureMoney(honoraire + tvaLine))}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr class="facture-pro-total-row">
+              <td colspan="7"></td>
+              <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
+              <td>${escapeHtml(formatFactureMoney(data.tva))}</td>
+              <td>${escapeHtml(formatFactureMoney(data.totalTtc))}</td>
+            </tr>
+          </tbody>
+        </table>
+        <table class="facture-pro-summary">
+          <tbody>
+            <tr><th>HONORAIRE</th><td>${escapeHtml(formatFactureMoney(data.amount))}</td></tr>
+            <tr><th>TVA</th><td>${escapeHtml(formatFactureMoney(data.tva))}</td></tr>
+            <tr><th>TOTAL</th><td>${escapeHtml(formatFactureMoney(data.totalTtc))}</td></tr>
+          </tbody>
+        </table>
+        <div class="facture-pro-footer">
+          <strong>WALID ARAQI HOUSSAINI</strong>
+          <span>Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3</span>
+          <span>Site internet : www.walidaraqi.com</span>
+          <span>Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com</span>
+        </div>
+      </div>
+    `;
+  }
+  if(/^Tranche\s*2$/i.test(currentTranche)){
+    return `
+      <div class="facture-sheet facture-sheet-pro facture-sheet-tranche2">
+        <div class="facture-pro-client">${escapeHtml(data.clientName)}</div>
+        <div class="facture-pro-ice">ICE ${escapeHtml(data.client?.ice || data.client?.ICE || '001655642000019')}</div>
+        <div class="facture-pro-date">Casablanca le ${escapeHtml(data.today)}</div>
+        <div class="facture-pro-title">Facture N°${escapeHtml(factureNumber)}</div>
+        <div class="facture-pro-tranche">${escapeHtml(currentTranche)}</div>
+        <table class="facture-pro-table facture-tranche2-table">
+          <colgroup>
+            <col class="facture-t2-col-type">
+            <col class="facture-t2-col-ref-client">
+            <col class="facture-t2-col-nom">
+            <col class="facture-t2-col-procedure">
+            <col class="facture-t2-col-ref-dossier">
+            <col class="facture-t2-col-money">
+            <col class="facture-t2-col-money">
+            <col class="facture-t2-col-money">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>TYPE</th>
+              <th>REF CLIENT</th>
+              <th>NOM</th>
+              <th>PROCEDURE</th>
+              <th>Réf dossier</th>
+              <th>HONORAIRE 50%</th>
+              <th>TVA</th>
+              <th>TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lines.map(line=>{
+              const honoraire = Number(line.amount) || 0;
+              const tvaLine = honoraire * 0.2;
+              return `
+                <tr>
+                  <td>${escapeHtml(line.type)}</td>
+                  <td>${escapeHtml(line.refClient)}</td>
+                  <td>${escapeHtml(line.nom)}</td>
+                  <td>${escapeHtml(line.procedure)}</td>
+                  <td>${escapeHtml(line.reference)}</td>
+                  <td>${escapeHtml(formatFactureMoney(honoraire))}</td>
+                  <td>${escapeHtml(formatFactureMoney(tvaLine))}</td>
+                  <td>${escapeHtml(formatFactureMoney(honoraire + tvaLine))}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr class="facture-pro-total-row">
+              <td colspan="5"></td>
+              <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
+              <td>${escapeHtml(formatFactureMoney(data.tva))}</td>
+              <td>${escapeHtml(formatFactureMoney(data.totalTtc))}</td>
+            </tr>
+          </tbody>
+        </table>
+        <table class="facture-pro-summary">
+          <tbody>
+            <tr><th>HONORAIRE</th><td>${escapeHtml(formatFactureMoney(data.amount))}</td></tr>
+            <tr><th>TVA</th><td>${escapeHtml(formatFactureMoney(data.tva))}</td></tr>
+            <tr><th>TOTAL</th><td>${escapeHtml(formatFactureMoney(data.totalTtc))}</td></tr>
+          </tbody>
+        </table>
+        <div class="facture-pro-footer">
+          <strong>WALID ARAQI HOUSSAINI</strong>
+          <span>Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3</span>
+          <span>Site internet : www.walidaraqi.com</span>
+          <span>Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com</span>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="facture-sheet facture-sheet-pro">
+      <div class="facture-pro-client">${escapeHtml(data.clientName)}</div>
+      <div class="facture-pro-ice">ICE ${escapeHtml(data.client?.ice || data.client?.ICE || '001655642000019')}</div>
+      <div class="facture-pro-date">Casablanca le ${escapeHtml(data.today)}</div>
+      <div class="facture-pro-title">Facture N°${escapeHtml(factureNumber)}</div>
+      <div class="facture-pro-tranche">${escapeHtml(currentTranche)}</div>
+      <table class="facture-pro-table">
+        <colgroup>
+          <col class="facture-col-type">
+          <col class="facture-col-ref-client">
+          <col class="facture-col-nom">
+          <col class="facture-col-procedure">
+          <col class="facture-col-ref-dossier">
+          <col class="facture-col-money">
+          <col class="facture-col-money">
+          <col class="facture-col-money">
+          <col class="facture-col-frais">
+          <col class="facture-col-huissier">
+          <col class="facture-col-deplacement">
+          <col class="facture-col-ville">
+        </colgroup>
         <thead>
           <tr>
-            <th>Designation</th>
-            <th>Quantite</th>
-            <th>Prix unitaire</th>
-            <th>Montant</th>
+            <th>TYPE</th>
+            <th>REF CLIENT</th>
+            <th>NOM</th>
+            <th>PROCEDURE</th>
+            <th>Réf dossier</th>
+            <th>TAXE</th>
+            <th>VIGNETTE</th>
+            <th>MED</th>
+            <th class="yellow-head">FRAIS TIMBRAGE</th>
+            <th>HUISSIER AUDIENCE</th>
+            <th>DEPLACEMENT</th>
+            <th>VILLE</th>
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>Proces-verbal</td>
-            <td>1</td>
-            <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
-            <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
-          </tr>
-          <tr class="facture-total-row">
-            <td colspan="3">Total</td>
-            <td>${escapeHtml(formatFactureMoney(data.amount))}</td>
-          </tr>
-          <tr>
-            <td colspan="3">TVA 20%</td>
-            <td>${escapeHtml(formatFactureMoney(data.tva))}</td>
-          </tr>
-          <tr class="facture-total-row facture-ttc-row">
-            <td colspan="3">Total TTC</td>
-            <td>${escapeHtml(formatFactureMoney(data.totalTtc))}</td>
+          ${lines.map(line=>`
+            <tr>
+              <td>${escapeHtml(line.type)}</td>
+              <td>${escapeHtml(line.refClient)}</td>
+              <td>${escapeHtml(line.nom)}</td>
+              <td>${escapeHtml(line.procedure)}</td>
+              <td>${escapeHtml(line.reference)}</td>
+              <td>${escapeHtml(formatFactureMoney(line.taxe))}</td>
+              <td>${escapeHtml(formatFactureMoney(line.vignette))}</td>
+              <td>${escapeHtml(formatFactureMoney(line.med))}</td>
+              <td>${escapeHtml(formatFactureMoney(line.fraisTimbrage))}</td>
+              <td>${escapeHtml(formatFactureMoney(line.huissierAudience))}</td>
+              <td>${escapeHtml(formatFactureMoney(line.deplacement))}</td>
+              <td>${escapeHtml(line.ville)}</td>
+            </tr>
+          `).join('')}
+          <tr class="facture-pro-total-row">
+            <td colspan="5"></td>
+            <td>${escapeHtml(formatFactureMoney(data.taxeTotal))}</td>
+            <td>${escapeHtml(formatFactureMoney(data.vignetteTotal))}</td>
+            <td>${escapeHtml(formatFactureMoney(data.medTotal))}</td>
+            <td>${escapeHtml(formatFactureMoney(data.fraisTimbrageTotal))}</td>
+            <td>${escapeHtml(formatFactureMoney(data.huissierAudienceTotal))}</td>
+            <td>${escapeHtml(formatFactureMoney(data.deplacementTotal))}</td>
+            <td></td>
           </tr>
         </tbody>
       </table>
-      <div class="facture-sheet-signature">WALID ARAQI HOUSSAIN</div>
+      <table class="facture-pro-summary">
+        <tbody>
+          <tr><th>TAXE</th><td>${escapeHtml(formatFactureMoney(data.taxeTotal))}</td></tr>
+          <tr><th>FRAIS</th><td>${escapeHtml(formatFactureMoney(data.fraisTotal))}</td></tr>
+          <tr><th>MONTANT NET A PAYER</th><td>${escapeHtml(formatFactureMoney(data.netAPayer))}</td></tr>
+        </tbody>
+      </table>
+      <div class="facture-pro-footer">
+        <strong>WALID ARAQI HOUSSAINI</strong>
+        <span>Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3</span>
+        <span>Site internet : www.walidaraqi.com</span>
+        <span>Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com</span>
+      </div>
     </div>
   `;
 }
@@ -13612,7 +14371,7 @@ function buildFactureProcesVerbalPreviewHtml(){
 async function exportFactureProcesVerbalExcel(){
   if(!canExportData()) return alert('Acces refuse');
   const { dossier } = getFactureSelectedDossier();
-  if(!dossier) return alert('Choisir dossier');
+  if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
   const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
   if(!excelReady || typeof ExcelJS === 'undefined') return alert('Export Excel indisponible.');
 
@@ -13632,8 +14391,342 @@ async function exportFactureProcesVerbalExcel(){
     views: [{ showGridLines: false }]
   });
 
+  {
+    const invoiceLines = data.lines?.length ? data.lines : [];
+    const currentTranche = String(data.tranche || $('factureDocumentTypeSelect')?.value || 'Tranche 1').trim() || 'Tranche 1';
+    sheet.columns = [
+      { width: 12 }, { width: 14 }, { width: 24 }, { width: 16 },
+      { width: 18 }, { width: 12 }, { width: 12 }, { width: 12 },
+      { width: 16 }, { width: 17 }, { width: 15 }, { width: 16 }
+    ];
+    const border = {
+      top: { style: 'thin', color: { argb: 'FF111111' } },
+      left: { style: 'thin', color: { argb: 'FF111111' } },
+      bottom: { style: 'thin', color: { argb: 'FF111111' } },
+      right: { style: 'thin', color: { argb: 'FF111111' } }
+    };
+    const fillHeader = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF963D38' } };
+    const fillBlue = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3F8A9B' } };
+    const fillYellow = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+    sheet.views = [{ showGridLines: true }];
+    if(/^Tranche\s*4$/i.test(currentTranche)){
+      sheet.columns = [
+        { width: 16 }, { width: 18 }, { width: 28 },
+        { width: 20 }, { width: 18 }, { width: 20 }
+      ];
+      sheet.mergeCells('C2:E2');
+      sheet.getCell('C2').value = data.clientName;
+      sheet.getCell('C2').font = { name: 'Arial', bold: true, underline: true, size: 18 };
+      sheet.getCell('C2').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('C5:E5');
+      sheet.getCell('C5').value = `ICE ${data.client?.ice || data.client?.ICE || '001655642000019'}`;
+      sheet.getCell('C5').font = { name: 'Arial', bold: true, size: 14 };
+      sheet.getCell('C5').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('C6:E7');
+      sheet.getCell('C6').value = `Facture N°${data.invoiceRef || ''}`;
+      sheet.getCell('C6').fill = fillBlue;
+      sheet.getCell('C6').font = { name: 'Arial', bold: true, size: 20 };
+      sheet.getCell('C6').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getCell('F5').value = `Casablanca le ${data.today}`;
+      sheet.getCell('F5').font = { name: 'Cambria', size: 12 };
+      sheet.getCell('C8').value = currentTranche;
+      sheet.getCell('C8').font = { bold: true, color: { argb: 'FF7F1D1D' } };
+
+      const headerRow = 10;
+      const headers = ['TYPE', 'REF CLIENT', 'NOM', 'PROCEDURE', 'Ref dossier', 'FRAIS JUGEMENT'];
+      sheet.getRow(headerRow).values = headers;
+      headers.forEach((_, index)=>{
+        const cell = sheet.getCell(headerRow, index + 1);
+        cell.fill = fillHeader;
+        cell.font = { name: 'Cambria', bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = border;
+      });
+      invoiceLines.forEach((line, index)=>{
+        const rowNumber = headerRow + 1 + index;
+        const values = [line.type, line.refClient, line.nom, line.procedure, line.reference, Number(line.amount) || 0];
+        sheet.getRow(rowNumber).values = values;
+        values.forEach((_, cellIndex)=>{
+          const cell = sheet.getCell(rowNumber, cellIndex + 1);
+          cell.border = border;
+          cell.alignment = { horizontal: cellIndex === 5 ? 'right' : 'center', vertical: 'middle', wrapText: true };
+          if(cellIndex === 5) cell.numFmt = '#,##0.00';
+        });
+      });
+      const totalRow = headerRow + 1 + invoiceLines.length;
+      const totalCell = sheet.getCell(totalRow, 6);
+      totalCell.value = data.amount;
+      totalCell.fill = fillYellow;
+      totalCell.border = border;
+      totalCell.font = { bold: true };
+      totalCell.alignment = { horizontal: 'right', vertical: 'middle' };
+      totalCell.numFmt = '#,##0.00';
+
+      const footerRow = totalRow + 4;
+      sheet.mergeCells(`A${footerRow}:D${footerRow}`);
+      sheet.getCell(`A${footerRow}`).value = 'WALID ARAQI HOUSSAINI';
+      sheet.getCell(`A${footerRow}`).font = { bold: true, size: 18 };
+      sheet.mergeCells(`A${footerRow + 1}:F${footerRow + 1}`);
+      sheet.getCell(`A${footerRow + 1}`).value = 'Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3';
+      sheet.mergeCells(`A${footerRow + 2}:F${footerRow + 2}`);
+      sheet.getCell(`A${footerRow + 2}`).value = 'Site internet : www.walidaraqi.com';
+      sheet.mergeCells(`A${footerRow + 3}:F${footerRow + 3}`);
+      sheet.getCell(`A${footerRow + 3}`).value = 'Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com';
+      const t4Buffer = await workbook.xlsx.writeBuffer();
+      const t4Blob = new Blob([t4Buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const t4SafeRef = String(data.invoiceRef || currentTranche || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+      await saveBlobDirectOrDownload(t4Blob, `Facture_${t4SafeRef}.xlsx`);
+      return;
+    }
+    if(/^Tranche\s*3$/i.test(currentTranche)){
+      sheet.columns = [
+        { width: 14 }, { width: 16 }, { width: 26 }, { width: 19 }, { width: 17 },
+        { width: 14 }, { width: 18 }, { width: 17 }, { width: 14 }, { width: 16 }
+      ];
+      sheet.mergeCells('D2:F2');
+      sheet.getCell('D2').value = data.clientName;
+      sheet.getCell('D2').font = { name: 'Arial', bold: true, underline: true, size: 18 };
+      sheet.getCell('D2').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('D5:F5');
+      sheet.getCell('D5').value = `ICE ${data.client?.ice || data.client?.ICE || '001655642000019'}`;
+      sheet.getCell('D5').font = { name: 'Arial', bold: true, size: 14 };
+      sheet.getCell('D5').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('D6:F7');
+      sheet.getCell('D6').value = `Facture N°${data.invoiceRef || ''}`;
+      sheet.getCell('D6').fill = fillBlue;
+      sheet.getCell('D6').font = { name: 'Arial', bold: true, size: 20 };
+      sheet.getCell('D6').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getCell('I5').value = `Casablanca le ${data.today}`;
+      sheet.getCell('I5').font = { name: 'Cambria', size: 12 };
+      sheet.getCell('D8').value = currentTranche;
+      sheet.getCell('D8').font = { bold: true, color: { argb: 'FF7F1D1D' } };
+
+      const headerRow = 10;
+      const headers = ['TYPE', 'REF CLIENT', 'NOM', 'PROCEDURE', 'Ref dossier', 'EXECUTION', 'DOSSIER EXECUTION', 'HONORAIRE 50%', 'TVA', 'TOTAL'];
+      sheet.getRow(headerRow).values = headers;
+      headers.forEach((_, index)=>{
+        const cell = sheet.getCell(headerRow, index + 1);
+        cell.fill = fillHeader;
+        cell.font = { name: 'Cambria', bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = border;
+      });
+      invoiceLines.forEach((line, index)=>{
+        const rowNumber = headerRow + 1 + index;
+        const honoraire = Number(line.amount) || 0;
+        const tvaLine = honoraire * 0.2;
+        const values = [
+          line.type, line.refClient, line.nom, line.procedure, line.reference,
+          '', '', honoraire, tvaLine, honoraire + tvaLine
+        ];
+        sheet.getRow(rowNumber).values = values;
+        values.forEach((_, cellIndex)=>{
+          const cell = sheet.getCell(rowNumber, cellIndex + 1);
+          cell.border = border;
+          cell.alignment = { horizontal: cellIndex >= 7 ? 'right' : 'center', vertical: 'middle', wrapText: true };
+          if(cellIndex >= 7) cell.numFmt = '#,##0.00';
+        });
+      });
+      const totalRow = headerRow + 1 + invoiceLines.length;
+      [8,9,10].forEach(col=>{
+        const cell = sheet.getCell(totalRow, col);
+        cell.fill = fillYellow;
+        cell.border = border;
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        cell.numFmt = '#,##0.00';
+      });
+      sheet.getCell(totalRow, 8).value = data.amount;
+      sheet.getCell(totalRow, 9).value = data.tva;
+      sheet.getCell(totalRow, 10).value = data.totalTtc;
+
+      const footerRow = totalRow + 4;
+      sheet.mergeCells(`A${footerRow}:D${footerRow}`);
+      sheet.getCell(`A${footerRow}`).value = 'WALID ARAQI HOUSSAINI';
+      sheet.getCell(`A${footerRow}`).font = { bold: true, size: 18 };
+      sheet.mergeCells(`A${footerRow + 1}:J${footerRow + 1}`);
+      sheet.getCell(`A${footerRow + 1}`).value = 'Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3';
+      sheet.mergeCells(`A${footerRow + 2}:J${footerRow + 2}`);
+      sheet.getCell(`A${footerRow + 2}`).value = 'Site internet : www.walidaraqi.com';
+      sheet.mergeCells(`A${footerRow + 3}:J${footerRow + 3}`);
+      sheet.getCell(`A${footerRow + 3}`).value = 'Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com';
+      const t3Buffer = await workbook.xlsx.writeBuffer();
+      const t3Blob = new Blob([t3Buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const t3SafeRef = String(data.invoiceRef || currentTranche || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+      await saveBlobDirectOrDownload(t3Blob, `Facture_${t3SafeRef}.xlsx`);
+      return;
+    }
+    if(/^Tranche\s*2$/i.test(currentTranche)){
+      sheet.columns = [
+        { width: 15 }, { width: 17 }, { width: 28 }, { width: 20 },
+        { width: 18 }, { width: 17 }, { width: 14 }, { width: 16 }
+      ];
+      sheet.mergeCells('D2:F2');
+      sheet.getCell('D2').value = data.clientName;
+      sheet.getCell('D2').font = { name: 'Arial', bold: true, underline: true, size: 18 };
+      sheet.getCell('D2').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('D5:F5');
+      sheet.getCell('D5').value = `ICE ${data.client?.ice || data.client?.ICE || '001655642000019'}`;
+      sheet.getCell('D5').font = { name: 'Arial', bold: true, size: 14 };
+      sheet.getCell('D5').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.mergeCells('D6:F7');
+      sheet.getCell('D6').value = `Facture N°${data.invoiceRef || ''}`;
+      sheet.getCell('D6').fill = fillBlue;
+      sheet.getCell('D6').font = { name: 'Arial', bold: true, size: 20 };
+      sheet.getCell('D6').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getCell('H5').value = `Casablanca le ${data.today}`;
+      sheet.getCell('H5').font = { name: 'Cambria', size: 12 };
+      sheet.getCell('D8').value = currentTranche;
+      sheet.getCell('D8').font = { bold: true, color: { argb: 'FF7F1D1D' } };
+
+      const headerRow = 10;
+      const headers = ['TYPE', 'REF CLIENT', 'NOM', 'PROCEDURE', 'Ref dossier', 'HONORAIRE 50%', 'TVA', 'TOTAL'];
+      sheet.getRow(headerRow).values = headers;
+      headers.forEach((_, index)=>{
+        const cell = sheet.getCell(headerRow, index + 1);
+        cell.fill = fillHeader;
+        cell.font = { name: 'Cambria', bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = border;
+      });
+      invoiceLines.forEach((line, index)=>{
+        const rowNumber = headerRow + 1 + index;
+        const honoraire = Number(line.amount) || 0;
+        const tvaLine = honoraire * 0.2;
+        const values = [
+          line.type, line.refClient, line.nom, line.procedure, line.reference,
+          honoraire, tvaLine, honoraire + tvaLine
+        ];
+        sheet.getRow(rowNumber).values = values;
+        values.forEach((_, cellIndex)=>{
+          const cell = sheet.getCell(rowNumber, cellIndex + 1);
+          cell.border = border;
+          cell.alignment = { horizontal: cellIndex >= 5 ? 'right' : 'center', vertical: 'middle', wrapText: true };
+          if(cellIndex >= 5) cell.numFmt = '#,##0.00';
+        });
+      });
+      const totalRow = headerRow + 1 + invoiceLines.length;
+      [6,7,8].forEach(col=>{
+        const cell = sheet.getCell(totalRow, col);
+        cell.fill = fillYellow;
+        cell.border = border;
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        cell.numFmt = '#,##0.00';
+      });
+      sheet.getCell(totalRow, 6).value = data.amount;
+      sheet.getCell(totalRow, 7).value = data.tva;
+      sheet.getCell(totalRow, 8).value = data.totalTtc;
+
+      const footerRow = totalRow + 4;
+      sheet.mergeCells(`A${footerRow}:D${footerRow}`);
+      sheet.getCell(`A${footerRow}`).value = 'WALID ARAQI HOUSSAINI';
+      sheet.getCell(`A${footerRow}`).font = { bold: true, size: 18 };
+      sheet.mergeCells(`A${footerRow + 1}:H${footerRow + 1}`);
+      sheet.getCell(`A${footerRow + 1}`).value = 'Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3';
+      sheet.mergeCells(`A${footerRow + 2}:H${footerRow + 2}`);
+      sheet.getCell(`A${footerRow + 2}`).value = 'Site internet : www.walidaraqi.com';
+      sheet.mergeCells(`A${footerRow + 3}:H${footerRow + 3}`);
+      sheet.getCell(`A${footerRow + 3}`).value = 'Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com';
+      const t2Buffer = await workbook.xlsx.writeBuffer();
+      const t2Blob = new Blob([t2Buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const t2SafeRef = String(data.invoiceRef || currentTranche || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+      await saveBlobDirectOrDownload(t2Blob, `Facture_${t2SafeRef}.xlsx`);
+      return;
+    }
+    sheet.mergeCells('F2:H2');
+    sheet.getCell('F2').value = data.clientName;
+    sheet.getCell('F2').font = { name: 'Arial', bold: true, underline: true, size: 18 };
+    sheet.getCell('F2').alignment = { horizontal: 'center', vertical: 'middle' };
+    sheet.mergeCells('F5:H5');
+    sheet.getCell('F5').value = `ICE ${data.client?.ice || data.client?.ICE || '001655642000019'}`;
+    sheet.getCell('F5').font = { name: 'Arial', bold: true, size: 14 };
+    sheet.getCell('F5').alignment = { horizontal: 'center', vertical: 'middle' };
+    sheet.mergeCells('F6:H7');
+    sheet.getCell('F6').value = `Facture N°${data.invoiceRef || ''}`;
+    sheet.getCell('F6').fill = fillBlue;
+    sheet.getCell('F6').font = { name: 'Arial', bold: true, size: 20 };
+    sheet.getCell('F6').alignment = { horizontal: 'center', vertical: 'middle' };
+    sheet.getCell('J5').value = `Casablanca le ${data.today}`;
+    sheet.getCell('J5').font = { name: 'Cambria', size: 12 };
+    sheet.getCell('F8').value = currentTranche;
+    sheet.getCell('F8').font = { bold: true, color: { argb: 'FF7F1D1D' } };
+    const headerRow = 10;
+    const headers = ['TYPE', 'REF CLIENT', 'NOM', 'PROCEDURE', 'Réf dossier', 'TAXE', 'VIGNETTE', 'MED', 'FRAIS TIMBRAGE', 'HUISSIER AUDIENCE', 'DEPLACEMENT', 'VILLE'];
+    sheet.getRow(headerRow).values = headers;
+    headers.forEach((_, index)=>{
+      const cell = sheet.getCell(headerRow, index + 1);
+      cell.fill = index === 8 ? fillYellow : fillHeader;
+      cell.font = { name: 'Cambria', bold: true, color: { argb: index === 8 ? 'FF000000' : 'FFFFFFFF' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = border;
+    });
+    invoiceLines.forEach((line, index)=>{
+      const rowNumber = headerRow + 1 + index;
+      const values = [
+        line.type, line.refClient, line.nom, line.procedure, line.reference,
+        line.taxe, line.vignette, line.med, line.fraisTimbrage,
+        line.huissierAudience, line.deplacement, line.ville
+      ];
+      sheet.getRow(rowNumber).values = values;
+      values.forEach((_, cellIndex)=>{
+        const cell = sheet.getCell(rowNumber, cellIndex + 1);
+        cell.border = border;
+        cell.alignment = { horizontal: cellIndex >= 5 && cellIndex <= 10 ? 'right' : 'center', vertical: 'middle', wrapText: true };
+        if(cellIndex >= 5 && cellIndex <= 10) cell.numFmt = '#,##0.00';
+      });
+    });
+    const totalRow = headerRow + 1 + invoiceLines.length;
+    [6,7,8,9,10,11,12].forEach(col=>{
+      sheet.getCell(totalRow, col).fill = fillYellow;
+      sheet.getCell(totalRow, col).border = border;
+      sheet.getCell(totalRow, col).font = { bold: true };
+      sheet.getCell(totalRow, col).alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+    sheet.getCell(totalRow, 6).value = data.taxeTotal;
+    sheet.getCell(totalRow, 7).value = data.vignetteTotal;
+    sheet.getCell(totalRow, 8).value = data.medTotal;
+    sheet.getCell(totalRow, 9).value = data.fraisTimbrageTotal;
+    sheet.getCell(totalRow, 10).value = data.huissierAudienceTotal;
+    sheet.getCell(totalRow, 11).value = data.deplacementTotal;
+    const summaryStart = totalRow + 3;
+    [['TAXE', data.taxeTotal], ['FRAIS', data.fraisTotal], ['MONTANT NET A PAYER', data.netAPayer]].forEach((row, index)=>{
+      const rowNumber = summaryStart + index;
+      sheet.getCell(rowNumber, 4).value = row[0];
+      sheet.getCell(rowNumber, 5).value = row[1];
+      [4,5].forEach(col=>{
+        const cell = sheet.getCell(rowNumber, col);
+        cell.border = border;
+        cell.font = { bold: true, color: { argb: 'FFC51616' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if(col === 5) cell.numFmt = '#,##0.00';
+      });
+    });
+    const footerRow = summaryStart + 5;
+    sheet.mergeCells(`A${footerRow}:D${footerRow}`);
+    sheet.getCell(`A${footerRow}`).value = 'WALID ARAQI HOUSSAINI';
+    sheet.getCell(`A${footerRow}`).font = { bold: true, size: 18 };
+    sheet.mergeCells(`A${footerRow + 1}:H${footerRow + 1}`);
+    sheet.getCell(`A${footerRow + 1}`).value = 'Adresse: Avenue El Hachemi el filali (Route Taddart), Résidence LUXORIA étage1 APT 3';
+    sheet.mergeCells(`A${footerRow + 2}:H${footerRow + 2}`);
+    sheet.getCell(`A${footerRow + 2}`).value = 'Site internet : www.walidaraqi.com';
+    sheet.mergeCells(`A${footerRow + 3}:H${footerRow + 3}`);
+    sheet.getCell(`A${footerRow + 3}`).value = 'Téléphone : 0522 80 50 36 / Email : contact@walidaraqi.com';
+    const proBuffer = await workbook.xlsx.writeBuffer();
+    const proBlob = new Blob([proBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const safeRef = String(data.invoiceRef || currentTranche || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+    await saveBlobDirectOrDownload(proBlob, `Facture_${safeRef}.xlsx`);
+    return;
+  }
+
   sheet.columns = [{ width: 15 }, { width: 18 }, { width: 18 }, { width: 14 }, { width: 18 }, { width: 18 }];
-  for(let rowIndex = 1; rowIndex <= 28; rowIndex += 1){
+  const invoiceLines = data.lines?.length ? data.lines : [{ designation: 'Proces-verbal', amount: data.amount }];
+  const firstLineRow = 17;
+  const totalRow = firstLineRow + invoiceLines.length;
+  const tvaRow = totalRow + 1;
+  const ttcRow = totalRow + 2;
+  const signatureRow = ttcRow + 4;
+  for(let rowIndex = 1; rowIndex <= Math.max(28, signatureRow); rowIndex += 1){
     sheet.getRow(rowIndex).height = 24;
   }
   const borderThin = {
@@ -13715,35 +14808,48 @@ async function exportFactureProcesVerbalExcel(){
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
 
-  merge('A17:C17');
-  sheet.getCell('A17').value = 'Proces-verbal';
-  sheet.getCell('D17').value = 1;
-  sheet.getCell('E17').value = data.amount;
-  sheet.getCell('F17').value = data.amount;
-  merge('A18:E18');
-  sheet.getCell('A18').value = 'Total';
-  sheet.getCell('F18').value = data.amount;
-  merge('A19:E19');
-  sheet.getCell('A19').value = 'TVA 20%';
-  sheet.getCell('F19').value = data.tva;
-  merge('A20:E20');
-  sheet.getCell('A20').value = 'Total TTC';
-  sheet.getCell('F20').value = data.totalTtc;
-  merge('A24:F24');
-  sheet.getCell('A24').value = 'WALID ARAQI HOUSSAIN';
-  sheet.getCell('A24').font = { name: 'Cambria', bold: true, size: 11 };
-  sheet.getCell('A24').alignment = { horizontal: 'center', vertical: 'middle' };
-  ['A18', 'F18', 'A20', 'F20'].forEach((cellAddress)=>{
+  invoiceLines.forEach((line, index)=>{
+    const rowNumber = firstLineRow + index;
+    merge(`A${rowNumber}:C${rowNumber}`);
+    sheet.getCell(`A${rowNumber}`).value = line.designation || 'Proces-verbal';
+    sheet.getCell(`D${rowNumber}`).value = 1;
+    sheet.getCell(`E${rowNumber}`).value = Number(line.amount) || 0;
+    sheet.getCell(`F${rowNumber}`).value = Number(line.amount) || 0;
+  });
+  merge(`A${totalRow}:E${totalRow}`);
+  sheet.getCell(`A${totalRow}`).value = 'Total';
+  sheet.getCell(`F${totalRow}`).value = data.amount;
+  merge(`A${tvaRow}:E${tvaRow}`);
+  sheet.getCell(`A${tvaRow}`).value = 'TVA 20%';
+  sheet.getCell(`F${tvaRow}`).value = data.tva;
+  merge(`A${ttcRow}:E${ttcRow}`);
+  sheet.getCell(`A${ttcRow}`).value = 'Total TTC';
+  sheet.getCell(`F${ttcRow}`).value = data.totalTtc;
+  merge(`A${signatureRow}:F${signatureRow}`);
+  sheet.getCell(`A${signatureRow}`).value = 'WALID ARAQI HOUSSAIN';
+  sheet.getCell(`A${signatureRow}`).font = { name: 'Cambria', bold: true, size: 11 };
+  sheet.getCell(`A${signatureRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+  [`A${totalRow}`, `F${totalRow}`, `A${ttcRow}`, `F${ttcRow}`].forEach((cellAddress)=>{
     sheet.getCell(cellAddress).font = { name: 'Cambria', bold: true };
   });
-  ['A18', 'F18', 'A20', 'F20'].forEach((cellAddress)=>{
+  [`A${totalRow}`, `F${totalRow}`, `A${ttcRow}`, `F${ttcRow}`].forEach((cellAddress)=>{
     sheet.getCell(cellAddress).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lightGray } };
   });
-  ['D17', 'E17', 'F17', 'F18', 'F19', 'F20'].forEach((cellAddress)=>{
+  invoiceLines.forEach((line, index)=>{
+    const rowNumber = firstLineRow + index;
+    ['D', 'E', 'F'].forEach(col=>{
+      sheet.getCell(`${col}${rowNumber}`).alignment = { horizontal: 'right', vertical: 'middle' };
+    });
+  });
+  [`F${totalRow}`, `F${tvaRow}`, `F${ttcRow}`].forEach((cellAddress)=>{
     sheet.getCell(cellAddress).alignment = { horizontal: 'right', vertical: 'middle' };
   });
-  styleRange('A16:F20', { border: borderThin });
-  ['E17', 'F17', 'F18', 'F19', 'F20'].forEach((cellAddress)=>{ sheet.getCell(cellAddress).numFmt = '#,##0.00'; });
+  styleRange(`A16:F${ttcRow}`, { border: borderThin });
+  invoiceLines.forEach((line, index)=>{
+    const rowNumber = firstLineRow + index;
+    [`E${rowNumber}`, `F${rowNumber}`].forEach((cellAddress)=>{ sheet.getCell(cellAddress).numFmt = '#,##0.00'; });
+  });
+  [`F${totalRow}`, `F${tvaRow}`, `F${ttcRow}`].forEach((cellAddress)=>{ sheet.getCell(cellAddress).numFmt = '#,##0.00'; });
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -13756,15 +14862,22 @@ function openFactureDocumentPreviewModal(){
   const content = $('factureDocumentPreviewContent');
   if(!modal || !content) return;
   const { dossier } = getFactureSelectedDossier();
-  if(!dossier) return alert('Choisir dossier');
+  if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
   content.innerHTML = buildFactureProcesVerbalPreviewHtml();
   modal.style.display = 'flex';
 }
 
+function openFactureTrackingPreview(invoiceId){
+  const record = getFactureTrackingRecordById(invoiceId);
+  if(!record) return alert('Facture introuvable');
+  currentFacturePreviewRecord = record;
+  openFactureDocumentPreviewModal();
+}
+
 function handleFactureDocumentTypeChange(){
-  const value = String($('factureDocumentTypeSelect')?.value || '').trim();
-  if(value === 'Proces-verbal' || value === 'Procès-verbal'){
-    openFactureDocumentPreviewModal();
+  const documentTypeSelect = $('factureDocumentTypeSelect');
+  if(documentTypeSelect && !String(documentTypeSelect.value || '').trim()){
+    documentTypeSelect.value = 'Tranche 1';
   }
 }
 
@@ -14606,12 +15719,14 @@ function resetAudienceFiltersUi(){
 function resetSuiviFiltersUi(){
   filterSuiviProcedure = 'all';
   filterSuiviTribunal = 'all';
+  filterSuiviFacture = 'all';
   filterSuiviStatus = 'all';
   filterSuiviCheckedFirst = false;
   filterSuiviAttDepotOnly = false;
   if($('filterGlobal')) $('filterGlobal').value = '';
   if($('filterSuiviProcedure')) $('filterSuiviProcedure').value = 'all';
   if($('filterSuiviTribunal')) $('filterSuiviTribunal').value = '';
+  if($('filterSuiviFacture')) $('filterSuiviFacture').value = 'all';
   if($('filterSuiviCheckedOrder')) $('filterSuiviCheckedOrder').value = 'default';
 }
 
@@ -15857,7 +16972,12 @@ async function applyExcelImport(payload, options = {}){
   }
 
   handleDossierDataChange({ audience: true });
-  await persistAppStateNow();
+  const importSaved = await persistAppStateNow();
+  if(!importSaved){
+    closeImportProgressModal(true);
+    alert("Import applique localement, mais la sauvegarde serveur n'a pas ete confirmee. Rechargez la page puis reessayez l'import.");
+    return;
+  }
   refreshPrimaryViews();
   const importDisplaySkipped = importSkippedRows.filter(isExcelImportDisplayError);
   const importDisplayWarnings = importWarningRows.filter(isExcelImportDisplayError);
@@ -16478,19 +17598,46 @@ function setupEvents(){
   $('factureClientSelect')?.addEventListener('change', handleFactureClientChange);
   $('factureDocumentTypeSelect')?.addEventListener('change', handleFactureDocumentTypeChange);
   $('factureDossierSearchInput')?.addEventListener('input', ()=>{
-    selectedFactureDossierIndex = -1;
     renderFactureDossierResults();
     renderFactureHonorairePanel();
   });
   $('factureDossierResults')?.addEventListener('click', (event)=>{
     const item = event.target?.closest?.('.facture-dossier-item');
     if(!item) return;
+    const procedureChoice = event.target?.closest?.('.facture-procedure-choice');
+    if(procedureChoice){
+      const safeIndex = Number(item.dataset.index);
+      if(Number.isInteger(safeIndex)){
+        selectedFactureDossierIndexes.add(safeIndex);
+        selectedFactureDossierIndex = safeIndex;
+        selectedFactureProcedure = String(procedureChoice.dataset.procedure || '').trim();
+        selectedFactureProceduresByDossier.set(safeIndex, selectedFactureProcedure);
+        renderFactureDossierResults();
+        renderFactureHonorairePanel();
+      }
+      return;
+    }
     selectFactureDossier(item.dataset.index);
   });
   $('saveFactureHonoraireBtn')?.addEventListener('click', ()=>{
     saveFactureHonoraire().catch((err)=>{
       console.error(err);
       alert('Erreur pendant la sauvegarde facture');
+    });
+  });
+  $('refreshFactureTrackingBtn')?.addEventListener('click', renderFactureTracking);
+  $('factureTrackingList')?.addEventListener('click', (event)=>{
+    if(event.target?.closest?.('.facture-paid-toggle')) return;
+    const item = event.target?.closest?.('.facture-tracking-item');
+    if(!item) return;
+    openFactureTrackingPreview(item.dataset.invoiceId);
+  });
+  $('factureTrackingList')?.addEventListener('dblclick', (event)=>{
+    const toggle = event.target?.closest?.('.facture-paid-toggle');
+    if(!toggle) return;
+    toggleFactureInvoicePaid(toggle.dataset.invoiceId).catch((err)=>{
+      console.error(err);
+      alert('Erreur pendant la mise a jour du paiement');
     });
   });
   $('exportImportErrorsBtn')?.addEventListener('click', ()=>{
@@ -16654,6 +17801,11 @@ function setupEvents(){
   $('filterSuiviProcedure')?.addEventListener('change', (e)=>{
     filterSuiviAttDepotOnly = false;
     filterSuiviProcedure = e.target.value;
+    renderSuivi();
+  });
+  $('filterSuiviFacture')?.addEventListener('change', (e)=>{
+    filterSuiviAttDepotOnly = false;
+    filterSuiviFacture = String(e.target?.value || 'all') === 'with' ? 'with' : 'all';
     renderSuivi();
   });
   $('filterSuiviTribunal')?.addEventListener('change', (e)=>{
@@ -18364,6 +19516,17 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
   const fileNames = Array.isArray(dossier?.files)
     ? dossier.files.map(f=>String(f?.name || '').trim()).filter(Boolean)
     : [];
+  const factureValues = Array.isArray(dossier?.factureInvoices)
+    ? dossier.factureInvoices.flatMap(record=>[
+        record?.invoiceRef,
+        record?.tranche,
+        record?.status === 'paid' ? 'facture payee' : 'facture non payee',
+        record?.clientName,
+        record?.objet,
+        record?.amount,
+        record?.totalTtc
+      ])
+    : [];
   const procedureDetailsValues = collectDeepValues(dossier?.procedureDetails || {});
   const diligenceValues = collectDeepValues(dossier?.diligence || {});
   const staticFields = [
@@ -18402,7 +19565,8 @@ function buildSuiviSearchHaystack(clientName, dossier, procedures, tribunaux){
     dossier?.sanlamSouscripteur || '',
     ...(Array.isArray(procedures) ? procedures : []),
     ...(Array.isArray(tribunaux) ? tribunaux : []),
-    ...fileNames
+    ...fileNames,
+    ...factureValues
   ];
   return [...staticFields, ...procedureDetailsValues, ...diligenceValues]
     .map(v=>normalizeCaseInsensitiveSearchText(v))
@@ -18466,6 +19630,13 @@ function getDiligenceSearchValues(row){
   return values
     .map(value=>normalizeDiligenceSearchQuery(value))
     .filter(Boolean);
+}
+
+function getDiligenceSearchHaystack(row){
+  if(!row || typeof row !== 'object') return '';
+  if(typeof row.__diligenceSearchHaystack === 'string') return row.__diligenceSearchHaystack;
+  row.__diligenceSearchHaystack = getDiligenceSearchValues(row).join(' ');
+  return row.__diligenceSearchHaystack;
 }
 
 function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData, draftData, row = null){
@@ -18623,7 +19794,30 @@ function getAudienceRowDedupeOrdonnanceRank(row){
   return 0;
 }
 
+function isAudienceAssRowFilledForDedupe(row){
+  const dateAudience = String(row?.draft?.dateAudience ?? row?.p?.audience ?? '').trim();
+  const juge = String(row?.draft?.juge ?? row?.p?.juge ?? '').trim();
+  const sort = String(row?.draft?.sort ?? row?.p?.sort ?? '').trim();
+  return !!(dateAudience || juge || sort);
+}
+
+function getAudienceAssDedupePreferredRank(row){
+  if(!isAudienceAssRow(row)) return 0;
+  const color = String(getAudienceRowEffectiveColor(row) || '').trim();
+  const allowedColor = !color || color === 'white' || color === 'green' || color === 'yellow';
+  const hasBlockingError = !!(row?.p?._missingGlobal || row?.p?._refClientMismatch || row?.p?._audienceImportErrorMessage);
+  return allowedColor && !hasBlockingError && isAudienceAssRowFilledForDedupe(row) ? 1 : 0;
+}
+
 function compareAudienceRowsForDedupe(existing, next){
+  if(isAudienceAssRow(existing) && isAudienceAssRow(next)){
+    const existingPreferredRank = getAudienceAssDedupePreferredRank(existing);
+    const nextPreferredRank = getAudienceAssDedupePreferredRank(next);
+    if(nextPreferredRank !== existingPreferredRank){
+      return nextPreferredRank - existingPreferredRank;
+    }
+  }
+
   const existingOrdonnanceRank = getAudienceRowDedupeOrdonnanceRank(existing);
   const nextOrdonnanceRank = getAudienceRowDedupeOrdonnanceRank(next);
   if(nextOrdonnanceRank !== existingOrdonnanceRank){
@@ -20783,8 +21977,7 @@ function getFilteredDiligenceRows(allRows){
     }
     if(!q) return true;
     if(executionOnlyQuery) return hasDiligenceExecutionNumber(row);
-    const searchValues = row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row));
-    return searchValues.some(value=>value.includes(q));
+    return getDiligenceSearchHaystack(row).includes(q);
   });
   
   // Tri chronologique
@@ -21515,6 +22708,16 @@ function getFactureSelectedDossier(){
   return { client, dossier: dossiers[dossierIndex], dossierIndex };
 }
 
+function getFactureSelectedDossierEntries(){
+  const client = getFactureSelectedClient();
+  const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+  if(!client) return [];
+  return [...selectedFactureDossierIndexes]
+    .map(index=>Number(index))
+    .filter(index=>Number.isInteger(index) && index >= 0 && index < dossiers.length)
+    .map(index=>({ client, dossier: dossiers[index], dossierIndex: index }));
+}
+
 function buildFactureDossierSearchText(dossier, client){
   return [
     client?.name,
@@ -21529,6 +22732,29 @@ function buildFactureDossierSearchText(dossier, client){
   ].map(value=>String(value || '').trim()).filter(Boolean).join(' ').toLowerCase();
 }
 
+function getFactureDossierProcedures(dossier){
+  const procedures = normalizeProcedures(dossier);
+  if(procedures.length) return procedures;
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? Object.keys(dossier.procedureDetails)
+    : [];
+  return details.map(value=>String(value || '').trim()).filter(Boolean);
+}
+
+function renderFactureProcedureBadges(procedures, dossierIndex){
+  const items = (Array.isArray(procedures) ? procedures : String(procedures || '').split(','))
+    .map(name=>String(name || '').trim())
+    .filter(Boolean);
+  if(!items.length) return '-';
+  const selected = String(selectedFactureProceduresByDossier.get(Number(dossierIndex)) || '').trim();
+  const pills = items.map(name=>{
+    const cls = getProcedureColorClass(name) || 'proc-autre';
+    const active = normalizeProcedureName(name) === normalizeProcedureName(selected) ? ' is-selected' : '';
+    return `<span class="proc-pill facture-procedure-choice ${cls}${active}" data-procedure="${escapeAttr(name)}" title="Choisir ${escapeAttr(name)}">${escapeHtml(name)}</span>`;
+  }).join('');
+  return `<span class="proc-pill-list">${pills}</span>`;
+}
+
 function renderFactureClientOptions(){
   const select = $('factureClientSelect');
   if(!select) return;
@@ -21537,6 +22763,9 @@ function renderFactureClientOptions(){
   if(!hasSelected){
     selectedFactureClientId = '';
     selectedFactureDossierIndex = -1;
+    selectedFactureDossierIndexes = new Set();
+    selectedFactureProcedure = '';
+    selectedFactureProceduresByDossier = new Map();
   }
   select.innerHTML = '<option value="">Choisir client</option>' + visibleClients
     .map(client=>`<option value="${escapeAttr(client.id)}">${escapeHtml(client.name || '-')}</option>`)
@@ -21552,40 +22781,55 @@ function renderFactureDossierResults(){
   const client = getFactureSelectedClient();
   const query = String(searchInput.value || '').trim().toLowerCase();
   if(!client || !query){
-    results.style.display = 'none';
-    results.innerHTML = '';
-    if(panel) panel.style.display = 'none';
-    selectedFactureDossierIndex = -1;
+    const selectedMatches = getFactureSelectedDossierEntries();
+    if(!selectedMatches.length){
+      results.style.display = 'none';
+      results.innerHTML = '';
+      if(panel) panel.style.display = 'none';
+      selectedFactureDossierIndex = -1;
+      return;
+    }
+    results.style.display = '';
+    results.innerHTML = renderFactureDossierResultItems(selectedMatches);
     return;
   }
   const dossiers = Array.isArray(client.dossiers) ? client.dossiers : [];
-  const selectedIndex = Number(selectedFactureDossierIndex);
-  const hasSelectedDossier = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < dossiers.length;
-  const matches = hasSelectedDossier
-    ? [{ dossier: dossiers[selectedIndex], index: selectedIndex }]
-    : dossiers
-      .map((dossier, index)=>({ dossier, index }))
-      .filter(({ dossier })=>buildFactureDossierSearchText(dossier, client).includes(query))
-      .slice(0, 60);
+  const selectedMatches = getFactureSelectedDossierEntries();
+  const seenIndexes = new Set(selectedMatches.map(entry=>Number(entry.dossierIndex)));
+  const matches = selectedMatches.concat(dossiers
+    .map((dossier, index)=>({ dossier, dossierIndex: index }))
+    .filter(({ dossier })=>buildFactureDossierSearchText(dossier, client).includes(query))
+    .filter(({ dossierIndex })=>{
+      if(seenIndexes.has(Number(dossierIndex))) return false;
+      seenIndexes.add(Number(dossierIndex));
+      return true;
+    })
+    .slice(0, 60));
   results.style.display = '';
   if(!matches.length){
     results.innerHTML = '<div class="facture-empty">Aucun dossier trouve.</div>';
     if(panel) panel.style.display = 'none';
-    selectedFactureDossierIndex = -1;
     return;
   }
-  results.innerHTML = matches.map(({ dossier, index })=>{
-    const active = Number(selectedFactureDossierIndex) === Number(index) ? ' is-active' : '';
-    const title = dossier?.referenceClient || dossier?.debiteur || `Dossier ${index + 1}`;
+  results.innerHTML = renderFactureDossierResultItems(matches);
+}
+
+function renderFactureDossierResultItems(matches){
+  return (matches || []).map(({ dossier, dossierIndex, index })=>{
+    const resolvedIndex = Number.isInteger(Number(dossierIndex)) ? Number(dossierIndex) : Number(index);
+    const active = selectedFactureDossierIndexes.has(resolvedIndex) ? ' is-active' : '';
+    const title = dossier?.referenceClient || dossier?.debiteur || `Dossier ${resolvedIndex + 1}`;
     const subtitle = [
       dossier?.debiteur,
       dossier?.procedure,
       dossier?.dateAffectation
     ].map(value=>String(value || '').trim()).filter(Boolean).join(' | ') || '-';
+    const procedureBadges = renderFactureProcedureBadges(getFactureDossierProcedures(dossier), resolvedIndex);
     return `
-      <button type="button" class="facture-dossier-item${active}" data-index="${index}">
+      <button type="button" class="facture-dossier-item${active}" data-index="${resolvedIndex}">
         <span class="facture-dossier-title">${escapeHtml(title)}</span>
         <span class="facture-dossier-subtitle">${escapeHtml(subtitle)}</span>
+        <span class="facture-dossier-procedures">${procedureBadges}</span>
       </button>
     `;
   }).join('');
@@ -21594,28 +22838,44 @@ function renderFactureDossierResults(){
 function renderFactureHonorairePanel(){
   const panel = $('factureHonorairePanel');
   const title = $('factureSelectedDossierTitle');
-  const input = $('factureTranchesHonoraireInput');
   const documentTypeSelect = $('factureDocumentTypeSelect');
-  if(!panel || !title || !input) return;
+  if(!panel || !title) return;
+  const selectedEntries = getFactureSelectedDossierEntries();
+  if(selectedEntries.length && !selectedEntries.some(entry=>Number(entry.dossierIndex) === Number(selectedFactureDossierIndex))){
+    selectedFactureDossierIndex = Number(selectedEntries[selectedEntries.length - 1]?.dossierIndex);
+  }
   const { client, dossier } = getFactureSelectedDossier();
   if(!client || !dossier){
     panel.style.display = 'none';
     title.textContent = '';
-    input.value = '';
     if(documentTypeSelect) documentTypeSelect.value = '';
+    renderFactureTracking();
     return;
   }
   panel.style.display = '';
-  title.textContent = [
+  const dossierTitle = [
     client.name || '-',
     dossier.referenceClient || dossier.debiteur || 'Dossier'
   ].filter(Boolean).join(' - ');
-  input.value = String(dossier.tranchesHonoraire || '');
-  if(documentTypeSelect) documentTypeSelect.value = String(dossier.factureDocumentType || '');
+  title.textContent = selectedEntries.length > 1
+    ? `${selectedEntries.length} dossiers selectionnes - ${dossierTitle}`
+    : dossierTitle;
+  if(documentTypeSelect) documentTypeSelect.value = String(dossier.factureDocumentType || 'Tranche 1');
+  renderFactureTracking();
 }
 
 function selectFactureDossier(index){
-  selectedFactureDossierIndex = Number(index);
+  const safeIndex = Number(index);
+  if(!Number.isInteger(safeIndex)) return;
+  selectedFactureProcedure = '';
+  if(selectedFactureDossierIndexes.has(safeIndex)){
+    selectedFactureDossierIndexes.delete(safeIndex);
+    selectedFactureProceduresByDossier.delete(safeIndex);
+    selectedFactureDossierIndex = Number([...selectedFactureDossierIndexes].pop() ?? -1);
+  }else{
+    selectedFactureDossierIndexes.add(safeIndex);
+    selectedFactureDossierIndex = safeIndex;
+  }
   renderFactureDossierResults();
   renderFactureHonorairePanel();
 }
@@ -21623,6 +22883,9 @@ function selectFactureDossier(index){
 function handleFactureClientChange(){
   selectedFactureClientId = String($('factureClientSelect')?.value || '').trim();
   selectedFactureDossierIndex = -1;
+  selectedFactureDossierIndexes = new Set();
+  selectedFactureProcedure = '';
+  selectedFactureProceduresByDossier = new Map();
   const wrap = $('factureDossierSearchWrap');
   const input = $('factureDossierSearchInput');
   const results = $('factureDossierResults');
@@ -21634,6 +22897,7 @@ function handleFactureClientChange(){
     results.innerHTML = '';
   }
   if(panel) panel.style.display = 'none';
+  renderFactureTracking();
   if(input && selectedFactureClientId) input.focus();
 }
 
@@ -21641,43 +22905,49 @@ async function saveFactureHonoraire(){
   if(!canEditData()) return alert('Acces refuse');
   const { client, dossier, dossierIndex } = getFactureSelectedDossier();
   if(!client || !dossier) return alert('Choisir dossier');
-  const input = $('factureTranchesHonoraireInput');
+  const selectedEntries = getFactureSelectedDossierEntries();
+  const targetEntries = selectedEntries.length ? selectedEntries : [{ client, dossier, dossierIndex }];
   const documentTypeSelect = $('factureDocumentTypeSelect');
-  const before = String(dossier.tranchesHonoraire || '');
-  const after = String(input?.value || '').trim();
-  const documentTypeBefore = String(dossier.factureDocumentType || '');
-  const documentTypeAfter = String(documentTypeSelect?.value || '').trim();
-  dossier.tranchesHonoraire = after;
-  dossier.factureDocumentType = documentTypeAfter;
-  queueDossierHistoryEntry(dossier, {
-    source: 'facture',
-    field: 'tranchesHonoraire',
-    before,
-    after
-  }, { immediate: true });
-  if(documentTypeBefore !== documentTypeAfter){
-    queueDossierHistoryEntry(dossier, {
-      source: 'facture',
-      field: 'factureDocumentType',
-      before: documentTypeBefore,
-      after: documentTypeAfter
-    }, { immediate: true });
-  }
+  const documentTypeAfter = String(documentTypeSelect?.value || 'Tranche 1').trim() || 'Tranche 1';
+  if(documentTypeSelect) documentTypeSelect.value = documentTypeAfter;
+  const factureData = getFactureProcesVerbalData();
+  const factureTrackingRecord = buildFactureTrackingRecord(factureData, documentTypeAfter);
+  targetEntries.forEach(entry=>{
+    const targetDossier = entry.dossier;
+    const documentTypeBefore = String(targetDossier.factureDocumentType || '');
+    targetDossier.factureDocumentType = documentTypeAfter;
+    upsertFactureTrackingRecord(targetDossier, factureTrackingRecord);
+    if(documentTypeBefore !== documentTypeAfter){
+      queueDossierHistoryEntry(targetDossier, {
+        source: 'facture',
+        field: 'factureDocumentType',
+        before: documentTypeBefore,
+        after: documentTypeAfter
+      }, { immediate: true });
+    }
+  });
   handleDossierDataChange({ audience: false });
-  await persistDossierPatchNow({
-    action: 'update',
-    clientId: Number(client.id),
-    dossierIndex: Number(dossierIndex),
-    dossier
-  }, { source: 'facture' });
+  for(const entry of targetEntries){
+    await persistDossierPatchNow({
+      action: 'update',
+      clientId: Number(entry.client.id),
+      dossierIndex: Number(entry.dossierIndex),
+      dossier: entry.dossier
+    }, { source: 'facture' });
+  }
   const feedback = $('factureSaveFeedback');
   if(feedback){
-    feedback.textContent = 'Enregistre.';
+    feedback.textContent = targetEntries.length > 1 ? `${targetEntries.length} dossiers enregistres.` : 'Enregistre.';
     feedback.className = 'audience-save-feedback success';
     feedback.style.display = '';
     setTimeout(()=>{ feedback.style.display = 'none'; }, 1800);
   }
   markDeferredRenderDirty('suivi');
+  renderFactureTracking();
+  if(/^Tranche\s+\d+$/i.test(documentTypeAfter) || documentTypeAfter === 'Proces-verbal' || documentTypeAfter === 'Procès-verbal'){
+    currentFacturePreviewRecord = null;
+    openFactureDocumentPreviewModal();
+  }
 }
 
 function renderFacture(options = {}){
@@ -21688,6 +22958,7 @@ function renderFacture(options = {}){
   if(wrap) wrap.style.display = selected ? '' : 'none';
   renderFactureDossierResults();
   renderFactureHonorairePanel();
+  renderFactureTracking();
 }
 
 function renderEquipe(options = {}){
@@ -22698,8 +23969,11 @@ function getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet){
   return 3;
 }
 
-function getFilteredAudienceRows(allRows = null){
-  const rows = dedupeAudienceRowsForDisplay(Array.isArray(allRows) ? allRows : getAudienceRows());
+function getFilteredAudienceRows(allRows = null, options = {}){
+  const inputRows = Array.isArray(allRows) ? allRows : getAudienceRows();
+  const rows = options?.alreadyDeduped === true
+    ? inputRows
+    : dedupeAudienceRowsForDisplay(inputRows);
   const priorityColor = getActiveAudiencePriorityColor();
   const strictPriorityColorFilter = (!filterAudienceErrorsOnly && filterAudienceColor === 'all' && priorityColor === 'closed')
     ? priorityColor
@@ -22714,7 +23988,9 @@ function getFilteredAudienceRows(allRows = null){
   if(rows === audienceFilteredRowsCacheInput && filterKey === audienceFilteredRowsCacheKey){
     return orderAudienceRowsByCheckedSelection(audienceFilteredRowsCacheOutput);
   }
-  const duplicateKeySet = getAudienceDuplicateKeySet(rows);
+  const duplicateKeySet = options?.duplicateKeySet instanceof Set
+    ? options.duplicateKeySet
+    : getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
   const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
   const filtered = rows.filter(row=>{
@@ -23441,7 +24717,17 @@ function getAudienceAssProcedureReferenceValue(row){
   return getAudienceRowDraftReferenceValue(row);
 }
 
+function composeAudienceAssDisplayDedupeKey(row){
+  const refDossier = normalizeAudienceDossierLookupKey(getAudienceAssProcedureReferenceValue(row));
+  const debiteur = normalizeLooseText(row?.d?.debiteur || '').toLowerCase();
+  if(isLetterOnlyClientReference(refDossier) || !debiteur || !refDossier) return '';
+  return `ass__${debiteur}__${refDossier}`;
+}
+
 function buildAudienceDisplayDedupeKey(row){
+  if(isAudienceAssRow(row)){
+    return composeAudienceAssDisplayDedupeKey(row);
+  }
   const procedure = isAudienceAssRow(row)
     ? 'ass'
     : String(row?.procKey || '').trim().toLowerCase();
@@ -24571,7 +25857,7 @@ function updateAudienceDraftFromEncoded(keyEncoded, field, value){
   updateAudienceDraft(decodeURIComponent(String(keyEncoded)), field, value);
 }
 
-function parseStrictAudienceDateValue(value){
+function parseStrictAudienceDateValueLegacyUnused(value){
   const text = String(value || '')
     .trim()
     .replace(/[٠-٩]/g, d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
@@ -24592,7 +25878,7 @@ function parseStrictAudienceDateValue(value){
   };
 }
 
-function setAudienceDateInputValidationState(inputEl){
+function setAudienceDateInputValidationStateLegacyUnused(inputEl){
   if(!inputEl) return false;
   const errorEl = inputEl.parentElement?.querySelector('.date-inline-error');
   const { invalid } = parseStrictAudienceDateValue(inputEl.value);
@@ -24604,13 +25890,13 @@ function setAudienceDateInputValidationState(inputEl){
   return invalid;
 }
 
-function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
+function handleAudienceDateInputFromEncodedLegacyUnused(keyEncoded, field, inputEl){
   if(!inputEl) return;
   updateAudienceDraftFromEncoded(keyEncoded, field, inputEl.value);
   setAudienceDateInputValidationState(inputEl);
 }
 
-function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDraftInputFromEncodedLegacyUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24630,7 +25916,7 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   return true;
 }
 
-function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDepotDraftInputFromEncodedLegacyUnused(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24689,7 +25975,7 @@ function handleAudienceDateInputFromEncoded(keyEncoded, field, inputEl){
   setAudienceDateInputValidationState(inputEl);
 }
 
-function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDraftInputFromEncodedLegacyInline(value, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();
@@ -24710,7 +25996,7 @@ function normalizeAudienceDateDraftInputFromEncoded(keyEncoded, inputEl){
   return true;
 }
 
-function normalizeAudienceDateDepotDraftInputFromEncoded(keyEncoded, inputEl){
+function normalizeAudienceDateDepotDraftInputFromEncodedLegacyInline(keyEncoded, inputEl){
   if(!inputEl) return false;
   const key = decodeURIComponent(String(keyEncoded));
   const raw = String(inputEl.value || '').trim();

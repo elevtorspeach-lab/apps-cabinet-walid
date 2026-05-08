@@ -472,20 +472,30 @@
             </div>
           </div>
 
+          <div class="facture-tracking-card">
+            <div class="facture-tracking-head">
+              <div>
+                <strong>Suivi des factures</strong>
+                <span id="factureTrackingCount">0 facture</span>
+              </div>
+              <button id="refreshFactureTrackingBtn" class="btn-primary" type="button">
+                <i class="fa-solid fa-rotate"></i> Actualiser
+              </button>
+            </div>
+            <div id="factureTrackingList" class="facture-tracking-list"></div>
+          </div>
+
           <div id="factureDossierResults" class="facture-dossier-results" style="display:none;"></div>
 
           <div id="factureHonorairePanel" class="facture-honoraire-panel" style="display:none;">
             <div class="facture-selected-title" id="factureSelectedDossierTitle"></div>
-            <div class="form-group creation-layout-card facture-honoraire-card">
-              <label for="factureTranchesHonoraireInput">Tranches d'honoraire</label>
-              <textarea id="factureTranchesHonoraireInput" rows="6" placeholder="Tranches d'honoraire"></textarea>
-            </div>
             <div class="form-group creation-layout-card facture-document-card">
-              <label for="factureDocumentTypeSelect">Type document</label>
-              <select id="factureDocumentTypeSelect">
-                <option value="">Choisir type</option>
-                <option value="Proces-verbal">Proces-verbal</option>
-                <option value="Jugement">Jugement</option>
+              <label for="factureDocumentTypeSelect">Tranches d'honoraire</label>
+              <select id="factureDocumentTypeSelect" aria-label="Tranches d'honoraire">
+                <option value="Tranche 1">Tranche 1</option>
+                <option value="Tranche 2">Tranche 2</option>
+                <option value="Tranche 3">Tranche 3</option>
+                <option value="Tranche 4">Tranche 4</option>
               </select>
             </div>
             <div class="facture-actions">
@@ -898,6 +908,13 @@
           />
           <datalist id="filterSuiviTribunalOptions">
           </datalist>
+        </div>
+        <div class="audience-color-filter">
+          <label for="filterSuiviFacture">Facture</label>
+          <select id="filterSuiviFacture">
+            <option value="all">Toutes</option>
+            <option value="with">Avec facture</option>
+          </select>
         </div>
         <label id="suiviCheckedCount" class="audience-checked-count" for="suiviPageSelectionToggle">
           <input id="suiviPageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page suivi">

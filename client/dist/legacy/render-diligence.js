@@ -541,7 +541,7 @@ function renderDiligence(options = {}){
     runDiligenceFilterInWorker(
       narrowedRows.map((row, idx)=>({
         idx,
-        values: row.__diligenceSearchValues || (row.__diligenceSearchValues = getDiligenceSearchValues(row)),
+        haystack: getDiligenceSearchHaystack(row),
         executionNo: String(row?.details?.executionNo || '').trim()
       })),
       diligenceQuery,
