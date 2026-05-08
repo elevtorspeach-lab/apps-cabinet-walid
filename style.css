@@ -1051,6 +1051,103 @@ tr:hover{background:#f1f5f9}
   box-shadow:0 10px 22px rgba(234,88,12,.22);
 }
 
+.creation-facture-status-card{
+  border:1px solid rgba(37,99,235,.22);
+  border-radius:14px;
+  background:linear-gradient(180deg,#f8fbff,#ffffff);
+  padding:12px;
+  box-shadow:0 10px 24px rgba(15,23,42,.08);
+}
+
+.creation-facture-status-head{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+  color:#0f2d65;
+}
+
+.creation-facture-status-head i{
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color:#1d4ed8;
+  background:#dbeafe;
+}
+
+.creation-facture-status-head strong{
+  display:block;
+  font-size:.95rem;
+}
+
+.creation-facture-status-head span{
+  color:#64748b;
+  font-size:.78rem;
+}
+
+.creation-facture-status-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:8px;
+}
+
+.creation-facture-status-item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  border:1px solid #dbeafe;
+  border-left:5px solid #f59e0b;
+  border-radius:10px;
+  padding:9px 10px;
+  background:#fff;
+}
+
+.creation-facture-status-item.is-paid{
+  border-left-color:#16a34a;
+}
+
+.creation-facture-status-main{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+}
+
+.creation-facture-status-main strong{
+  color:#1d4ed8;
+  font-size:.78rem;
+}
+
+.creation-facture-status-main span{
+  color:#0f172a;
+  font-weight:800;
+  font-size:.88rem;
+}
+
+.creation-facture-status-main small{
+  color:#64748b;
+  font-size:.74rem;
+}
+
+.creation-facture-status-badge{
+  flex:0 0 auto;
+  border-radius:999px;
+  padding:6px 9px;
+  font-size:.74rem;
+  font-weight:900;
+  color:#92400e;
+  background:#fef3c7;
+}
+
+.creation-facture-status-badge.is-paid{
+  color:#166534;
+  background:#dcfce7;
+}
+
 .creation-form-layout{
   grid-column:1 / -1;
   display:flex;
@@ -5363,6 +5460,39 @@ td[data-label="Actions"] .btn-danger{
   min-height:34px;
 }
 
+.facture-tracking-search{
+  flex:1 1 220px;
+  max-width:360px;
+  min-height:34px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid #bfdbfe;
+  border-radius:8px;
+  background:#f8fbff;
+  padding:0 10px;
+}
+
+.facture-tracking-search i{
+  color:#2563eb;
+  font-size:.8rem;
+}
+
+.facture-tracking-search input{
+  flex:1;
+  min-width:0;
+  border:0;
+  background:transparent;
+  padding:7px 0;
+  box-shadow:none;
+  font-size:.82rem;
+}
+
+.facture-tracking-search input:focus{
+  border:0;
+  box-shadow:none;
+}
+
 .facture-tracking-list{
   display:flex;
   flex-direction:column;
@@ -5457,6 +5587,33 @@ td[data-label="Actions"] .btn-danger{
   display:flex;
   justify-content:flex-start;
   overflow:auto;
+}
+
+.facture-document-preview-content.is-editing [contenteditable="true"]{
+  outline:2px dashed rgba(37,99,235,.42);
+  outline-offset:-2px;
+  cursor:text;
+}
+
+.facture-document-preview-content.is-editing [contenteditable="true"]:focus{
+  outline:3px solid rgba(37,99,235,.68);
+  background:#eff6ff;
+}
+
+.facture-document-preview-content.is-edited::before{
+  content:"Version modifiee";
+  position:sticky;
+  left:0;
+  top:0;
+  z-index:4;
+  align-self:flex-start;
+  margin:8px;
+  padding:6px 9px;
+  border-radius:999px;
+  background:#fef3c7;
+  color:#92400e;
+  font-size:.76rem;
+  font-weight:900;
 }
 
 .facture-sheet{

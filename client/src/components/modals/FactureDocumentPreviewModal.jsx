@@ -5,6 +5,15 @@ function FactureDocumentPreviewModal() {
         <div className="modal-head">
           <h2><i className="fa-solid fa-file-invoice"></i> Apercu facture</h2>
           <div className="preview-modal-actions">
+            <button id="toggleFacturePreviewEditBtn" className="btn-primary" type="button">
+              <i className="fa-solid fa-pen-to-square"></i> Modifier
+            </button>
+            <button id="addFacturePreviewRowBtn" className="btn-primary" type="button" disabled>
+              <i className="fa-solid fa-plus"></i> Ligne
+            </button>
+            <button id="addFacturePreviewColumnBtn" className="btn-primary" type="button" disabled>
+              <i className="fa-solid fa-table-columns"></i> Case
+            </button>
             <button id="exportFactureDocumentExcelBtn" className="btn-success" type="button">
               <i className="fa-regular fa-file-excel"></i> Exporter Excel
             </button>

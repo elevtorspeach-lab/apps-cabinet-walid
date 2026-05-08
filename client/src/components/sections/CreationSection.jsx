@@ -21,6 +21,17 @@ function CreationSection() {
             <span>Champs prioritaires: Client, Référence Client, Date d&apos;affectation et Débiteur.</span>
           </div>
 
+          <div id="creationFactureStatusCard" className="creation-facture-status-card full" style={{ display: 'none' }}>
+            <div className="creation-facture-status-head">
+              <i className="fa-solid fa-file-invoice"></i>
+              <div>
+                <strong>Factures du dossier</strong>
+                <span id="creationFactureStatusCount">0 facture</span>
+              </div>
+            </div>
+            <div id="creationFactureStatusList" className="creation-facture-status-list"></div>
+          </div>
+
           <div className="creation-form-layout full">
             <div className="creation-form-row creation-form-row-top-extended">
               <div className="creation-form-top-left">

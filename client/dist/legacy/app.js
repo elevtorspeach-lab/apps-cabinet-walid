@@ -148,6 +148,8 @@ let selectedFactureProceduresByDossier = new Map();
 let currentFactureInvoiceKey = '';
 let currentFactureInvoiceNumber = '';
 let currentFacturePreviewRecord = null;
+let facturePreviewEditMode = false;
+let facturePreviewEdited = false;
 let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
@@ -13592,8 +13594,86 @@ function closeFactureDocumentPreviewModal(){
   const modal = $('factureDocumentPreviewModal');
   const content = $('factureDocumentPreviewContent');
   currentFacturePreviewRecord = null;
+  setFacturePreviewEditMode(false);
+  facturePreviewEdited = false;
   if(content) content.innerHTML = '';
   if(modal) modal.style.display = 'none';
+}
+
+function getFacturePreviewEditableNodes(){
+  const content = $('factureDocumentPreviewContent');
+  if(!content) return [];
+  return [...content.querySelectorAll('.facture-sheet td, .facture-sheet th, .facture-sheet div')];
+}
+
+function markFacturePreviewEdited(){
+  facturePreviewEdited = true;
+  $('factureDocumentPreviewContent')?.classList.add('is-edited');
+}
+
+function setFacturePreviewEditMode(enabled){
+  facturePreviewEditMode = !!enabled;
+  const content = $('factureDocumentPreviewContent');
+  const toggleBtn = $('toggleFacturePreviewEditBtn');
+  const rowBtn = $('addFacturePreviewRowBtn');
+  const colBtn = $('addFacturePreviewColumnBtn');
+  if(content) content.classList.toggle('is-editing', facturePreviewEditMode);
+  getFacturePreviewEditableNodes().forEach(node=>{
+    node.contentEditable = facturePreviewEditMode ? 'true' : 'false';
+    node.spellcheck = false;
+  });
+  if(toggleBtn){
+    toggleBtn.innerHTML = facturePreviewEditMode
+      ? '<i class="fa-solid fa-check"></i> Terminer'
+      : '<i class="fa-solid fa-pen-to-square"></i> Modifier';
+  }
+  if(rowBtn) rowBtn.disabled = !facturePreviewEditMode;
+  if(colBtn) colBtn.disabled = !facturePreviewEditMode;
+}
+
+function toggleFacturePreviewEditMode(){
+  setFacturePreviewEditMode(!facturePreviewEditMode);
+}
+
+function getActiveFacturePreviewTable(){
+  const active = document.activeElement;
+  return active?.closest?.('#factureDocumentPreviewContent table')
+    || $('factureDocumentPreviewContent')?.querySelector('.facture-pro-table, .facture-sheet-lines, table')
+    || null;
+}
+
+function addFacturePreviewRow(){
+  if(!facturePreviewEditMode) return;
+  const table = getActiveFacturePreviewTable();
+  const tbody = table?.tBodies?.[0];
+  if(!tbody) return;
+  const rows = [...tbody.rows].filter(row=>!row.classList.contains('facture-pro-total-row') && !row.classList.contains('facture-total-row') && !row.classList.contains('facture-ttc-row'));
+  const sourceRow = rows[rows.length - 1] || tbody.rows[tbody.rows.length - 1];
+  if(!sourceRow) return;
+  const nextRow = sourceRow.cloneNode(true);
+  [...nextRow.cells].forEach(cell=>{
+    cell.textContent = '';
+    cell.contentEditable = 'true';
+    cell.spellcheck = false;
+  });
+  const totalRow = [...tbody.rows].find(row=>row.classList.contains('facture-pro-total-row') || row.classList.contains('facture-total-row'));
+  tbody.insertBefore(nextRow, totalRow || null);
+  markFacturePreviewEdited();
+}
+
+function addFacturePreviewColumn(){
+  if(!facturePreviewEditMode) return;
+  const table = getActiveFacturePreviewTable();
+  if(!table) return;
+  [...table.rows].forEach(row=>{
+    const sourceCell = row.cells[row.cells.length - 1];
+    const nextCell = sourceCell ? sourceCell.cloneNode(true) : document.createElement(row.parentElement?.tagName === 'THEAD' ? 'th' : 'td');
+    nextCell.textContent = '';
+    nextCell.contentEditable = 'true';
+    nextCell.spellcheck = false;
+    row.appendChild(nextCell);
+  });
+  markFacturePreviewEdited();
 }
 
 function getFactureDocumentAmount(value){
@@ -13800,6 +13880,43 @@ function normalizeFactureTrackingRecord(record){
   };
 }
 
+function renderCreationFactureStatus(dossier = null){
+  const card = $('creationFactureStatusCard');
+  const count = $('creationFactureStatusCount');
+  const list = $('creationFactureStatusList');
+  if(!card || !list) return;
+  const records = Array.isArray(dossier?.factureInvoices)
+    ? dossier.factureInvoices.map(normalizeFactureTrackingRecord).filter(Boolean)
+    : [];
+  if(!records.length){
+    card.style.display = 'none';
+    list.innerHTML = '';
+    if(count) count.textContent = '0 facture';
+    return;
+  }
+  card.style.display = '';
+  if(count) count.textContent = `${records.length} facture${records.length > 1 ? 's' : ''}`;
+  list.innerHTML = records
+    .slice()
+    .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .map(record=>{
+      const paid = record.status === 'paid';
+      const amount = /^Tranche\s*[14]$/i.test(record.tranche) ? record.amount : record.totalTtc;
+      return `
+        <div class="creation-facture-status-item ${paid ? 'is-paid' : 'is-unpaid'}">
+          <div class="creation-facture-status-main">
+            <strong>${escapeHtml(record.tranche || 'Tranche')}</strong>
+            <span>Facture ${escapeHtml(record.invoiceRef || '-')}</span>
+            <small>${escapeHtml(formatFactureTrackingDate(record.createdAt))} · ${escapeHtml(formatFactureMoney(amount))}</small>
+          </div>
+          <span class="creation-facture-status-badge ${paid ? 'is-paid' : 'is-unpaid'}">
+            ${paid ? 'Payee' : 'Non payee'}
+          </span>
+        </div>
+      `;
+    }).join('');
+}
+
 function getFactureTrackingRecordById(invoiceId){
   const id = String(invoiceId || '').trim();
   if(!id) return null;
@@ -13932,13 +14049,58 @@ function formatFactureTrackingDate(value){
   return '-';
 }
 
+function getFactureTrackingSearchText(record){
+  const normalized = normalizeFactureTrackingRecord(record);
+  if(!normalized) return '';
+  const paidLabel = normalized.status === 'paid' ? 'payee facture payee payer' : 'non payee facture non payee impayee';
+  const lineValues = Array.isArray(normalized.lines)
+    ? normalized.lines.flatMap(line=>[
+        line?.refClient,
+        line?.nom,
+        line?.procedure,
+        line?.reference,
+        line?.type,
+        line?.ville,
+        line?.amount
+      ])
+    : [];
+  return [
+    normalized.invoiceRef,
+    normalized.tranche,
+    normalized.clientName,
+    normalized.objet,
+    normalized.amount,
+    normalized.totalTtc,
+    formatFactureTrackingDate(normalized.createdAt),
+    paidLabel,
+    ...(Array.isArray(normalized.dossierLabels) ? normalized.dossierLabels : []),
+    ...lineValues
+  ].map(value=>normalizeCaseInsensitiveSearchText(value)).filter(Boolean).join(' ');
+}
+
+function filterFactureTrackingRecords(records){
+  const query = normalizeCaseInsensitiveSearchText($('factureTrackingSearchInput')?.value || '');
+  if(!query) return records;
+  const tokens = query.split(/\s+/).map(token=>token.trim()).filter(Boolean);
+  if(!tokens.length) return records;
+  return records.filter(record=>{
+    const haystack = record.__factureTrackingSearchText || (record.__factureTrackingSearchText = getFactureTrackingSearchText(record));
+    return tokens.every(token=>haystack.includes(token));
+  });
+}
+
 function renderFactureTracking(){
   const list = $('factureTrackingList');
   const count = $('factureTrackingCount');
   if(!list) return;
   const client = getFactureSelectedClient();
   const records = collectFactureTrackingRecords(client);
-  if(count) count.textContent = `${records.length} facture${records.length > 1 ? 's' : ''}`;
+  const filteredRecords = filterFactureTrackingRecords(records);
+  if(count){
+    count.textContent = filteredRecords.length === records.length
+      ? `${records.length} facture${records.length > 1 ? 's' : ''}`
+      : `${filteredRecords.length}/${records.length} facture${records.length > 1 ? 's' : ''}`;
+  }
   if(!client){
     list.innerHTML = '<div class="facture-tracking-empty">Choisir client pour voir le suivi.</div>';
     return;
@@ -13947,7 +14109,11 @@ function renderFactureTracking(){
     list.innerHTML = '<div class="facture-tracking-empty">Aucune facture enregistree pour ce client.</div>';
     return;
   }
-  list.innerHTML = records.map(record=>{
+  if(!filteredRecords.length){
+    list.innerHTML = '<div class="facture-tracking-empty">Aucune facture ne correspond au filtre.</div>';
+    return;
+  }
+  list.innerHTML = filteredRecords.map(record=>{
     const paid = record.status === 'paid';
     const statusLabel = paid ? 'Payee' : 'Non payee';
     const statusClass = paid ? ' is-paid' : ' is-unpaid';
@@ -14368,8 +14534,86 @@ function buildFactureProcesVerbalPreviewHtml(){
   `;
 }
 
+async function exportEditedFacturePreviewExcel(){
+  if(!canExportData()) return alert('Acces refuse');
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
+  if(!excelReady || typeof ExcelJS === 'undefined') return alert('Export Excel indisponible.');
+  const sheetNode = $('factureDocumentPreviewContent')?.querySelector('.facture-sheet');
+  if(!sheetNode) return alert('Apercu facture indisponible.');
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Cabinet Walid Araqi';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Facture modifiee', {
+    pageSetup: {
+      paperSize: 9,
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 1
+    },
+    views: [{ showGridLines: true }]
+  });
+  sheet.columns = Array.from({ length: 14 }, ()=>({ width: 18 }));
+
+  const border = {
+    top: { style: 'thin', color: { argb: 'FF111111' } },
+    left: { style: 'thin', color: { argb: 'FF111111' } },
+    bottom: { style: 'thin', color: { argb: 'FF111111' } },
+    right: { style: 'thin', color: { argb: 'FF111111' } }
+  };
+
+  let rowNumber = 1;
+  const addTextRow = (text, bold = false)=>{
+    const safeText = String(text || '').trim();
+    if(!safeText) return;
+    const row = sheet.getRow(rowNumber);
+    row.getCell(1).value = safeText;
+    row.getCell(1).font = { bold, size: bold ? 14 : 11 };
+    row.getCell(1).alignment = { wrapText: true, vertical: 'middle' };
+    rowNumber += 1;
+  };
+
+  [...sheetNode.children].forEach(child=>{
+    if(child.tagName === 'TABLE'){
+      const rows = [...child.rows];
+      rows.forEach(domRow=>{
+        const excelRow = sheet.getRow(rowNumber);
+        [...domRow.cells].forEach((cell, index)=>{
+          const excelCell = excelRow.getCell(index + 1);
+          const text = String(cell.innerText || cell.textContent || '').trim();
+          const numberText = text.replace(/\s+/g, '').replace(',', '.');
+          const numericValue = Number(numberText);
+          excelCell.value = text && Number.isFinite(numericValue) && /^-?\d+(\.\d+)?$/.test(numberText)
+            ? numericValue
+            : text;
+          excelCell.border = border;
+          excelCell.alignment = { horizontal: index === 0 ? 'left' : 'center', vertical: 'middle', wrapText: true };
+          if(domRow.parentElement?.tagName === 'THEAD' || cell.tagName === 'TH'){
+            excelCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF963D38' } };
+          }
+        });
+        rowNumber += 1;
+      });
+      rowNumber += 1;
+      return;
+    }
+    addTextRow(child.innerText || child.textContent || '', child.classList.contains('facture-pro-title') || child.classList.contains('facture-sheet-title'));
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const safeRef = String(getFactureProcesVerbalData()?.invoiceRef || 'facture_modifiee').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+  await saveBlobDirectOrDownload(blob, `Facture_${safeRef}_modifiee.xlsx`);
+}
+
 async function exportFactureProcesVerbalExcel(){
   if(!canExportData()) return alert('Acces refuse');
+  if(facturePreviewEdited){
+    await exportEditedFacturePreviewExcel();
+    return;
+  }
   const { dossier } = getFactureSelectedDossier();
   if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
   const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
@@ -14864,6 +15108,8 @@ function openFactureDocumentPreviewModal(){
   const { dossier } = getFactureSelectedDossier();
   if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
   content.innerHTML = buildFactureProcesVerbalPreviewHtml();
+  facturePreviewEdited = false;
+  setFacturePreviewEditMode(false);
   modal.style.display = 'flex';
 }
 
@@ -17587,6 +17833,12 @@ function setupEvents(){
   $('closeImportResultModalBtn')?.addEventListener('click', closeImportResultModal);
   $('closeExportPreviewModalBtn')?.addEventListener('click', closeExportPreviewModal);
   $('closeFactureDocumentPreviewModalBtn')?.addEventListener('click', closeFactureDocumentPreviewModal);
+  $('toggleFacturePreviewEditBtn')?.addEventListener('click', toggleFacturePreviewEditMode);
+  $('addFacturePreviewRowBtn')?.addEventListener('click', addFacturePreviewRow);
+  $('addFacturePreviewColumnBtn')?.addEventListener('click', addFacturePreviewColumn);
+  $('factureDocumentPreviewContent')?.addEventListener('input', ()=>{
+    if(facturePreviewEditMode) markFacturePreviewEdited();
+  });
   $('exportFactureDocumentExcelBtn')?.addEventListener('click', ()=>{
     exportFactureProcesVerbalExcel().catch((err)=>{
       console.error(err);
@@ -17626,6 +17878,7 @@ function setupEvents(){
     });
   });
   $('refreshFactureTrackingBtn')?.addEventListener('click', renderFactureTracking);
+  $('factureTrackingSearchInput')?.addEventListener('input', debounce(renderFactureTracking, 80));
   $('factureTrackingList')?.addEventListener('click', (event)=>{
     if(event.target?.closest?.('.facture-paid-toggle')) return;
     const item = event.target?.closest?.('.facture-tracking-item');
@@ -19011,6 +19264,9 @@ async function addDossier(){
       importUid: String(previousImportMeta?.importUid || '').trim() || createImportTrackingId('dossier'),
       importGlobalBatchId: String(previousImportMeta?.importGlobalBatchId || '').trim(),
       importAudienceBatchId: String(previousImportMeta?.importAudienceBatchId || '').trim(),
+      factureInvoices: Array.isArray(previousImportMeta?.factureInvoices)
+        ? previousImportMeta.factureInvoices.map(record=>({ ...record }))
+        : [],
       isManualEntry: editingDossier ? previousImportMeta?.isManualEntry === true : true,
       isAudienceOrphanImport: previousImportMeta?.isAudienceOrphanImport === true,
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
@@ -19936,6 +20192,7 @@ function editDossier(clientId, index){
   ])];
   renderProcedureDetails(renderProcList);
   applyProcedureDraftToCards(details);
+  renderCreationFactureStatus(d);
   const addBtn = $('addDossierBtn');
   if(addBtn) addBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Mettre à jour';
 }
@@ -19993,6 +20250,7 @@ function resetCreationForm(clientId = ''){
   if($('fileInput')) $('fileInput').value = '';
   if($('fileList')) $('fileList').innerHTML = '';
   renderProcedureMontantGroups();
+  renderCreationFactureStatus(null);
 
   const selectClient = $('selectClient');
   if(selectClient){

@@ -32,6 +32,10 @@ function FactureSection() {
                 <strong>Suivi des factures</strong>
                 <span id="factureTrackingCount">0 facture</span>
               </div>
+              <div className="facture-tracking-search">
+                <i className="fa-solid fa-magnifying-glass"></i>
+                <input id="factureTrackingSearchInput" type="text" placeholder="Filtrer factures..." autoComplete="off" />
+              </div>
               <button id="refreshFactureTrackingBtn" className="btn-primary" type="button">
                 <i className="fa-solid fa-rotate"></i> Actualiser
               </button>

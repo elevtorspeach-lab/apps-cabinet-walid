@@ -478,6 +478,10 @@
                 <strong>Suivi des factures</strong>
                 <span id="factureTrackingCount">0 facture</span>
               </div>
+              <div class="facture-tracking-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="factureTrackingSearchInput" type="text" placeholder="Filtrer factures..." autocomplete="off">
+              </div>
               <button id="refreshFactureTrackingBtn" class="btn-primary" type="button">
                 <i class="fa-solid fa-rotate"></i> Actualiser
               </button>
@@ -645,6 +649,17 @@
           <div class="creation-priority-banner full">
             <i class="fa-solid fa-bolt"></i>
             <span>Champs prioritaires: Client, Référence Client, Date d’affectation et Débiteur.</span>
+          </div>
+
+          <div id="creationFactureStatusCard" class="creation-facture-status-card full" style="display:none;">
+            <div class="creation-facture-status-head">
+              <i class="fa-solid fa-file-invoice"></i>
+              <div>
+                <strong>Factures du dossier</strong>
+                <span id="creationFactureStatusCount">0 facture</span>
+              </div>
+            </div>
+            <div id="creationFactureStatusList" class="creation-facture-status-list"></div>
           </div>
 
           <div class="creation-form-layout full">
@@ -1079,6 +1094,15 @@
     <div class="modal-head">
       <h2><i class="fa-solid fa-file-invoice"></i> Apercu facture</h2>
       <div class="preview-modal-actions">
+        <button id="toggleFacturePreviewEditBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-pen-to-square"></i> Modifier
+        </button>
+        <button id="addFacturePreviewRowBtn" class="btn-primary" type="button" disabled>
+          <i class="fa-solid fa-plus"></i> Ligne
+        </button>
+        <button id="addFacturePreviewColumnBtn" class="btn-primary" type="button" disabled>
+          <i class="fa-solid fa-table-columns"></i> Case
+        </button>
         <button id="exportFactureDocumentExcelBtn" class="btn-success" type="button">
           <i class="fa-regular fa-file-excel"></i> Exporter Excel
         </button>
