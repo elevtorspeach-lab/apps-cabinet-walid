@@ -23441,16 +23441,7 @@ function getAudienceAssProcedureReferenceValue(row){
   return getAudienceRowDraftReferenceValue(row);
 }
 
-function isImportedAudienceDuplicateSource(row){
-  return !!(
-    row?.d?.importGlobalBatchId
-    || row?.d?.importAudienceBatchId
-    || row?.p?._audienceImportBatchId
-  );
-}
-
 function buildAudienceDisplayDedupeKey(row){
-  if(isImportedAudienceDuplicateSource(row)) return '';
   const procedure = isAudienceAssRow(row)
     ? 'ass'
     : String(row?.procKey || '').trim().toLowerCase();
@@ -23466,7 +23457,6 @@ function buildAudienceDisplayDedupeKey(row){
 }
 
 function buildAudienceDuplicateKey(row){
-  if(isImportedAudienceDuplicateSource(row)) return '';
   if(typeof row?.__dupKey === 'string') return row.__dupKey;
   if(row?.p?._missingGlobal || row?.p?._audienceImportErrorMessage) return '';
   // Audience rows are unique per procedure for the same dossier/debiteur/tribunal.
