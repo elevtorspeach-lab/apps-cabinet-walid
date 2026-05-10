@@ -257,7 +257,9 @@ let pendingRemoteLiveUpdateOptions = {
 };
 let lastPingMs = null;
 let lastLiveDelayMs = null;
+let lastLiveUpdatedAtMs = null;
 let syncMetricsRenderQueued = false;
+let syncMetricsLiveTimer = null;
 let loginAttemptCount = 0;
 let loginLockedUntil = 0;
 let loginInFlight = false;
@@ -556,6 +558,7 @@ const CONTENT_ZOOM_MIN = 0.3;
 const CONTENT_ZOOM_MAX = 1.4;
 const CONTENT_ZOOM_STEP = 0.05;
 const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
+const REMOTE_SYNC_PING_INTERVAL_MS = 15000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 18;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
 const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
@@ -2832,8 +2835,19 @@ function formatLastSyncDelay(value){
 function renderSyncMetrics(){
   const pingNode = $('syncPingMetric');
   const liveNode = $('syncLiveMetric');
+  if(Number.isFinite(lastLiveUpdatedAtMs)){
+    lastLiveDelayMs = Math.max(0, Date.now() - lastLiveUpdatedAtMs);
+  }
   if(pingNode) pingNode.innerText = `Ping: ${formatSyncMetricMs(lastPingMs)}`;
   if(liveNode) liveNode.innerText = `Derniere synchro: ${formatLastSyncDelay(lastLiveDelayMs)}`;
+}
+
+function ensureSyncMetricsLiveTimer(){
+  if(syncMetricsLiveTimer || typeof window === 'undefined') return;
+  syncMetricsLiveTimer = window.setInterval(()=>{
+    if(!Number.isFinite(lastLiveUpdatedAtMs)) return;
+    queueSyncMetricsRender();
+  }, 1000);
 }
 
 function queueSyncMetricsRender(){
@@ -2858,9 +2872,12 @@ function setPingMetric(value){
 function setLiveDelayMetricFromIso(updatedAtIso){
   const ts = Date.parse(String(updatedAtIso || ''));
   if(!Number.isFinite(ts)){
+    lastLiveUpdatedAtMs = null;
     lastLiveDelayMs = null;
   }else{
-    lastLiveDelayMs = Math.max(0, Date.now() - ts);
+    lastLiveUpdatedAtMs = ts;
+    lastLiveDelayMs = Math.max(0, Date.now() - lastLiveUpdatedAtMs);
+    ensureSyncMetricsLiveTimer();
   }
   queueSyncMetricsRender();
 }
@@ -5142,6 +5159,7 @@ async function refreshServerConnectionStatus(options = {}){
       }
     }
     setPingMetric(null);
+    lastLiveUpdatedAtMs = null;
     lastLiveDelayMs = null;
     renderSyncMetrics();
     setSyncStatus(remoteSyncStreamConnected ? 'pending' : 'error', remoteSyncStreamConnected ? 'Connexion serveur ralentie' : 'Serveur indisponible - reconnexion automatique');
@@ -8238,6 +8256,18 @@ async function serializeUploadedFiles(files){
   const result = [];
   for(const file of files){
     if(!file) continue;
+    if(file.id && file.url && file.name){
+      result.push({
+        id: String(file.id || ''),
+        name: String(file.name || ''),
+        size: Number(file.size || 0),
+        type: String(file.type || ''),
+        url: String(file.url || ''),
+        uploadedAt: String(file.uploadedAt || ''),
+        uploadedBy: String(file.uploadedBy || '')
+      });
+      continue;
+    }
     if(file.dataUrl && file.name){
       result.push({
         name: String(file.name || ''),
@@ -8248,20 +8278,62 @@ async function serializeUploadedFiles(files){
       continue;
     }
     if(typeof File !== 'undefined' && file instanceof File){
-      const dataUrl = await fileToDataUrl(file);
-      result.push({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        dataUrl
-      });
+      result.push(await uploadFileToServer(file));
     }
   }
   return result;
 }
 
+function buildAuthenticatedServerFileUrl(file, options = {}){
+  const rawUrl = String(file?.url || '').trim();
+  if(!rawUrl) return '';
+  const baseUrl = /^https?:\/\//i.test(rawUrl)
+    ? rawUrl
+    : `${API_BASE}${rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`}`;
+  try{
+    const url = new URL(baseUrl, window.location.href);
+    if(options.download === true) url.searchParams.set('download', '1');
+    if(hasRemoteAuthSession()) url.searchParams.set('token', remoteAuthToken);
+    return url.toString();
+  }catch(err){
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const params = [];
+    if(options.download === true) params.push('download=1');
+    if(hasRemoteAuthSession()) params.push(`token=${encodeURIComponent(remoteAuthToken)}`);
+    return params.length ? `${baseUrl}${sep}${params.join('&')}` : baseUrl;
+  }
+}
+
+async function uploadFileToServer(file){
+  if(!hasRemoteAuthSession()){
+    throw new Error('Connexion serveur requise pour envoyer le fichier.');
+  }
+  const dataUrl = await fileToDataUrl(file);
+  const res = await fetchWithTimeout(`${API_BASE}/files`, {
+    method: 'POST',
+    headers: buildRemoteAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      dataUrl
+    })
+  }, 180000);
+  if(res.status === 401){
+    handleUnauthorizedRemoteSession();
+    throw new Error('Session serveur expiree.');
+  }
+  const payload = await res.json().catch(()=>({}));
+  if(!res.ok || !payload?.file){
+    throw new Error(payload?.message || 'Upload fichier impossible.');
+  }
+  markApiBaseHealthy(API_BASE);
+  return payload.file;
+}
+
 function getStoredFileSource(file){
   if(!file) return '';
+  if(file.url) return buildAuthenticatedServerFileUrl(file);
   if(file.dataUrl) return String(file.dataUrl);
   if(typeof File !== 'undefined' && file instanceof File){
     return URL.createObjectURL(file);
@@ -8282,7 +8354,7 @@ function openStoredFile(file){
 }
 
 function downloadStoredFile(file){
-  const src = getStoredFileSource(file);
+  const src = file?.url ? buildAuthenticatedServerFileUrl(file, { download: true }) : getStoredFileSource(file);
   if(!src){
     alert('Fichier non disponible pour téléchargement');
     return;
@@ -12450,11 +12522,14 @@ function startRemoteSync(){
   }else{
     setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
+  let lastRemoteSyncPingAt = 0;
   refreshServerConnectionStatus({ force: true }).catch(()=>{});
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
-    if(remoteSyncHealthTick === 0){
-      refreshServerConnectionStatus({ force: !remoteServerReachable }).then((connected)=>{
+    const now = Date.now();
+    if((now - lastRemoteSyncPingAt) >= REMOTE_SYNC_PING_INTERVAL_MS){
+      lastRemoteSyncPingAt = now;
+      refreshServerConnectionStatus({ force: true }).then((connected)=>{
         if(connected && !remoteSyncStream){
           startRemoteSyncStream();
         }
@@ -12468,7 +12543,6 @@ function startRemoteSync(){
       return;
     }
     if(!remoteSyncStreamConnected){
-      const now = Date.now();
       if((now - remoteSyncLastRecoveryRefreshAt) >= REMOTE_SYNC_RECOVERY_REFRESH_INTERVAL_MS){
         remoteSyncLastRecoveryRefreshAt = now;
         queueRemoteStateRefresh(REMOTE_SYNC_EVENT_DEBOUNCE_MS);
@@ -18891,6 +18965,7 @@ function logout(){
   clientListSummaryCacheVersion = -1;
   clientListSummaryCacheUserKey = '';
   lastPingMs = null;
+  lastLiveUpdatedAtMs = null;
   lastLiveDelayMs = null;
   renderSyncMetrics();
   $('appContent').style.display='none';
@@ -19444,15 +19519,26 @@ async function addDossier(){
   }
 }
 
-function handleFiles(e){
+async function handleFiles(e){
   let files = [];
   if(e.dataTransfer?.files) files = [...e.dataTransfer.files];
   if(e.target?.files) files = [...e.target.files];
   if(!files.length) return;
-  files.forEach(f=>{
-    uploadedFiles.push(f);
-  });
-  renderFileList();
+  setSyncStatus('syncing', 'Envoi document serveur...');
+  try{
+    for(const f of files){
+      const uploaded = await uploadFileToServer(f);
+      uploadedFiles.push(uploaded);
+      renderFileList();
+    }
+    setSyncStatus('ok', 'Document envoye au serveur');
+  }catch(err){
+    console.error('Upload document impossible', err);
+    alert(err?.message || 'Upload document impossible.');
+    setSyncStatus('error', 'Upload document impossible');
+  }finally{
+    if(e.target) e.target.value = '';
+  }
 }
 
 function renderFileList(){

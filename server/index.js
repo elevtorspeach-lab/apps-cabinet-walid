@@ -40,6 +40,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const STATE_JOURNAL_FILE = path.join(DATA_DIR, 'state.journal');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const SERVER_BACKUP_RETENTION_COUNT = 20;
 const SERVER_BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000;
 const SERVER_SNAPSHOT_FLUSH_DELAY_MS = 3000;
@@ -392,6 +393,53 @@ app.use(express.static(WEB_DIR, {
     }
   }
 }));
+
+function sanitizeUploadFileName(value) {
+  const raw = String(value || 'document').trim() || 'document';
+  return raw
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 180)
+    || 'document';
+}
+
+function getUploadExtension(fileName) {
+  const ext = path.extname(sanitizeUploadFileName(fileName)).toLowerCase();
+  return /^[.][a-z0-9]{1,12}$/.test(ext) ? ext : '';
+}
+
+function parseDataUrlUpload(dataUrl) {
+  const text = String(dataUrl || '');
+  const match = text.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+  if (!match || !match[2]) {
+    throw new Error('Invalid upload data.');
+  }
+  const mimeType = String(match[1] || 'application/octet-stream').trim() || 'application/octet-stream';
+  return {
+    mimeType,
+    buffer: Buffer.from(match[3] || '', 'base64')
+  };
+}
+
+function buildUploadedFileUrl(id, name) {
+  return `/files/${encodeURIComponent(id)}/${encodeURIComponent(sanitizeUploadFileName(name))}`;
+}
+
+async function findUploadedFileRecord(id) {
+  const safeId = String(id || '').trim();
+  if (!/^[a-f0-9]{32}$/i.test(safeId)) return null;
+  const metaPath = path.join(UPLOADS_DIR, `${safeId}.json`);
+  const metaRaw = await fsp.readFile(metaPath, 'utf8').catch(() => '');
+  if (!metaRaw) return null;
+  const meta = JSON.parse(metaRaw);
+  const storedName = String(meta?.storedName || '').trim();
+  if (!storedName) return null;
+  const filePath = path.join(UPLOADS_DIR, storedName);
+  const resolvedBase = path.resolve(UPLOADS_DIR);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(`${resolvedBase}${path.sep}`)) return null;
+  return { meta, filePath };
+}
 
 async function ensureDataFile() {
   await db.initializeDatabase();
@@ -2034,6 +2082,56 @@ app.get('/api/dossiers/paginated', requireApiAuth, async (req, res) => {
   } catch (err) {
     console.error('Paginated dossiers error:', err);
     res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+app.use('/api/files', requireApiAuth);
+
+app.post('/api/files', async (req, res) => {
+  try {
+    await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+    const body = getRequestBodyObject(req);
+    const originalName = sanitizeUploadFileName(body?.name || 'document');
+    const declaredType = String(body?.type || '').trim();
+    const declaredSize = Number(body?.size || 0);
+    const parsed = parseDataUrlUpload(body?.dataUrl || '');
+    const id = crypto.randomBytes(16).toString('hex');
+    const extension = getUploadExtension(originalName);
+    const storedName = `${id}${extension}`;
+    const filePath = path.join(UPLOADS_DIR, storedName);
+    await fsp.writeFile(filePath, parsed.buffer);
+    const size = parsed.buffer.length;
+    const meta = {
+      id,
+      name: originalName,
+      storedName,
+      size: size || declaredSize || 0,
+      type: declaredType || parsed.mimeType || 'application/octet-stream',
+      url: buildUploadedFileUrl(id, originalName),
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: String(req.authSession?.username || '').trim()
+    };
+    await fsp.writeFile(path.join(UPLOADS_DIR, `${id}.json`), JSON.stringify(meta, null, 2), 'utf8');
+    return res.json({ ok: true, file: meta });
+  } catch (err) {
+    return sendJsonError(res, 400, 'FILE_UPLOAD_FAILED', 'File upload failed.', err);
+  }
+});
+
+app.get('/api/files/:id/:name?', async (req, res) => {
+  try {
+    const record = await findUploadedFileRecord(req.params.id);
+    if (!record) return sendJsonError(res, 404, 'FILE_NOT_FOUND', 'File not found.');
+    const { meta, filePath } = record;
+    const type = String(meta?.type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const name = sanitizeUploadFileName(meta?.name || req.params.name || 'document');
+    res.setHeader('Content-Type', type);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    const disposition = String(req.query?.download || '') === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${name.replace(/"/g, '_')}"`);
+    return res.sendFile(filePath);
+  } catch (err) {
+    return sendJsonError(res, 500, 'FILE_READ_FAILED', 'File read failed.', err);
   }
 });
 
