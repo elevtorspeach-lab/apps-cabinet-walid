@@ -150,6 +150,7 @@ let currentFactureInvoiceNumber = '';
 let currentFacturePreviewRecord = null;
 let facturePreviewEditMode = false;
 let facturePreviewEdited = false;
+let facturePreviewLastFocusedCell = null;
 let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
@@ -3864,8 +3865,10 @@ function getSelectedSuiviRowsForExport(){
   return out;
 }
 
-function buildSuiviSelectedExportDatasetBase(){
-  const rows = getSelectedSuiviRowsForExport();
+function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
+  const rows = Array.isArray(rowsOverride)
+    ? rowsOverride
+    : getSelectedSuiviRowsForExport();
   const omitWwAndMarque = shouldOmitSuiviWwAndMarqueColumns(rows);
   const omitCaution = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.caution);
   const omitCautionAdresse = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionAdresse);
@@ -4017,8 +4020,8 @@ function buildSuiviExportTableRows(rows, options = {}){
   });
 }
 
-function buildSuiviSelectedExportDataset(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
+function buildSuiviSelectedExportDataset(rowsOverride = null){
+  const dataset = buildSuiviSelectedExportDatasetBase(rowsOverride);
   return {
     ...dataset,
     tableRows: buildSuiviExportTableRows(dataset.rows, {
@@ -4029,8 +4032,8 @@ function buildSuiviSelectedExportDataset(){
   };
 }
 
-async function buildSuiviSelectedExportDatasetAsync(){
-  const dataset = buildSuiviSelectedExportDatasetBase();
+async function buildSuiviSelectedExportDatasetAsync(rowsOverride = null){
+  const dataset = buildSuiviSelectedExportDatasetBase(rowsOverride);
   const rowGroups = await mapChunked(dataset.rows, async (row)=>{
     return buildSuiviExportTableRows([row], {
       omitWwAndMarque: dataset.omitWwAndMarque,
@@ -13596,6 +13599,7 @@ function closeFactureDocumentPreviewModal(){
   currentFacturePreviewRecord = null;
   setFacturePreviewEditMode(false);
   facturePreviewEdited = false;
+  facturePreviewLastFocusedCell = null;
   if(content) content.innerHTML = '';
   if(modal) modal.style.display = 'none';
 }
@@ -13621,6 +13625,12 @@ function setFacturePreviewEditMode(enabled){
   getFacturePreviewEditableNodes().forEach(node=>{
     node.contentEditable = facturePreviewEditMode ? 'true' : 'false';
     node.spellcheck = false;
+    node.onfocus = ()=>{
+      if(node.matches?.('td, th')) facturePreviewLastFocusedCell = node;
+    };
+    node.onpointerdown = ()=>{
+      if(node.matches?.('td, th')) facturePreviewLastFocusedCell = node;
+    };
   });
   if(toggleBtn){
     toggleBtn.innerHTML = facturePreviewEditMode
@@ -13665,15 +13675,82 @@ function addFacturePreviewColumn(){
   if(!facturePreviewEditMode) return;
   const table = getActiveFacturePreviewTable();
   if(!table) return;
+  const active = document.activeElement?.closest?.('td, th') || facturePreviewLastFocusedCell;
+  const activeRow = active?.closest?.('tr');
+  const activeInTable = activeRow?.closest?.('table') === table;
+  const targetColumnIndex = activeInTable
+    ? getFacturePreviewVisualColumnIndex(active)
+    : getFacturePreviewLastVisualColumnIndex(table);
+  const insertColumnIndex = Number.isFinite(targetColumnIndex) ? targetColumnIndex + 1 : getFacturePreviewLastVisualColumnIndex(table) + 1;
+  insertFacturePreviewColGroupColumn(table, insertColumnIndex);
   [...table.rows].forEach(row=>{
-    const sourceCell = row.cells[row.cells.length - 1];
-    const nextCell = sourceCell ? sourceCell.cloneNode(true) : document.createElement(row.parentElement?.tagName === 'THEAD' ? 'th' : 'td');
-    nextCell.textContent = '';
-    nextCell.contentEditable = 'true';
-    nextCell.spellcheck = false;
-    row.appendChild(nextCell);
+    insertFacturePreviewCellAtVisualIndex(row, insertColumnIndex);
   });
   markFacturePreviewEdited();
+}
+
+function getFacturePreviewVisualColumnIndex(cell){
+  if(!cell) return -1;
+  let index = 0;
+  let node = cell;
+  while(node.previousElementSibling){
+    node = node.previousElementSibling;
+    index += Math.max(1, Number(node.colSpan) || 1);
+  }
+  return index;
+}
+
+function getFacturePreviewLastVisualColumnIndex(table){
+  const rows = [...(table?.rows || [])];
+  const maxCount = rows.reduce((max, row)=>{
+    const count = [...row.cells].reduce((sum, cell)=>sum + Math.max(1, Number(cell.colSpan) || 1), 0);
+    return Math.max(max, count);
+  }, 0);
+  return Math.max(0, maxCount - 1);
+}
+
+function insertFacturePreviewColGroupColumn(table, visualIndex){
+  const colgroup = table?.querySelector?.('colgroup');
+  if(!colgroup) return;
+  const cols = [...colgroup.children].filter(child=>child.tagName === 'COL');
+  const sourceCol = cols[Math.max(0, Math.min(visualIndex - 1, cols.length - 1))];
+  const nextCol = sourceCol ? sourceCol.cloneNode(false) : document.createElement('col');
+  if(sourceCol?.className){
+    nextCol.className = sourceCol.className;
+  }
+  colgroup.insertBefore(nextCol, cols[visualIndex] || null);
+}
+
+function insertFacturePreviewCellAtVisualIndex(row, visualIndex){
+  if(!row) return;
+  let cursor = 0;
+  const cells = [...row.cells];
+  for(let index = 0; index < cells.length; index += 1){
+    const cell = cells[index];
+    const span = Math.max(1, Number(cell.colSpan) || 1);
+    if(visualIndex > cursor && visualIndex < cursor + span){
+      cell.colSpan = span + 1;
+      return;
+    }
+    if(visualIndex === cursor){
+      const nextCell = cloneFacturePreviewInsertCell(row, cells[index - 1] || cell);
+      row.insertBefore(nextCell, cell);
+      return;
+    }
+    cursor += span;
+  }
+  row.appendChild(cloneFacturePreviewInsertCell(row, cells[cells.length - 1]));
+}
+
+function cloneFacturePreviewInsertCell(row, sourceCell){
+  const tagName = row.parentElement?.tagName === 'THEAD' ? 'th' : 'td';
+  const nextCell = sourceCell ? sourceCell.cloneNode(true) : document.createElement(tagName);
+  nextCell.removeAttribute('colspan');
+  nextCell.removeAttribute('rowspan');
+  nextCell.textContent = '';
+  nextCell.contentEditable = 'true';
+  nextCell.spellcheck = false;
+  return nextCell;
 }
 
 function getFactureDocumentAmount(value){
@@ -25741,39 +25818,87 @@ function getAudienceRowsForRegularExport(){
   return selectedRows.slice().sort(compareAudienceRowsForExport);
 }
 
+function buildSuiviRowsFromAudienceExportRows(audienceRows){
+  const rows = Array.isArray(audienceRows) ? audienceRows : [];
+  return rows.map((row)=>{
+    const procedureName = String(row?.procKey || '').trim();
+    const details = row?.d?.procedureDetails && typeof row.d.procedureDetails === 'object'
+      ? row.d.procedureDetails
+      : {};
+    const existingDetails = procedureName && details[procedureName] && typeof details[procedureName] === 'object'
+      ? details[procedureName]
+      : {};
+    const draft = row?.draft && typeof row.draft === 'object' ? row.draft : {};
+    const procedure = row?.p && typeof row.p === 'object' ? row.p : {};
+    const tribunal = String(draft.tribunal || procedure.tribunal || existingDetails.tribunal || '').trim();
+    const mergedProcedureDetails = procedureName
+      ? {
+        ...details,
+        [procedureName]: {
+          ...existingDetails,
+          depotLe: draft.dateDepot || procedure.depotLe || existingDetails.depotLe || '',
+          dateDepot: draft.dateDepot || procedure.dateDepot || existingDetails.dateDepot || '',
+          referenceClient: draft.refDossier || procedure.referenceClient || existingDetails.referenceClient || '',
+          audience: draft.dateAudience || procedure.audience || existingDetails.audience || '',
+          sort: draft.sort || procedure.sort || existingDetails.sort || '',
+          tribunal
+        }
+      }
+      : details;
+    return {
+      ...row,
+      c: row?.c,
+      d: {
+        ...(row?.d || {}),
+        procedureDetails: mergedProcedureDetails
+      },
+      index: row?.di,
+      procSource: procedureName ? [procedureName] : [],
+      tribunalList: tribunal ? [tribunal] : (Array.isArray(row?.tribunalList) ? row.tribunalList : []),
+      tribunalLabels: tribunal ? [tribunal] : (Array.isArray(row?.tribunalLabels) ? row.tribunalLabels : [])
+    };
+  });
+}
+
 async function exportAudienceRegularXLS(options = {}){
-  if(!canExportData()) return alert('Accès refusé');
+  if(!canExportData()) return alert('AccÃ¨s refusÃ©');
   return runWithHeavyUiOperation(async ()=>{
     const exportRows = getAudienceRowsForRegularExport();
     if(!exportRows.length){
-      alert("Aucune ligne d'audience à exporter.");
+      alert("Aucune ligne d'audience Ã  exporter.");
       return;
     }
+    const suiviRows = buildSuiviRowsFromAudienceExportRows(exportRows);
+    const dataset = await buildSuiviSelectedExportDatasetAsync(suiviRows);
     if(shouldPreferAudienceRegularExportCsvPath(exportRows.length)){
-      const dataset = buildAudienceSelectedExportDatasetBase(exportRows, { omitSort: true });
       const csvBlob = await createMappedCsvBlobChunked({
         headers: dataset.headers,
-        items: dataset.rows,
-        mapRow: (row)=>buildAudienceSelectedExportTableRow(row, {
-          omitSort: true,
-          closedStatusLookup: dataset.closedStatusLookup
-        }),
-        progressLabel: 'Export audience CSV',
-        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 60
+        items: dataset.tableRows,
+        mapRow: (row)=>row,
+        progressLabel: 'Export suivi CSV',
+        chunkSize: isVeryLargeLiveSyncMode() ? 20 : 120
       });
-      await saveBlobDirectOrDownload(csvBlob, 'audience_export.csv');
+      await saveBlobDirectOrDownload(csvBlob, 'suivi_export.csv', {
+        openAfterExport: options?.openAfterExport === true,
+        browserDownloadTarget: options?.browserDownloadTarget || null,
+        browserOpenInline: options?.browserOpenInline === true,
+        preferredFileHandle: options?.preferredFileHandle || null
+      });
       return;
     }
-    const dataset = await buildAudienceSelectedExportDatasetAsync(exportRows, { omitSort: true });
     await exportAudienceWorkbookXlsxStyled({
       headers: dataset.headers,
       rows: dataset.tableRows,
-      subtitle: dataset.subtitle,
-      sheetName: 'Audience',
-      filename: "Export d'audience Excel.xlsx",
-      layoutPreset: 'audience-reference',
+      subtitle: '',
+      sheetName: 'Suivi',
+      colWidths: dataset.colWidths,
+      filename: 'suivis dossier.xlsx',
+      layoutPreset: 'suivi-reference',
+      wrapColumnIndexes: dataset.wrapColumnIndexes,
       openAfterExport: options?.openAfterExport === true,
-      browserOpenInline: options?.browserOpenInline === true
+      browserDownloadTarget: options?.browserDownloadTarget || null,
+      browserOpenInline: options?.browserOpenInline === true,
+      preferredFileHandle: options?.preferredFileHandle || null
     });
   });
 }
