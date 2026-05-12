@@ -5575,6 +5575,32 @@ td[data-label="Actions"] .btn-danger{
   background:#dcfce7;
 }
 
+.facture-tracking-actions{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.facture-delete-btn{
+  flex:0 0 auto;
+  width:36px;
+  height:36px;
+  border:0;
+  border-radius:8px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color:#991b1b;
+  background:#fee2e2;
+  cursor:pointer;
+}
+
+.facture-delete-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
 .facture-document-preview-card{
   width:min(1500px,98vw);
 }

@@ -8,6 +8,9 @@ function FactureDocumentPreviewModal() {
             <button id="toggleFacturePreviewEditBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-pen-to-square"></i> Modifier
             </button>
+            <button id="saveFacturePreviewEditsBtn" className="btn-success" type="button">
+              <i className="fa-solid fa-floppy-disk"></i> Sauvegarder
+            </button>
             <button id="addFacturePreviewRowBtn" className="btn-primary" type="button" disabled>
               <i className="fa-solid fa-plus"></i> Ligne
             </button>
