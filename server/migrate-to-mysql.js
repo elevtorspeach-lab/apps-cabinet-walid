@@ -6,7 +6,8 @@ require('dotenv').config();
 // We import the db module to use its functions
 const db = require('./db');
 
-const STATE_FILE = path.join(__dirname, 'data', 'state.json');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
 async function migrate() {
   console.log('Starting migration to MySQL...');

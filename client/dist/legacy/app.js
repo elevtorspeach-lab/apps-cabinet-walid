@@ -176,6 +176,7 @@ const APP_INSTANCE_ID = `cabinet-${Date.now().toString(36)}-${Math.random().toSt
 const AUTO_BACKUP_STORAGE_KEY = 'cabinet-avocat-auto-backups-v1';
 const CURRENT_USER_BADGE_STORAGE_KEY = 'cabinet-avocat-current-user-badge-v1';
 const CURRENT_LOGIN_USERNAME_STORAGE_KEY = 'cabinet-avocat-current-login-username-v1';
+const FACTURE_PREVIEW_EDITS_STORAGE_KEY = 'cabinet-facture-preview-edits-v1';
 let API_BASE = (() => {
   if(typeof window !== 'undefined' && window.location && (window.location.protocol === 'http:' || window.location.protocol === 'https:')){
     return `${window.location.origin}/api`;
@@ -13667,7 +13668,10 @@ function closeExportPreviewModal(){
   if(modal) modal.style.display = 'none';
 }
 
-function closeFactureDocumentPreviewModal(){
+async function closeFactureDocumentPreviewModal(){
+  if(facturePreviewEdited){
+    await saveFacturePreviewEdits();
+  }
   const modal = $('factureDocumentPreviewModal');
   const content = $('factureDocumentPreviewContent');
   currentFacturePreviewRecord = null;
@@ -13689,6 +13693,131 @@ function markFacturePreviewEdited(){
   $('factureDocumentPreviewContent')?.classList.add('is-edited');
 }
 
+function getFacturePreviewCurrentTranche(){
+  if(currentFacturePreviewRecord?.tranche){
+    return String(currentFacturePreviewRecord.tranche || 'Tranche 1').trim() || 'Tranche 1';
+  }
+  return String($('factureDocumentTypeSelect')?.value || 'Tranche 1').trim() || 'Tranche 1';
+}
+
+function getFacturePreviewStorageEntries(){
+  const client = getFactureSelectedClient();
+  const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+  if(!client) return [];
+  if(currentFacturePreviewRecord && Array.isArray(currentFacturePreviewRecord.dossierIndexes)){
+    return currentFacturePreviewRecord.dossierIndexes
+      .map(index=>Number(index))
+      .filter(index=>Number.isInteger(index) && index >= 0 && index < dossiers.length)
+      .map(index=>({ client, dossier: dossiers[index], dossierIndex: index }));
+  }
+  const selectedEntries = getFactureSelectedDossierEntries();
+  if(selectedEntries.length) return selectedEntries;
+  const fallback = getFactureSelectedDossier();
+  return fallback.client && fallback.dossier ? [fallback] : [];
+}
+
+function getSavedFacturePreviewHtml(tranche){
+  const normalizedTranche = String(tranche || 'Tranche 1').trim() || 'Tranche 1';
+  const storageKey = getFacturePreviewEditStorageKey(normalizedTranche);
+  const localSaved = getLocalFacturePreviewEdit(storageKey);
+  if(localSaved) return localSaved;
+  const entries = getFacturePreviewStorageEntries();
+  for(const entry of entries){
+    const edits = entry.dossier?.facturePreviewEdits;
+    if(!edits || typeof edits !== 'object') continue;
+    const saved = edits[normalizedTranche];
+    if(typeof saved === 'string' && saved.trim()) return saved;
+    if(saved && typeof saved === 'object' && typeof saved.html === 'string' && saved.html.trim()) return saved.html;
+  }
+  return '';
+}
+
+function getFacturePreviewEditStorageKey(tranche = getFacturePreviewCurrentTranche()){
+  const client = getFactureSelectedClient();
+  const entries = getFacturePreviewStorageEntries();
+  const dossierPart = entries
+    .map(entry=>Number(entry.dossierIndex))
+    .filter(index=>Number.isInteger(index))
+    .sort((a, b)=>a - b)
+    .join('-');
+  const recordPart = currentFacturePreviewRecord?.id ? `record-${currentFacturePreviewRecord.id}` : '';
+  return [
+    String(client?.id || selectedFactureClientId || '').trim(),
+    dossierPart || recordPart || 'dossier',
+    String(tranche || 'Tranche 1').trim() || 'Tranche 1'
+  ].join('|');
+}
+
+function readLocalFacturePreviewEdits(){
+  try{
+    const raw = localStorage.getItem(FACTURE_PREVIEW_EDITS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  }catch(err){
+    console.warn('Impossible de lire les modifications facture locales', err);
+    return {};
+  }
+}
+
+function getLocalFacturePreviewEdit(storageKey){
+  const key = String(storageKey || '').trim();
+  if(!key) return '';
+  const edits = readLocalFacturePreviewEdits();
+  const saved = edits[key];
+  if(typeof saved === 'string' && saved.trim()) return saved;
+  if(saved && typeof saved === 'object' && typeof saved.html === 'string' && saved.html.trim()) return saved.html;
+  return '';
+}
+
+function saveLocalFacturePreviewEdit(storageKey, html){
+  const key = String(storageKey || '').trim();
+  const safeHtml = String(html || '').trim();
+  if(!key || !safeHtml) return;
+  try{
+    const edits = readLocalFacturePreviewEdits();
+    edits[key] = {
+      html: safeHtml,
+      updatedAt: new Date().toISOString()
+    };
+    localStorage.setItem(FACTURE_PREVIEW_EDITS_STORAGE_KEY, JSON.stringify(edits));
+  }catch(err){
+    console.warn('Impossible de sauvegarder les modifications facture locales', err);
+  }
+}
+
+async function saveFacturePreviewEdits(){
+  if(!facturePreviewEdited) return;
+  if(!canEditData()) return alert('Acces refuse');
+  const content = $('factureDocumentPreviewContent');
+  const html = String(content?.innerHTML || '').trim();
+  if(!content || !html) return;
+  const tranche = getFacturePreviewCurrentTranche();
+  const entries = getFacturePreviewStorageEntries();
+  saveLocalFacturePreviewEdit(getFacturePreviewEditStorageKey(tranche), html);
+  if(!entries.length) return;
+  entries.forEach(entry=>{
+    const targetDossier = entry.dossier;
+    if(!targetDossier || typeof targetDossier !== 'object') return;
+    const edits = targetDossier.facturePreviewEdits && typeof targetDossier.facturePreviewEdits === 'object'
+      ? { ...targetDossier.facturePreviewEdits }
+      : {};
+    edits[tranche] = {
+      html,
+      updatedAt: new Date().toISOString()
+    };
+    targetDossier.facturePreviewEdits = edits;
+  });
+  handleDossierDataChange({ audience: false });
+  for(const entry of entries){
+    await persistDossierPatchNow({
+      action: 'update',
+      clientId: Number(entry.client.id),
+      dossierIndex: Number(entry.dossierIndex),
+      dossier: entry.dossier
+    }, { source: 'facture-preview-edit' });
+  }
+}
+
 function setFacturePreviewEditMode(enabled){
   facturePreviewEditMode = !!enabled;
   const content = $('factureDocumentPreviewContent');
@@ -13705,6 +13834,7 @@ function setFacturePreviewEditMode(enabled){
     node.onpointerdown = ()=>{
       if(node.matches?.('td, th')) facturePreviewLastFocusedCell = node;
     };
+    node.oninput = ()=>markFacturePreviewEdited();
   });
   if(toggleBtn){
     toggleBtn.innerHTML = facturePreviewEditMode
@@ -13715,7 +13845,10 @@ function setFacturePreviewEditMode(enabled){
   if(colBtn) colBtn.disabled = !facturePreviewEditMode;
 }
 
-function toggleFacturePreviewEditMode(){
+async function toggleFacturePreviewEditMode(){
+  if(facturePreviewEditMode){
+    await saveFacturePreviewEdits();
+  }
   setFacturePreviewEditMode(!facturePreviewEditMode);
 }
 
@@ -13749,18 +13882,19 @@ function addFacturePreviewColumn(){
   if(!facturePreviewEditMode) return;
   const table = getActiveFacturePreviewTable();
   if(!table) return;
-  const active = document.activeElement?.closest?.('td, th') || facturePreviewLastFocusedCell;
-  const activeRow = active?.closest?.('tr');
-  const activeInTable = activeRow?.closest?.('table') === table;
-  const targetColumnIndex = activeInTable
-    ? getFacturePreviewVisualColumnIndex(active)
-    : getFacturePreviewLastVisualColumnIndex(table);
-  const insertColumnIndex = Number.isFinite(targetColumnIndex) ? targetColumnIndex + 1 : getFacturePreviewLastVisualColumnIndex(table) + 1;
+  const insertColumnIndex = getFacturePreviewLastVisualColumnIndex(table) + 1;
   insertFacturePreviewColGroupColumn(table, insertColumnIndex);
+  let firstInsertedCell = null;
   [...table.rows].forEach(row=>{
-    insertFacturePreviewCellAtVisualIndex(row, insertColumnIndex);
+    const insertedCell = insertFacturePreviewCellAtVisualIndex(row, insertColumnIndex);
+    if(!firstInsertedCell && insertedCell) firstInsertedCell = insertedCell;
   });
   markFacturePreviewEdited();
+  if(firstInsertedCell){
+    facturePreviewLastFocusedCell = firstInsertedCell;
+    firstInsertedCell.focus();
+    firstInsertedCell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
+  }
 }
 
 function getFacturePreviewVisualColumnIndex(cell){
@@ -13796,7 +13930,7 @@ function insertFacturePreviewColGroupColumn(table, visualIndex){
 }
 
 function insertFacturePreviewCellAtVisualIndex(row, visualIndex){
-  if(!row) return;
+  if(!row) return null;
   let cursor = 0;
   const cells = [...row.cells];
   for(let index = 0; index < cells.length; index += 1){
@@ -13804,16 +13938,18 @@ function insertFacturePreviewCellAtVisualIndex(row, visualIndex){
     const span = Math.max(1, Number(cell.colSpan) || 1);
     if(visualIndex > cursor && visualIndex < cursor + span){
       cell.colSpan = span + 1;
-      return;
+      return null;
     }
     if(visualIndex === cursor){
       const nextCell = cloneFacturePreviewInsertCell(row, cells[index - 1] || cell);
       row.insertBefore(nextCell, cell);
-      return;
+      return nextCell;
     }
     cursor += span;
   }
-  row.appendChild(cloneFacturePreviewInsertCell(row, cells[cells.length - 1]));
+  const nextCell = cloneFacturePreviewInsertCell(row, cells[cells.length - 1]);
+  row.appendChild(nextCell);
+  return nextCell;
 }
 
 function cloneFacturePreviewInsertCell(row, sourceCell){
@@ -15258,8 +15394,11 @@ function openFactureDocumentPreviewModal(){
   if(!modal || !content) return;
   const { dossier } = getFactureSelectedDossier();
   if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
-  content.innerHTML = buildFactureProcesVerbalPreviewHtml();
-  facturePreviewEdited = false;
+  const tranche = getFacturePreviewCurrentTranche();
+  const savedHtml = getSavedFacturePreviewHtml(tranche);
+  content.innerHTML = savedHtml || buildFactureProcesVerbalPreviewHtml();
+  facturePreviewEdited = !!savedHtml;
+  content.classList.toggle('is-edited', facturePreviewEdited);
   setFacturePreviewEditMode(false);
   modal.style.display = 'flex';
 }

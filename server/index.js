@@ -7,6 +7,7 @@ const https = require('https');
 const path = require('path');
 const { promisify } = require('util');
 const zlib = require('zlib');
+require('dotenv').config();
 const db = require('./db');
 
 const app = express();
@@ -36,7 +37,7 @@ const PASSWORD_HASH_ITERATIONS = 120000;
 const PASSWORD_MIN_LENGTH = 1;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const STATE_JOURNAL_FILE = path.join(DATA_DIR, 'state.journal');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');

@@ -4,7 +4,8 @@ require('dotenv').config();
 
 const db = require('./db');
 
-const BACKUP_DIR = path.join(__dirname, 'data', 'manual-backups');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+const BACKUP_DIR = path.join(DATA_DIR, 'manual-backups');
 
 function buildBackupFileName() {
   const now = new Date();
