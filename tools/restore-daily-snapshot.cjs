@@ -131,6 +131,14 @@ async function listSnapshots() {
   });
 }
 
+async function readJsonIfExists(filePath, fallback) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'));
+  } catch (_) {
+    return fallback;
+  }
+}
+
 async function copyDirectory(sourceDir, targetDir) {
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
@@ -146,7 +154,48 @@ async function copyDirectory(sourceDir, targetDir) {
   }
 }
 
+async function restoreIncrementalFiles(snapshot, options, snapshots) {
+  const selectedIndex = await readJsonIfExists(path.join(snapshot.dir, 'file-index.json'), null);
+  if (!selectedIndex || typeof selectedIndex !== 'object' || Array.isArray(selectedIndex)) return false;
+
+  const chain = snapshots.filter((item) => item.createdAt <= snapshot.createdAt);
+  for (const item of chain) {
+    const filesDir = path.join(item.dir, 'files');
+    if (await pathExists(filesDir)) {
+      await copyDirectory(filesDir, repoRoot);
+    }
+    const metadata = await readJsonIfExists(path.join(item.dir, 'metadata.json'), {});
+    const deletedFiles = Array.isArray(metadata?.deletedFiles) ? metadata.deletedFiles : [];
+    for (const file of deletedFiles) {
+      await fs.rm(path.join(repoRoot, file), { force: true });
+    }
+  }
+
+  if (!options.exact) return true;
+
+  const { execFileSync } = require('child_process');
+  const currentTracked = execFileSync('git', ['ls-files', '-z'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+    .split('\0')
+    .map((file) => file.trim())
+    .filter(Boolean)
+    .filter((file) => !file.startsWith('backups/'));
+  const snapshotFileSet = new Set(Object.keys(selectedIndex));
+  for (const file of currentTracked) {
+    if (snapshotFileSet.has(file)) continue;
+    await fs.rm(path.join(repoRoot, file), { force: true });
+  }
+  return true;
+}
+
 async function restoreFiles(snapshot, options) {
+  if (Array.isArray(options.snapshots) && await restoreIncrementalFiles(snapshot, options, options.snapshots)) {
+    return;
+  }
+
   const filesDir = path.join(snapshot.dir, 'files');
   const manifestPath = path.join(snapshot.dir, 'manifest.json');
   if (!(await pathExists(filesDir)) || !(await pathExists(manifestPath))) {
@@ -194,8 +243,16 @@ async function loadServerEnv() {
   } catch (_) {}
 }
 
-async function restoreMysqlState(snapshot) {
-  const statePath = path.join(snapshot.dir, 'mysql-state.json');
+function findMysqlSnapshot(snapshots, snapshot) {
+  const chain = (Array.isArray(snapshots) ? snapshots : [])
+    .filter((item) => item.createdAt <= snapshot.createdAt)
+    .sort((a, b) => b.createdAt - a.createdAt);
+  return chain.find((item) => require('fs').existsSync(path.join(item.dir, 'mysql-state.json'))) || snapshot;
+}
+
+async function restoreMysqlState(snapshot, snapshots = []) {
+  const stateSnapshot = findMysqlSnapshot(snapshots, snapshot);
+  const statePath = path.join(stateSnapshot.dir, 'mysql-state.json');
   if (!(await pathExists(statePath))) {
     throw new Error(`Snapshot has no mysql-state.json: ${snapshot.dir}`);
   }
@@ -260,11 +317,11 @@ async function main() {
     await createPreRestoreSnapshot();
   }
   if (!options.dataOnly) {
-    await restoreFiles(snapshot, options);
+    await restoreFiles(snapshot, { ...options, snapshots });
     console.log('Code/files restored.');
   }
   if (!options.codeOnly) {
-    await restoreMysqlState(snapshot);
+    await restoreMysqlState(snapshot, snapshots);
     console.log('MySQL state restored.');
   }
 }

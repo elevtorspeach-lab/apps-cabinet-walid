@@ -2119,6 +2119,39 @@ app.post('/api/files', async (req, res) => {
   }
 });
 
+app.post('/api/import-backups/excel', requireApiAuth, async (req, res) => {
+  try {
+    const body = getRequestBodyObject(req);
+    const originalName = sanitizeUploadFileName(body?.name || 'import.xlsx');
+    const source = sanitizeUploadFileName(body?.source || 'import');
+    const parsed = parseDataUrlUpload(body?.dataUrl || '');
+    const now = new Date();
+    const day = now.toISOString().slice(0, 10);
+    const stamp = now.toISOString().replace(/[:.]/g, '-');
+    const importsDir = path.join(UPLOADS_DIR, 'imports', day);
+    await fsp.mkdir(importsDir, { recursive: true });
+    const ext = getUploadExtension(originalName) || '.xlsx';
+    const baseName = path.basename(originalName, path.extname(originalName));
+    const storedName = `${stamp}_${source}_${sanitizeUploadFileName(baseName)}${ext}`;
+    const filePath = path.join(importsDir, storedName);
+    await fsp.writeFile(filePath, parsed.buffer);
+    const meta = {
+      name: originalName,
+      storedName,
+      source,
+      size: parsed.buffer.length,
+      type: String(body?.type || parsed.mimeType || 'application/octet-stream').trim(),
+      backedUpAt: now.toISOString(),
+      backedUpBy: String(req.authSession?.username || '').trim(),
+      relativePath: path.relative(DATA_DIR, filePath)
+    };
+    await fsp.writeFile(`${filePath}.json`, JSON.stringify(meta, null, 2), 'utf8');
+    return res.json({ ok: true, backup: meta });
+  } catch (err) {
+    return sendJsonError(res, 400, 'IMPORT_BACKUP_FAILED', 'Import backup failed.', err);
+  }
+});
+
 app.get('/api/files/:id/:name?', async (req, res) => {
   try {
     const record = await findUploadedFileRecord(req.params.id);

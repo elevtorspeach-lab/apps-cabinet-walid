@@ -13,6 +13,11 @@ const PASSWORD_SALT_BYTES = 16;
 const PASSWORD_MIN_LENGTH = 1;
 const AUDIENCE_AUTOCOMPLETE_MAX_ITEMS = 8;
 const PROCEDURE_TRIBUNAL_DATALIST_ID = 'procedureTribunalOptions';
+const PROCEDURE_FIELD_DATALIST_IDS = {
+  juge: 'procedureJugeOptions',
+  sort: 'procedureSortOptions',
+  tribunal: PROCEDURE_TRIBUNAL_DATALIST_ID
+};
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 2 * 60 * 1000;
 const PASSWORD_SETUP_MODE_FORCED = 'forced';
@@ -7693,6 +7698,41 @@ function fileToDataUrl(file){
     reader.onerror = ()=>reject(new Error('Lecture fichier impossible'));
     reader.readAsDataURL(file);
   });
+}
+
+function getExcelImportBackupSource(options = {}){
+  const opts = options && typeof options === 'object' ? options : {};
+  if(opts.diligenceMode === true) return 'diligence';
+  const hasDossiers = opts.importDossiers !== false;
+  const hasAudiences = opts.importAudiences !== false;
+  if(hasDossiers && hasAudiences) return 'global-audience';
+  if(hasDossiers) return 'global';
+  if(hasAudiences) return 'audience';
+  return 'excel-import';
+}
+
+async function backupImportedExcelFile(file, dataUrl, options = {}){
+  if(!file || !dataUrl || LOCAL_ONLY_MODE || !hasRemoteAuthSession()) return null;
+  try{
+    const response = await fetchWithTimeout(`${API_BASE}/import-backups/excel`, {
+      method: 'POST',
+      headers: buildRemoteAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        name: String(file?.name || 'import.xlsx').trim() || 'import.xlsx',
+        type: String(file?.type || '').trim() || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: Number(file?.size || 0),
+        source: getExcelImportBackupSource(options),
+        dataUrl
+      })
+    }, 120000);
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json().catch(()=>null);
+    if(!payload?.ok) throw new Error(String(payload?.message || 'Backup import impossible'));
+    return payload.backup || null;
+  }catch(err){
+    console.warn('Backup du fichier Excel importé impossible', err);
+    return null;
+  }
 }
 
 function blobToDataUrl(blob){
@@ -15524,6 +15564,7 @@ async function handleExcelImportFile(file, options = {}){
     updateImportProgress('Lecture du fichier...', 0, 1);
     setSyncStatus('syncing', 'Import Excel: lecture du fichier...');
     const importFileDataUrl = await fileToDataUrl(file).catch(()=>'');
+    await backupImportedExcelFile(file, importFileDataUrl, options);
     const buffer = await file.arrayBuffer();
     updateImportProgress('Analyse de la feuille...', 1, 3);
     setSyncStatus('syncing', 'Import Excel: analyse de la feuille...');
@@ -24219,7 +24260,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       <input type="text" data-field="executionNo" placeholder="Execution N°">
       <input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">
       <input type="text" data-field="huissier" placeholder="Huissier">
-      <input type="text" data-field="sort" placeholder="Sort">
+      <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
       ${tribunalFieldHtml}
     `;
   }
@@ -24246,7 +24287,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       </select>
       <input type="text" data-field="executionNo" placeholder="Execution N°">
       <input type="text" data-field="huissier" placeholder="Huissier">
-      <input type="text" data-field="sort" placeholder="Sort">
+      <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
       ${tribunalFieldHtml}
     `;
   }
@@ -24267,8 +24308,8 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
       <input type="text" data-field="referenceClient" placeholder="Référence dossier">
       <input type="text" data-field="audience" placeholder="Audience">
-      <input type="text" data-field="juge" placeholder="Juge">
-      <input type="text" data-field="sort" placeholder="Sort">
+      <input type="text" data-field="juge" list="${PROCEDURE_FIELD_DATALIST_IDS.juge}" placeholder="Juge" autocomplete="off">
+      <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
       ${tribunalFieldHtml}
     `;
   }
@@ -24277,8 +24318,8 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
     <input type="text" data-field="depotLe" placeholder="Dépôt le">
     <input type="text" data-field="referenceClient" placeholder="Référence dossier">
     <input type="text" data-field="audience" placeholder="Audience">
-    <input type="text" data-field="juge" placeholder="Juge">
-    <input type="text" data-field="sort" placeholder="Sort">
+    <input type="text" data-field="juge" list="${PROCEDURE_FIELD_DATALIST_IDS.juge}" placeholder="Juge" autocomplete="off">
+    <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
     ${tribunalFieldHtml}
   `;
 }
@@ -24456,7 +24497,9 @@ function updateInjonctionNotificationDateVisibility(card){
   dateWrap.style.display = show ? '' : 'none';
 }
 
-function collectKnownProcedureTribunalLabels(draft = null){
+function collectKnownProcedureFieldLabels(field, draft = null){
+  const safeField = String(field || '').trim();
+  if(!safeField) return [];
   const labels = [];
   AppState.clients.forEach(client=>{
     (client?.dossiers || []).forEach(dossier=>{
@@ -24464,8 +24507,8 @@ function collectKnownProcedureTribunalLabels(draft = null){
         ? dossier.procedureDetails
         : {};
       Object.values(details).forEach(procDetails=>{
-        const tribunal = normalizeLooseText(procDetails?.tribunal || '');
-        if(tribunal) labels.push(tribunal);
+        const label = normalizeLooseText(procDetails?.[safeField] || '');
+        if(label) labels.push(label);
       });
     });
   });
@@ -24473,18 +24516,47 @@ function collectKnownProcedureTribunalLabels(draft = null){
     ? draft
     : collectProcedureDraft();
   Object.values(draftSource || {}).forEach(procDetails=>{
-    const tribunal = normalizeLooseText(procDetails?.tribunal || '');
-    if(tribunal) labels.push(tribunal);
+    const label = normalizeLooseText(procDetails?.[safeField] || '');
+    if(label) labels.push(label);
   });
-  const clustered = buildTribunalClusterStateFromLabels(labels);
-  return clustered.options.map(option=>String(option?.label || '').trim()).filter(Boolean);
+  if(safeField === 'tribunal'){
+    const clustered = buildTribunalClusterStateFromLabels(labels);
+    return clustered.options.map(option=>String(option?.label || '').trim()).filter(Boolean);
+  }
+  const seen = new Set();
+  return labels
+    .filter(label=>{
+      const key = normalizeCaseInsensitiveSearchText(label);
+      if(!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b)=>a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
+}
+
+function collectKnownProcedureTribunalLabels(draft = null){
+  return collectKnownProcedureFieldLabels('tribunal', draft);
+}
+
+function ensureProcedureFieldDatalist(id){
+  let datalist = $(id);
+  if(datalist) return datalist;
+  datalist = document.createElement('datalist');
+  datalist.id = id;
+  document.body.appendChild(datalist);
+  return datalist;
+}
+
+function syncProcedureFieldAutocompleteOptions(draft = null){
+  Object.entries(PROCEDURE_FIELD_DATALIST_IDS).forEach(([field, id])=>{
+    const datalist = ensureProcedureFieldDatalist(id);
+    const labels = collectKnownProcedureFieldLabels(field, draft);
+    datalist.innerHTML = labels.map(label=>`<option value="${escapeAttr(label)}"></option>`).join('');
+  });
 }
 
 function syncProcedureTribunalAutocompleteOptions(draft = null){
-  const datalist = $(PROCEDURE_TRIBUNAL_DATALIST_ID);
-  if(!datalist) return;
-  const labels = collectKnownProcedureTribunalLabels(draft);
-  datalist.innerHTML = labels.map(label=>`<option value="${escapeHtml(label)}"></option>`).join('');
+  syncProcedureFieldAutocompleteOptions(draft);
 }
 
 function syncConditionalCreationFieldsVisibility(forceList){
@@ -24638,7 +24710,7 @@ function renderProcedureDetails(forceList, forceDraft){
         fieldEl.addEventListener(eventName, ()=>updateProcedureCardRemoveButtonVisibility(div));
       });
     });
-    div.querySelectorAll('input[data-field="tribunal"]').forEach(bindProcedureTribunalAutocomplete);
+    div.querySelectorAll('input[data-field="juge"], input[data-field="sort"], input[data-field="tribunal"]').forEach(bindProcedureTribunalAutocomplete);
     updateProcedureCardRemoveButtonVisibility(div);
   });
 

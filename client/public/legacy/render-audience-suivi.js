@@ -19,6 +19,49 @@ function renderSuiviTableMessage(body, message, key){
   renderTableMessage(body, SUIVI_TABLE_COL_COUNT, message, key);
 }
 
+const AUDIENCE_FIELD_DATALISTS = {
+  juge: 'audienceJugeOptions',
+  sort: 'audienceSortOptions',
+  tribunal: 'audienceTribunalEditOptions'
+};
+
+function getAudienceFieldOptionValue(row, field){
+  const draft = row?.draft || {};
+  const p = row?.p || {};
+  return String(draft[field] ?? p[field] ?? '').trim();
+}
+
+function collectAudienceFieldOptions(rows, field){
+  const seen = new Set();
+  const values = [];
+  (Array.isArray(rows) ? rows : []).forEach((row)=>{
+    const value = getAudienceFieldOptionValue(row, field);
+    if(!value) return;
+    const key = normalizeCaseInsensitiveSearchText(value);
+    if(!key || seen.has(key)) return;
+    seen.add(key);
+    values.push(value);
+  });
+  return values.sort((a, b)=>a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
+}
+
+function ensureAudienceFieldDatalist(id){
+  let datalist = $(id);
+  if(datalist) return datalist;
+  datalist = document.createElement('datalist');
+  datalist.id = id;
+  document.body.appendChild(datalist);
+  return datalist;
+}
+
+function syncAudienceFieldDatalists(rows){
+  Object.entries(AUDIENCE_FIELD_DATALISTS).forEach(([field, id])=>{
+    const datalist = ensureAudienceFieldDatalist(id);
+    const options = collectAudienceFieldOptions(rows, field);
+    datalist.innerHTML = options.map(value=>`<option value="${escapeAttr(value)}"></option>`).join('');
+  });
+}
+
 function renderAudienceRowsHtml(rows, duplicateKeySet){
   return rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
 }
@@ -323,9 +366,9 @@ function renderAudienceRowHtml(row, duplicateKeySet){
           <div class="date-inline-error" ${audienceDateInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
         </div>
       </td>
-      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
-      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
-      <td data-label="Tribunal"><input value="${escapeAttr(tribunalValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','tribunal',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','tribunal',this,event)"></td>
+      <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" list="${AUDIENCE_FIELD_DATALISTS.juge}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
+      <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" list="${AUDIENCE_FIELD_DATALISTS.sort}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
+      <td data-label="Tribunal"><input value="${escapeAttr(tribunalValue)}" list="${AUDIENCE_FIELD_DATALISTS.tribunal}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','tribunal',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','tribunal',this,event)"></td>
       <td data-label="ProcÃ©dure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dÃ©pÃ´t">
         <div class="audience-date-field">
@@ -738,6 +781,7 @@ function renderAudience(options = {}){
   const finalizeAudienceRender = (allRows)=>{
     const selectionPruned = pruneAudiencePrintSelection(baseRows);
     syncAudienceFilterOptions(allRows);
+    syncAudienceFieldDatalists(baseRows);
     const displayRows = allRows;
     const duplicateKeySet = getAudienceDuplicateKeySet(displayRows);
     const rows = getFilteredAudienceRows(displayRows, { alreadyDeduped: true, duplicateKeySet });
