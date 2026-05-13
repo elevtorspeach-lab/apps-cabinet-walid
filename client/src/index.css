@@ -3073,6 +3073,23 @@ tr:hover{background:#f1f5f9}
   transition:opacity .18s ease, transform .18s ease, visibility .18s ease;
 }
 
+.import-history-panel--inline-menu{
+  margin-top:14px;
+  margin-bottom:72px;
+}
+
+.import-history-panel--inline-menu .import-history-hover-menu{
+  position:static;
+  margin-top:10px;
+  display:none;
+  transform:none;
+}
+
+.import-history-panel--inline-menu .import-history-hoverbox.is-open .import-history-hover-menu{
+  display:block;
+  transform:none;
+}
+
 .import-history-hoverbox.is-open .import-history-hover-trigger{
   border-color:#93c5fd;
   box-shadow:0 10px 22px rgba(37,99,235,.12);

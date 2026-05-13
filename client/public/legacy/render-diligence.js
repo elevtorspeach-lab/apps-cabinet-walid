@@ -399,6 +399,9 @@ function orderDiligenceRowsByCheckedSelection(rows){
 
 function renderDiligence(options = {}){
   if(!shouldRenderDeferredSection('diligence', options)) return;
+  if(typeof renderImportHistoryPanel === 'function'){
+    renderImportHistoryPanel('diligenceImportHistory', 'diligence');
+  }
   const diligenceQuery = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
   const diligenceFilterStateKey = getDiligenceFilterStateKey(diligenceQuery);
   syncPaginationFilterState(

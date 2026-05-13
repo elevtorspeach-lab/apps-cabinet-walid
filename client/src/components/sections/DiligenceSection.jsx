@@ -108,6 +108,7 @@ function DiligenceSection() {
           <div id="diligencePagination" className="table-pagination"></div>
         </div>
       </div>
+      <div id="diligenceImportHistory" className="import-history-panel import-history-panel--inline-menu" style={{ display: 'none' }}></div>
     </div>
   )
 }

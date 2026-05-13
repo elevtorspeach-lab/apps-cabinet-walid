@@ -7754,6 +7754,9 @@ function normalizeImportHistoryEntries(rawEntries){
       if(!entry || typeof entry !== 'object') return null;
       const id = String(entry.id || '').trim() || createImportTrackingId('import');
       const type = String(entry.type || '').trim() === 'audience' ? 'audience' : 'global';
+      const category = type === 'audience'
+        ? 'audience'
+        : (String(entry.category || '').trim() === 'diligence' ? 'diligence' : 'global');
       const fileName = String(entry.fileName || '').trim() || 'Import Excel';
       const fileDataUrl = String(entry.fileDataUrl || '').trim();
       const createdAt = String(entry.createdAt || '').trim() || new Date().toISOString();
@@ -7795,6 +7798,7 @@ function normalizeImportHistoryEntries(rawEntries){
       return {
         id,
         type,
+        category,
         fileName,
         fileDataUrl,
         createdAt,
@@ -8883,16 +8887,25 @@ function normalizeRecycleArchiveEntries(rawEntries){
 }
 
 function getImportHistoryEntriesByType(type){
-  const targetType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const targetType = requestedType === 'audience' ? 'audience' : 'global';
+  const targetCategory = requestedType === 'diligence'
+    ? 'diligence'
+    : (targetType === 'audience' ? 'audience' : 'global');
   return normalizeImportHistoryEntries(AppState.importHistory)
-    .filter(entry=>entry.type === targetType)
+    .filter(entry=>entry.type === targetType && entry.category === targetCategory)
     .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
-function createImportHistoryEntry(type, fileName){
+function createImportHistoryEntry(type, fileName, options = {}){
+  const normalizedType = type === 'audience' ? 'audience' : 'global';
+  const category = normalizedType === 'audience'
+    ? 'audience'
+    : (String(options?.category || '').trim() === 'diligence' ? 'diligence' : 'global');
   return {
-    id: createImportTrackingId(type === 'audience' ? 'aud' : 'glob'),
-    type: type === 'audience' ? 'audience' : 'global',
+    id: createImportTrackingId(normalizedType === 'audience' ? 'aud' : (category === 'diligence' ? 'dil' : 'glob')),
+    type: normalizedType,
+    category,
     fileName: String(fileName || '').trim() || 'Import Excel',
     fileDataUrl: '',
     createdAt: new Date().toISOString(),
@@ -9099,8 +9112,11 @@ async function persistImportDeleteBatchNow(importType, batchId){
 
 async function deleteGlobalImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import global');
-  const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
-  if(!batch) return alert('Import global introuvable.');
+  const targetBatchId = String(batchId || '').trim();
+  const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === targetBatchId)
+    || getImportHistoryEntriesByType('diligence').find(entry=>String(entry?.id || '').trim() === targetBatchId);
+  if(!batch) return alert('Import introuvable.');
+  const importLabel = batch.category === 'diligence' ? 'diligence' : 'global';
   if(!window.confirm(`Supprimer l'import global "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
 
   const createdClientIds = new Set((batch.createdClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
@@ -9125,7 +9141,7 @@ async function deleteGlobalImportBatch(batchId){
   reconcileAudienceOrphanDossiers();
   handleDossierDataChange({ audience: true });
   await persistImportDeleteBatchNow('global', batch.id).catch((err)=>{
-    console.error('Erreur pendant la sauvegarde suppression import global', err);
+    console.error(`Erreur pendant la sauvegarde suppression import ${importLabel}`, err);
     alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
   });
   refreshPrimaryViews({ includeSalle: true });
@@ -9255,6 +9271,7 @@ function buildImportHistoryPanelKey(entries, type, canDelete){
     canDelete: canDelete ? 1 : 0,
     entries: (entries || []).map(entry=>({
       id: String(entry?.id || ''),
+      category: String(entry?.category || ''),
       fileName: String(entry?.fileName || ''),
       createdAt: String(entry?.createdAt || ''),
       downloadable: entry?.fileDataUrl ? 1 : 0,
@@ -9272,7 +9289,7 @@ function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
     : 'deleteGlobalImportBatch';
   const compactDeleteLabel = normalizedType === 'audience'
     ? 'Supprimer'
-    : 'Supprimer dossier global';
+    : (normalizedType === 'diligence' ? 'Supprimer diligence' : 'Supprimer dossier global');
   const markup = `
     <div class="import-history-list">
       ${entries.map(entry=>`
@@ -9326,7 +9343,8 @@ function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
 function ensureImportHistoryHoverMenu(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const entries = getImportHistoryEntriesByType(normalizedType);
   if(!entries.length) return;
   const canDelete = canDeleteData();
@@ -9359,7 +9377,8 @@ function ensureImportHistoryOutsideClickHandler(){
 function toggleImportHistoryMenu(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const hoverBox = container.querySelector('.import-history-hoverbox');
   if(!hoverBox) return;
   const shouldOpen = !hoverBox.classList.contains('is-open');
@@ -9386,7 +9405,8 @@ function handleImportHistoryToggleKey(event, containerId, type){
 function renderImportHistoryPanel(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const entries = getImportHistoryEntriesByType(normalizedType);
   if(!entries.length){
     container.innerHTML = '';
@@ -9399,13 +9419,10 @@ function renderImportHistoryPanel(containerId, type){
   const canDelete = canDeleteData();
   const title = normalizedType === 'audience'
     ? 'Fichiers Audience importes'
-    : 'Fichiers dossier global importes';
+    : (normalizedType === 'diligence' ? 'Fichiers Diligence importes' : 'Fichiers dossier global importes');
   const subtitle = normalizedType === 'audience'
     ? 'Les imports ci-dessous peuvent etre supprimes individuellement.'
-    : 'Chaque fichier importe peut etre retire separement.';
-  const deleteFn = normalizedType === 'audience'
-    ? 'deleteAudienceImportBatch'
-    : 'deleteGlobalImportBatch';
+    : (normalizedType === 'diligence' ? 'Chaque fichier diligence importe peut etre retire separement.' : 'Chaque fichier importe peut etre retire separement.');
   const compactMode = true;
   const compactSummaryLabel = normalizedType === 'audience'
     ? 'Cliquez pour voir la liste complete'
@@ -16952,7 +16969,9 @@ async function applyExcelImport(payload, options = {}){
   const allowedDossierProcedureSet = opts.allowedDossierProcedureSet instanceof Set
     ? opts.allowedDossierProcedureSet
     : null;
-  const globalImportEntry = importDossiers ? createImportHistoryEntry('global', importFileName) : null;
+  const globalImportEntry = importDossiers ? createImportHistoryEntry('global', importFileName, {
+    category: diligenceMode ? 'diligence' : 'global'
+  }) : null;
   const audienceImportEntry = importAudiences ? createImportHistoryEntry('audience', importFileName) : null;
   if(globalImportEntry) globalImportEntry.fileDataUrl = importFileDataUrl;
   if(audienceImportEntry) audienceImportEntry.fileDataUrl = importFileDataUrl;
