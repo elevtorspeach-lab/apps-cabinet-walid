@@ -23998,10 +23998,39 @@ function saveAllAudience(options = {}){
   return true;
 }
 
+function collectAudienceDraftDossierPersistEntries(){
+  const entries = new Map();
+  Object.keys(audienceDraft || {}).forEach((key)=>{
+    const { ci, di } = parseAudienceDraftKey(key);
+    const client = AppState.clients?.[ci];
+    const dossier = client?.dossiers?.[di];
+    if(!client || !dossier) return;
+    const persistKey = `${Number(client.id) || 0}::${String(dossier.externalId || di)}`;
+    entries.set(persistKey, {
+      clientId: client.id,
+      dossier
+    });
+  });
+  return [...entries.values()];
+}
+
+function persistAudienceDraftDossiersNow(){
+  const entries = collectAudienceDraftDossierPersistEntries();
+  entries.forEach((entry)=>{
+    persistDossierReferenceNow(entry.clientId, entry.dossier, {
+      source: 'audience-autosave'
+    }).catch((err)=>{
+      console.warn('Impossible de sauvegarder automatiquement la modification audience', err);
+    });
+  });
+  return entries.length;
+}
+
 function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
+    persistAudienceDraftDossiersNow();
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
 }
