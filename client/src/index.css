@@ -1771,6 +1771,32 @@ tr:hover{background:#f1f5f9}
   display:block;
 }
 
+.creation-field-error-link{
+  appearance:none;
+  border:none;
+  padding:0;
+  margin:0;
+  background:transparent;
+  color:#b91c1c;
+  font:inherit;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+
+.creation-field-error-link:hover,
+.creation-field-error-link:focus-visible{
+  color:#7f1d1d;
+}
+
+.creation-field-error-link:focus-visible{
+  outline:2px solid rgba(239,68,68,.45);
+  outline-offset:3px;
+  border-radius:4px;
+}
+
 .creation-priority-badge{
   display:inline-flex;
   align-items:center;

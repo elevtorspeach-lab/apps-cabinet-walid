@@ -7638,15 +7638,49 @@ function clearCreationReferenceClientError(){
   const input = $('referenceClientInput');
   const error = $('referenceClientError');
   if(input) input.classList.remove('input-invalid');
-  if(error) error.classList.remove('visible');
+  if(error){
+    error.classList.remove('visible');
+    error.innerHTML = '';
+    delete error.dataset.duplicateClientId;
+    delete error.dataset.duplicateDossierIndex;
+  }
 }
 
-function showCreationReferenceClientError(message){
+function openDuplicateReferenceClientDossierFromError(){
+  const error = $('referenceClientError');
+  const clientId = Number(error?.dataset?.duplicateClientId);
+  const dossierIndex = Number(error?.dataset?.duplicateDossierIndex);
+  if(Number.isFinite(clientId) && Number.isFinite(dossierIndex)){
+    editDossier(clientId, dossierIndex);
+    return;
+  }
+  const duplicate = findDuplicateClientReference($('referenceClientInput')?.value || '', {
+    ignoreClientId: editingDossier?.clientId,
+    ignoreDossierIndex: editingDossier?.index
+  });
+  if(!duplicate) return;
+  editDossier(duplicate.clientId, duplicate.dossierIndex);
+}
+
+function showCreationReferenceClientError(message, duplicate = null){
   const input = $('referenceClientInput');
   const error = $('referenceClientError');
   if(input) input.classList.add('input-invalid');
   if(error){
     error.textContent = String(message || 'Cette référence client existe déjà.');
+    if(duplicate && Number.isFinite(Number(duplicate.clientId)) && Number.isFinite(Number(duplicate.dossierIndex))){
+      const safeMessage = String(message || 'Cette reference client existe deja.');
+      error.dataset.duplicateClientId = String(duplicate.clientId);
+      error.dataset.duplicateDossierIndex = String(duplicate.dossierIndex);
+      error.innerHTML = `
+        <button type="button" class="creation-field-error-link" onclick="openDuplicateReferenceClientDossierFromError()">
+          ${escapeHtml(safeMessage)} Cliquez pour ouvrir le dossier.
+        </button>
+      `;
+    }else{
+      delete error.dataset.duplicateClientId;
+      delete error.dataset.duplicateDossierIndex;
+    }
     error.classList.add('visible');
   }
 }
@@ -7717,7 +7751,7 @@ function validateCreationReferenceClient(options = {}){
     return true;
   }
   const message = `Cette référence client existe déjà${duplicate.clientName ? ` (${duplicate.clientName})` : ''}.`;
-  showCreationReferenceClientError(message);
+  showCreationReferenceClientError(message, duplicate);
   if(options.focus !== false){
     $('referenceClientInput')?.focus();
   }
