@@ -774,6 +774,13 @@ body{
 input,select,textarea{padding:10px 12px;border-radius:8px;border:2px solid #e5e7eb}
 input:focus,select:focus,textarea:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12);outline:none}
 
+#adresseInput,
+#cautionAdresseInput{
+  direction:ltr;
+  unicode-bidi:isolate;
+  text-align:left;
+}
+
 /* ================== BUTTONS ================== */
 button{border:none;border-radius:8px;cursor:pointer;padding:10px 18px;display:flex;align-items:center;gap:6px;transition:.2s}
 .btn-success{background:#10b981;color:#fff}
@@ -6010,6 +6017,15 @@ td[data-label="Actions"] .btn-danger{
 
 #audienceSection #exportAudienceDetailBtn:hover{
   background:linear-gradient(135deg,#0f766e 0%, #115e59 100%);
+}
+
+#audienceSection #exportAudienceDiligenceBtn{
+  background:linear-gradient(135deg,#db2777 0%, #9d174d 100%);
+  border-color:#9d174d;
+}
+
+#audienceSection #exportAudienceDiligenceBtn:hover{
+  background:linear-gradient(135deg,#be185d 0%, #831843 100%);
 }
 
 #audienceSection #previewAudienceBtn{

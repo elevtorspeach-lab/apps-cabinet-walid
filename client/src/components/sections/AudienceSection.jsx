@@ -45,6 +45,9 @@ function AudienceSection() {
             <button id="exportAudienceDetailBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-file-lines"></i> Export d&apos;audience
             </button>
+            <button id="exportAudienceDiligenceBtn" className="btn-primary" type="button">
+              <i className="fa-solid fa-list-check"></i> DILLIGENCE
+            </button>
             <button id="previewAudienceBtn" className="btn-primary" type="button">
               <i className="fa-regular fa-eye"></i> Aperçu Excel
             </button>

@@ -24,6 +24,8 @@ const AUDIENCE_FIELD_DATALISTS = {
   sort: 'audienceSortOptions',
   tribunal: 'audienceTribunalEditOptions'
 };
+let audienceFieldDatalistsRowsRef = null;
+let audienceFieldDatalistsMarkupKey = '';
 
 function getAudienceFieldOptionValue(row, field){
   const draft = row?.draft || {};
@@ -55,11 +57,25 @@ function ensureAudienceFieldDatalist(id){
 }
 
 function syncAudienceFieldDatalists(rows){
-  Object.entries(AUDIENCE_FIELD_DATALISTS).forEach(([field, id])=>{
-    const datalist = ensureAudienceFieldDatalist(id);
-    const options = collectAudienceFieldOptions(rows, field);
-    datalist.innerHTML = options.map(value=>`<option value="${escapeAttr(value)}"></option>`).join('');
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const markupParts = [];
+  const fieldEntries = Object.entries(AUDIENCE_FIELD_DATALISTS);
+  const optionsByField = new Map();
+  fieldEntries.forEach(([field])=>{
+    const options = collectAudienceFieldOptions(safeRows, field);
+    optionsByField.set(field, options);
+    markupParts.push(`${field}:${options.join('\u001f')}`);
   });
+  const markupKey = markupParts.join('\u001e');
+  if(safeRows === audienceFieldDatalistsRowsRef && markupKey === audienceFieldDatalistsMarkupKey) return;
+  fieldEntries.forEach(([field, id])=>{
+    const datalist = ensureAudienceFieldDatalist(id);
+    const options = optionsByField.get(field) || [];
+    const html = options.map(value=>`<option value="${escapeAttr(value)}"></option>`).join('');
+    if(datalist.innerHTML !== html) datalist.innerHTML = html;
+  });
+  audienceFieldDatalistsRowsRef = safeRows;
+  audienceFieldDatalistsMarkupKey = markupKey;
 }
 
 function renderAudienceRowsHtml(rows, duplicateKeySet){
@@ -780,7 +796,7 @@ function renderAudience(options = {}){
 
   const finalizeAudienceRender = (allRows)=>{
     const selectionPruned = pruneAudiencePrintSelection(baseRows);
-    syncAudienceFilterOptions(allRows);
+    syncAudienceFilterOptions(baseRows);
     syncAudienceFieldDatalists(baseRows);
     const displayRows = allRows;
     const duplicateKeySet = getAudienceDuplicateKeySet(displayRows);
@@ -842,12 +858,20 @@ function renderAudience(options = {}){
   };
 
   const baseRows = getAudienceRowsDedupedCached();
+  if(!audienceQuery && typeof scheduleAudienceReferenceSearchIndexWarmup === 'function'){
+    scheduleAudienceReferenceSearchIndexWarmup(baseRows);
+  }
   const colorFilteredRows = filterAudienceColor === 'all'
     ? baseRows
     : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
-  const exactMatchedRows = audienceQuery
-    ? getAudienceRowsByExactQuery(colorFilteredRows, audienceQuery)
+  const referenceMatchedRows = audienceQuery && typeof getAudienceRowsByReferenceQuery === 'function'
+    ? getAudienceRowsByReferenceQuery(colorFilteredRows, audienceQuery)
     : null;
+  const exactMatchedRows = Array.isArray(referenceMatchedRows)
+    ? referenceMatchedRows
+    : (audienceQuery
+    ? getAudienceRowsByExactQuery(colorFilteredRows, audienceQuery)
+    : null);
   const canUseWorker = (
     !!audienceQuery
     && !exactMatchedRows

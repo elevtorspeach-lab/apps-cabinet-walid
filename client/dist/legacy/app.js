@@ -313,6 +313,11 @@ let audienceErrorRowsCacheInput = null;
 let audienceErrorRowsCacheOutput = [];
 let audienceExactSearchIndexCacheInput = null;
 let audienceExactSearchIndexCacheOutput = null;
+let audienceReferenceSearchIndexCacheInput = null;
+let audienceReferenceSearchIndexCacheOutput = null;
+let audienceReferenceSearchIndexWarmupTimer = null;
+let audienceReferenceSearchIndexWarmupToken = 0;
+let audienceReferenceSearchIndexWarmupInput = null;
 let audienceSelectedExportRowsCacheInput = null;
 let audienceSelectedExportRowsCacheVersion = -1;
 let audienceSelectedExportRowsCacheOutput = [];
@@ -1435,6 +1440,11 @@ function invalidateDerivedCaches(options = {}){
   audienceClosedStatusLookupCacheVersion = -1;
   audienceExactSearchIndexCacheInput = null;
   audienceExactSearchIndexCacheOutput = null;
+  audienceReferenceSearchIndexCacheInput = null;
+  audienceReferenceSearchIndexCacheOutput = null;
+  audienceReferenceSearchIndexWarmupTimer = clearScheduledWarmupTimer(audienceReferenceSearchIndexWarmupTimer);
+  audienceReferenceSearchIndexWarmupToken += 1;
+  audienceReferenceSearchIndexWarmupInput = null;
   if(!preserveKnownJudgesCache){
     knownJudgesCache = null;
     knownJudgesCacheVersion = -1;
@@ -3912,6 +3922,8 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     ] : []),
     ...(!omitCaution ? [{ header: 'Caution', width: 28 }] : []),
     ...(!omitCautionAdresse ? [{ header: 'Adresse  caution', width: 36 }] : []),
+    { header: 'CIN de caution', width: 22 },
+    { header: 'Montant', width: 18 },
     { header: 'Date depot', width: 18 },
     { header: 'Réf Ass', width: 26 },
     { header: 'Audience', width: 18 },
@@ -3931,6 +3943,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
       || normalizedHeader === 'adresse'
       || normalizedHeader === 'caution'
       || normalizedHeader === 'adresse  caution'
+      || normalizedHeader === 'cin de caution'
       || normalizedHeader === 'réf ass'
       || normalizedHeader === 'sort'
       || normalizedHeader === 'tribunal'
@@ -4033,6 +4046,7 @@ function buildSuiviExportTableRows(rows, options = {}){
       }
       if(!omitCaution) exportRow.push(row.d?.caution || '-');
       if(!omitCautionAdresse) exportRow.push(row.d?.cautionAdresse || '-');
+      exportRow.push(row.d?.cautionCin || '-', row.d?.montant || '-');
       exportRow.push(
         procedureValues.dateDepot || '',
         procedureValues.reference || '',
@@ -19317,6 +19331,7 @@ function setupEvents(){
       blankSort: true
     });
   });
+  $('exportAudienceDiligenceBtn')?.addEventListener('click', ()=>exportAudienceDiligenceXLS({ openAfterExport: true, browserOpenInline: true }));
   $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
   $('calendarPrevBtn')?.addEventListener('click', ()=>{
     dashboardCalendarCursor = new Date(dashboardCalendarCursor.getFullYear(), dashboardCalendarCursor.getMonth() - 1, 1);
@@ -19850,6 +19865,7 @@ function applyRoleUI(options = {}){
     'clearAllPrintAudienceBtn',
     'exportAudienceBtn',
     'exportAudienceDetailBtn',
+    'exportAudienceDiligenceBtn',
     'previewAudienceBtn',
     'selectAllDiligenceBtn',
     'clearAllDiligenceBtn',
@@ -21004,6 +21020,27 @@ function buildAudienceExactSearchTokens(row){
   return [...tokens];
 }
 
+function buildAudienceReferenceSearchTokens(row){
+  if(!row || typeof row !== 'object') return [];
+  const tokens = new Set();
+  const pushRefToken = (value)=>{
+    const key = normalizeReferenceForAudienceLookup(value);
+    if(key) tokens.add(key);
+  };
+  pushRefToken(getAudienceRowDraftReferenceValue(row));
+  pushRefToken(row?.d?.referenceClient || '');
+  pushRefToken(row?.p?.referenceClient || '');
+  if(Array.isArray(row?.__dedupedAudienceRows)){
+    row.__dedupedAudienceRows.forEach(item=>{
+      pushRefToken(getAudienceRowDraftReferenceValue(item));
+      pushRefToken(item?.d?.referenceClient || '');
+      pushRefToken(item?.p?.referenceClient || '');
+    });
+  }
+  getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
+  return [...tokens];
+}
+
 function normalizeAudienceExactSearchQuery(value){
   const raw = String(value || '').trim();
   if(!raw) return '';
@@ -21012,6 +21049,116 @@ function normalizeAudienceExactSearchQuery(value){
   const textKey = normalizeCaseInsensitiveSearchText(raw);
   if(textKey.length >= 6) return textKey;
   return '';
+}
+
+function normalizeAudienceReferenceSearchQuery(value){
+  const raw = String(value || '').trim();
+  if(!raw || !/^[\s\d./-]+$/.test(raw)) return '';
+  const refKey = normalizeReferenceForAudienceLookup(raw);
+  return refKey ? refKey : '';
+}
+
+function getAudienceReferenceSearchIndex(rows){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if(sourceRows === audienceReferenceSearchIndexCacheInput){
+    return audienceReferenceSearchIndexCacheOutput;
+  }
+  const index = new Map();
+  sourceRows.forEach((row)=>{
+    const tokens = row.__referenceSearchTokens || (row.__referenceSearchTokens = buildAudienceReferenceSearchTokens(row));
+    tokens.forEach((token)=>{
+      if(!token) return;
+      if(!index.has(token)) index.set(token, []);
+      index.get(token).push(row);
+    });
+  });
+  audienceReferenceSearchIndexCacheInput = sourceRows;
+  audienceReferenceSearchIndexCacheOutput = index;
+  return index;
+}
+
+function isAudienceReferenceSearchIndexReady(rows){
+  return Array.isArray(rows)
+    && rows === audienceReferenceSearchIndexCacheInput
+    && audienceReferenceSearchIndexCacheOutput instanceof Map;
+}
+
+function scheduleAudienceReferenceSearchIndexWarmup(rows, options = {}){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if(!sourceRows.length || isAudienceReferenceSearchIndexReady(sourceRows)) return;
+  if(audienceReferenceSearchIndexWarmupInput === sourceRows && audienceReferenceSearchIndexWarmupTimer) return;
+  audienceReferenceSearchIndexWarmupTimer = clearScheduledWarmupTimer(audienceReferenceSearchIndexWarmupTimer);
+  audienceReferenceSearchIndexWarmupInput = sourceRows;
+  audienceReferenceSearchIndexWarmupToken += 1;
+  const token = audienceReferenceSearchIndexWarmupToken;
+  const index = new Map();
+  let rowIndex = 0;
+  const schedule = ()=>{
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      audienceReferenceSearchIndexWarmupTimer = window.requestIdleCallback(run, { timeout: 700 });
+      return;
+    }
+    audienceReferenceSearchIndexWarmupTimer = setTimeout(()=>run(null), 16);
+  };
+  const run = (deadline)=>{
+    if(token !== audienceReferenceSearchIndexWarmupToken) return;
+    audienceReferenceSearchIndexWarmupTimer = null;
+    let processed = 0;
+    while(rowIndex < sourceRows.length && processed < SEARCH_CACHE_WARMUP_CHUNK_SIZE){
+      if(
+        deadline
+        && typeof deadline.timeRemaining === 'function'
+        && processed > 0
+        && deadline.timeRemaining() <= 3
+      ){
+        break;
+      }
+      const row = sourceRows[rowIndex];
+      if(!row){
+        rowIndex += 1;
+        processed += 1;
+        continue;
+      }
+      const tokens = row.__referenceSearchTokens || (row.__referenceSearchTokens = buildAudienceReferenceSearchTokens(row));
+      tokens.forEach((item)=>{
+        if(!item) return;
+        if(!index.has(item)) index.set(item, []);
+        index.get(item).push(row);
+      });
+      rowIndex += 1;
+      processed += 1;
+    }
+    if(rowIndex < sourceRows.length){
+      schedule();
+      return;
+    }
+    audienceReferenceSearchIndexWarmupInput = null;
+    audienceReferenceSearchIndexCacheInput = sourceRows;
+    audienceReferenceSearchIndexCacheOutput = index;
+    if(options?.rerender === true && typeof renderAudience === 'function'){
+      const currentQuery = $('filterAudience')?.value || '';
+      if(normalizeAudienceReferenceSearchQuery(currentQuery)){
+        renderAudience();
+      }
+    }
+  };
+  schedule();
+}
+
+function getAudienceRowsByReferenceQuery(rows, query){
+  const refQuery = normalizeAudienceReferenceSearchQuery(query);
+  if(!refQuery) return null;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if(sourceRows.length > AUDIENCE_EXACT_SEARCH_SYNC_MAX_ROWS && !isAudienceReferenceSearchIndexReady(sourceRows)){
+    scheduleAudienceReferenceSearchIndexWarmup(sourceRows);
+  }
+  const index = getAudienceReferenceSearchIndex(sourceRows);
+  const matchedSet = new Set();
+  index.forEach((matchedRows, token)=>{
+    if(!(token === refQuery || token.startsWith(refQuery) || token.includes(refQuery))) return;
+    matchedRows.forEach(row=>matchedSet.add(row));
+  });
+  return [...matchedSet];
 }
 
 function getAudienceRowsByExactQuery(rows, query){
@@ -25624,6 +25771,56 @@ function buildAudienceSelectedExportTableRow(row, options = {}){
   return out;
 }
 
+function buildAudienceDiligenceExportTableRow(row){
+  const p = row?.p || {};
+  const d = row?.d || {};
+  const draft = row?.draft || {};
+  const procedureValue = getProcedureBaseName(row?.procKey || p?.procedure || '') || String(row?.procKey || p?.procedure || '').trim();
+  const audienceDateRaw = draft.dateAudience || p.audience || '';
+  const sortValue = draft.sort || p.sort || '';
+  return [
+    row?.c?.name || '',
+    procedureValue,
+    d.debiteur || d.adversaire || '',
+    getAudienceRowDraftReferenceValue(row) || d.referenceClient || '',
+    normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim(),
+    formatMixedDirectionExportText(sortValue),
+    p.tribunal || ''
+  ];
+}
+
+function buildAudienceDiligenceExportDatasetBase(rowsOverride = null){
+  const rows = Array.isArray(rowsOverride)
+    ? rowsOverride.slice()
+    : getSelectedAudienceRowsForExport();
+  return {
+    rows,
+    headers: ['client', 'Proc\u00e9dure', 'debiteur', 'R\u00e9f Ass', 'Audience', 'Sort', 'Tribunal'],
+    colWidths: [
+      { wch: 20 },
+      { wch: 16 },
+      { wch: 30 },
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 30 },
+      { wch: 34 }
+    ]
+  };
+}
+
+async function buildAudienceDiligenceExportDatasetAsync(rowsOverride = null){
+  const dataset = buildAudienceDiligenceExportDatasetBase(rowsOverride);
+  const tableRows = await mapChunked(
+    dataset.rows,
+    async (row)=>buildAudienceDiligenceExportTableRow(row),
+    { chunkSize: 100, onProgress: makeProgressReporter('Export diligence audience') }
+  );
+  return {
+    ...dataset,
+    tableRows
+  };
+}
+
 function blankAudienceExportSortColumn(headers, rows, options = {}){
   if(options?.blankSort !== true) return Array.isArray(rows) ? rows : [];
   const sortIndex = (Array.isArray(headers) ? headers : []).findIndex((header)=>{
@@ -26864,6 +27061,29 @@ async function exportAudienceXLS(options = {}){
   });
 }
 
+async function exportAudienceDiligenceXLS(options = {}){
+  if(!canExportData()) return alert('AccÃ¨s refusÃ©');
+  return runWithHeavyUiOperation(async ()=>{
+    const dataset = await buildAudienceDiligenceExportDatasetAsync();
+    if(!dataset.rows.length){
+      alert('Cochez les dossiers \u00e0 exporter dans "DILLIGENCE".');
+      return;
+    }
+    await exportAudienceWorkbookXlsxStyled({
+      headers: dataset.headers,
+      rows: dataset.tableRows,
+      subtitle: '',
+      sheetName: 'DILLIGENCE',
+      colWidths: dataset.colWidths,
+      filename: 'dilligence.xlsx',
+      openAfterExport: options?.openAfterExport === true,
+      browserDownloadTarget: options?.browserDownloadTarget || null,
+      browserOpenInline: options?.browserOpenInline === true,
+      preferredFileHandle: options?.preferredFileHandle || null
+    });
+  });
+}
+
 function escapeHtml(str){
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -27703,10 +27923,39 @@ function saveAllAudience(options = {}){
   return true;
 }
 
+function collectAudienceDraftDossierPersistEntries(){
+  const entries = new Map();
+  Object.keys(audienceDraft || {}).forEach((key)=>{
+    const { ci, di } = parseAudienceDraftKey(key);
+    const client = AppState.clients?.[ci];
+    const dossier = client?.dossiers?.[di];
+    if(!client || !dossier) return;
+    const persistKey = `${Number(client.id) || 0}::${String(dossier.externalId || di)}`;
+    entries.set(persistKey, {
+      clientId: client.id,
+      dossier
+    });
+  });
+  return [...entries.values()];
+}
+
+function persistAudienceDraftDossiersNow(){
+  const entries = collectAudienceDraftDossierPersistEntries();
+  entries.forEach((entry)=>{
+    persistDossierReferenceNow(entry.clientId, entry.dossier, {
+      source: 'audience-autosave'
+    }).catch((err)=>{
+      console.warn('Impossible de sauvegarder automatiquement la modification audience', err);
+    });
+  });
+  return entries.length;
+}
+
 function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
+    persistAudienceDraftDossiersNow();
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
 }

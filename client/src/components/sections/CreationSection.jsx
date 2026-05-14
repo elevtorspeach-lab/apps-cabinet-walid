@@ -92,7 +92,7 @@ function CreationSection() {
             <div className="creation-form-row creation-form-row-three">
               <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Adresse</label>
-                <input type="text" id="adresseInput" placeholder="Adresse" />
+                <input type="text" id="adresseInput" placeholder="Adresse" dir="ltr" />
               </div>
 
               <div className="form-group creation-layout-card creation-secondary-highlight-field">
@@ -114,7 +114,7 @@ function CreationSection() {
 
               <div className="form-group creation-layout-card">
                 <label>Adresse de caution</label>
-                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" />
+                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" dir="ltr" />
               </div>
 
               <div className="form-group creation-layout-card">
