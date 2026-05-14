@@ -250,7 +250,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
   const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
-  const jugementAddValue = String(draft.jugementAdd || p.jugementAdd || '').trim().toLowerCase();
+  const jugementAddValue = getAudienceRowJugementAddStatus(row);
   return `
     <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
       <td data-label="Sélection">
@@ -352,7 +352,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const dateDepotValue = displayDateDepot === '-' ? '' : displayDateDepot;
   const audienceDateInvalid = parseStrictAudienceDateValue(audienceDateValue).invalid;
   const dateDepotInvalid = parseStrictAudienceDateValue(dateDepotValue).invalid;
-  const jugementAddValue = String(draft.jugementAdd || p.jugementAdd || '').trim().toLowerCase();
+  const jugementAddValue = getAudienceRowJugementAddStatus(row);
   return `
     <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
       <td data-label="SÃ©lection">

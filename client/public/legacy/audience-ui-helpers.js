@@ -61,6 +61,21 @@ function getAudienceRowOrdonnanceColor(row){
   return '';
 }
 
+function getAudienceRowJugementAddStatus(row){
+  const explicitValue = String(row?.draft?.jugementAdd || row?.p?.jugementAdd || '').trim().toLowerCase();
+  if(explicitValue === 'ok' || explicitValue === 'att') return explicitValue;
+  const sortValue = normalizeCaseInsensitiveSearchText(row?.draft?.sort ?? row?.p?.sort ?? '');
+  if(!sortValue) return '';
+  const hasJugement = sortValue.includes('jugement') || /\bj\b/.test(sortValue);
+  const hasAdd = /\badd\b/.test(sortValue);
+  if(!hasJugement && !hasAdd) return '';
+  if(/\bjugement\b(?:\s*\+\s*|\s+)*(?:\badd\b\s*)?\bok\b/.test(sortValue)) return 'ok';
+  if(/\badd\b(?:\s*\+\s*|\s+)*\bj\b(?:\s*\+\s*|\s+)*\bok\b/.test(sortValue)) return 'ok';
+  if(/\batt\b/.test(sortValue) || sortValue.includes('attente')) return 'att';
+  if(hasJugement) return 'att';
+  return '';
+}
+
 function isAudienceRowOrdonnanceColorSuppressed(row){
   return String(row?.p?._disableAudienceRowColor || '').trim() === '1'
     || String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1';
@@ -95,7 +110,7 @@ function audienceRowMatchesColorFilter(row, color){
   if(!targetColor || targetColor === 'all') return true;
   if(targetColor === 'jugement-ok' || targetColor === 'jugement-att'){
     const expectedValue = targetColor === 'jugement-ok' ? 'ok' : 'att';
-    return String(row?.p?.jugementAdd || '').trim().toLowerCase() === expectedValue;
+    return getAudienceRowJugementAddStatus(row) === expectedValue;
   }
   if(targetColor === 'closed'){
     return !!getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');

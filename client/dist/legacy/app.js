@@ -521,6 +521,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.depotLe': 'Date dépôt',
   'procedureDetails.executionNo': 'N° exécution',
   'procedureDetails.attOrdOrOrdOk': 'Ordonnance',
+  'procedureDetails.jugementAdd': 'Jugement ADD',
   'procedureDetails.attDelegationOuDelegat': 'Délégation',
   'procedureDetails.nomHuissier': 'Nom huissier',
   'procedureDetails.datePrevueExecution': 'Date prévue exécution',
@@ -16753,7 +16754,7 @@ function showExcelImportResult(summary, issuesText, options = {}){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed'];
+  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'jugement-ok', 'jugement-att', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
@@ -16765,7 +16766,7 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'closed']);
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'jugement-ok', 'jugement-att', 'closed']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
@@ -21009,9 +21010,14 @@ function buildAudienceExactSearchTokens(row){
       pushRefToken(item?.d?.referenceClient || '');
       pushRefToken(item?.p?.referenceClient || '');
       pushTextToken(item?.d?.debiteur || '');
+      pushTextToken(item?.draft?.dateAudience || '');
+      pushTextToken(item?.p?.audience || '');
     });
   }
   getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
+  pushTextToken(getAudienceRowDateValue(row));
+  pushTextToken(row?.draft?.dateAudience || '');
+  pushTextToken(row?.p?.audience || '');
   pushTextToken(row?.d?.debiteur || '');
   pushTextToken(row?.d?.statut || '');
   pushTextToken(row?.d?.statutDetails || '');
@@ -21041,9 +21047,32 @@ function buildAudienceReferenceSearchTokens(row){
   return [...tokens];
 }
 
+function isAudienceDateLikeSearchQuery(value){
+  const raw = String(value || '').trim();
+  if(!raw) return false;
+  const compact = raw.replace(/\s+/g, '');
+  const dmy = compact.match(/^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$/);
+  if(dmy){
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    return day >= 1 && day <= 31 && month >= 1 && month <= 12;
+  }
+  const ymd = compact.match(/^(\d{4})[./-](\d{1,2})(?:[./-](\d{1,2}))?$/);
+  if(ymd){
+    const month = Number(ymd[2]);
+    const day = ymd[3] ? Number(ymd[3]) : 1;
+    return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+  }
+  return false;
+}
+
 function normalizeAudienceExactSearchQuery(value){
   const raw = String(value || '').trim();
   if(!raw) return '';
+  if(isAudienceDateLikeSearchQuery(raw)){
+    const textKey = normalizeCaseInsensitiveSearchText(raw);
+    return textKey.length >= 4 ? textKey : '';
+  }
   const refKey = normalizeReferenceForAudienceLookup(raw);
   if(refKey && refKey.length >= 5) return refKey;
   const textKey = normalizeCaseInsensitiveSearchText(raw);
@@ -21054,6 +21083,7 @@ function normalizeAudienceExactSearchQuery(value){
 function normalizeAudienceReferenceSearchQuery(value){
   const raw = String(value || '').trim();
   if(!raw || !/^[\s\d./-]+$/.test(raw)) return '';
+  if(isAudienceDateLikeSearchQuery(raw)) return '';
   const refKey = normalizeReferenceForAudienceLookup(raw);
   return refKey ? refKey : '';
 }
@@ -27395,6 +27425,46 @@ function updateAudienceDraft(key, field, value){
 
 function updateAudienceDraftFromEncoded(keyEncoded, field, value){
   updateAudienceDraft(decodeURIComponent(String(keyEncoded)), field, value);
+}
+
+function setAudienceJugementAddFromEncoded(keyEncoded, value){
+  const key = decodeURIComponent(String(keyEncoded || ''));
+  const nextValue = String(value || '').trim().toLowerCase();
+  if(!key || !['ok', 'att'].includes(nextValue)) return false;
+  const { ci, di, procKey } = parseAudienceDraftKey(key);
+  const client = AppState.clients?.[ci];
+  if(!canEditData() || !canEditClient(client)) return false;
+  const dossier = client?.dossiers?.[di];
+  if(!dossier) return false;
+  const p = getAudienceProcedure(ci, di, procKey);
+  const before = String(p?.jugementAdd || '').trim().toLowerCase();
+  if(before === nextValue) return false;
+  p.jugementAdd = nextValue;
+  if(audienceDraft[key] && Object.prototype.hasOwnProperty.call(audienceDraft[key], 'jugementAdd')){
+    delete audienceDraft[key].jugementAdd;
+    if(!Object.keys(audienceDraft[key]).length) delete audienceDraft[key];
+    persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
+  }
+  detachAudienceImportBatchOwnership(p);
+  queueDossierHistoryEntry(dossier, {
+    source: 'audience',
+    field: 'procedureDetails.jugementAdd',
+    procedure: procKey,
+    before,
+    after: nextValue
+  });
+  markAudienceRowsCacheDirty({
+    preserveClientAccessCaches: true,
+    preserveClientListSummary: true
+  });
+  persistDossierReferenceNow(client.id, dossier, { source: 'audience-jugement-add' }).catch(()=>{});
+  if(isDeferredRenderSectionVisible('audience')){
+    renderAudienceKeepingPosition();
+  }else{
+    markDeferredRenderDirty('audience');
+  }
+  queueAudienceLinkedRenders();
+  return true;
 }
 
 function parseStrictAudienceDateValueLegacyUnused(value){
