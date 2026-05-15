@@ -246,13 +246,21 @@ function CreationSection() {
               </div>
 
               <div className="panel-field">
-                <select id="statutInput" defaultValue="En cours">
-                  <option value="En cours">En cours</option>
-                  <option value="Soldé">Soldé</option>
-                  <option value="Arrêt définitif">Arrêt définitif</option>
-                  <option value="Clôture">Clôture</option>
-                  <option value="Suspension">Suspension</option>
-                </select>
+                <input
+                  type="text"
+                  id="statutInput"
+                  list="statutOptions"
+                  defaultValue="En cours"
+                  autoComplete="off"
+                  placeholder="En cours, Soldé, Arrêt définitif, Clôture, Suspension"
+                />
+                <datalist id="statutOptions">
+                  <option value="En cours" />
+                  <option value="Soldé" />
+                  <option value="Arrêt définitif" />
+                  <option value="Clôture" />
+                  <option value="Suspension" />
+                </datalist>
               </div>
             </div>
           </div>

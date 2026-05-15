@@ -2151,8 +2151,21 @@ tr:hover{background:#f1f5f9}
 }
 
 .panel textarea,
+.panel input,
 .panel select{
   width:100%;
+}
+
+#statutInput{
+  appearance:textfield;
+  -webkit-appearance:textfield;
+  background-image:none!important;
+}
+
+#statutInput::-webkit-calendar-picker-indicator{
+  display:none!important;
+  opacity:0!important;
+  pointer-events:none!important;
 }
 
 .panel textarea{

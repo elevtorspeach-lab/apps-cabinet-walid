@@ -5458,16 +5458,21 @@ function normalizeLooseText(value){
     .trim();
 }
 
+function stripExcelBidiControlChars(value){
+  return String(value ?? '').replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '');
+}
+
+function sanitizeExcelExportCellValue(value){
+  if(typeof value !== 'string') return value;
+  return stripExcelBidiControlChars(value);
+}
+
+function sanitizeExcelExportRow(row){
+  return Array.isArray(row) ? row.map(sanitizeExcelExportCellValue) : row;
+}
+
 function formatMixedDirectionExportText(value){
-  const text = normalizeLooseText(value);
-  if(!text) return '';
-  const hasArabic = /[\u0600-\u06FF]/.test(text);
-  const hasLatinOrDigits = /[A-Za-z0-9]/.test(text);
-  if(!hasArabic || !hasLatinOrDigits) return text;
-  return `\u200F${text.replace(/[A-Za-z0-9][A-Za-z0-9\s/+().:-]*/g, (segment)=>{
-    const cleaned = String(segment || '').trim();
-    return cleaned ? `\u2066${cleaned}\u2069` : '';
-  })}`;
+  return stripExcelBidiControlChars(normalizeLooseText(value));
 }
 
 function getAudienceReferenceCellAlignment(layout, columnIndex){
@@ -6499,6 +6504,9 @@ async function saveBlobDirectOrDownload(blob, filename, options = {}){
 
 async function exportAudienceWorkbookXlsxStyled({ headers, rows, subtitle = '', sheetName = 'Audience', colWidths = [], filename = 'audience_export.xlsx', preferWorker = false, openAfterExport = false, layoutPreset = 'default', browserDownloadTarget = null, browserOpenInline = false, preferredFileHandle = null, wrapColumnIndexes = [] }){
   const directExportHandlePromise = primeDirectExportDirectoryAccess();
+  headers = sanitizeExcelExportRow(headers);
+  rows = (Array.isArray(rows) ? rows : []).map(sanitizeExcelExportRow);
+  subtitle = stripExcelBidiControlChars(subtitle);
   const colCount = Array.isArray(headers) ? headers.length : 0;
   const rowCount = Array.isArray(rows) ? rows.length : 0;
   const useAudienceReferenceLayout = layoutPreset === 'audience-reference';
@@ -16089,8 +16097,7 @@ function setupEvents(){
   $('clientsLink').onclick = ()=>showView('clients');
   $('creationLink').onclick = ()=>{
     creationPinnedClientId = '';
-    resetCreationForm();
-    showView('creation');
+    showView('creation', { newDossier: true, force: true });
   };
   $('suiviLink').onclick = ()=>{
     filterSuiviStatus = 'all';
@@ -16627,6 +16634,13 @@ function setSelectedAudienceColor(color, syncFilter){
 // ================== NAV ==================
 function showView(v, options = {}){
   const nextView = resolveAccessibleView(v);
+  if(nextView === 'creation' && options.newDossier === true){
+    creationPinnedClientId = '';
+    resetCreationForm();
+  }
+  if(currentView === 'creation' && nextView !== 'creation' && editingDossier && options.keepCreationState !== true){
+    resetCreationForm();
+  }
   const isSameView = nextView && nextView === currentView;
   const isKnownDeferredView = Object.prototype.hasOwnProperty.call(DEFERRED_RENDER_SECTION_IDS, nextView);
   const viewIsDirty = isKnownDeferredView ? deferredRenderDirtyState[nextView] === true : false;
@@ -17413,7 +17427,7 @@ function goToCreation(clientId){
   if(!client || !canEditClient(client)) return alert('Accès refusé');
   creationPinnedClientId = String(clientId || '');
   resetCreationForm(clientId);
-  showView('creation');
+  showView('creation', { preserveCreationForm: true });
 }
 
 // ================== DOSSIERS ==================
@@ -17436,6 +17450,15 @@ async function addDossier(){
     if(selected.length === 0) return alert('Choisir au moins une procédure');
 
     const details = collectProcedureDraftFromCards({ trimValues: true });
+    const dossierReferenceForCustomProcedures = String($('referenceClientInput')?.value || '').trim();
+    customList.forEach((procName)=>{
+      const safeProcName = String(procName || '').trim();
+      if(!safeProcName) return;
+      if(!details[safeProcName]) details[safeProcName] = {};
+      if(dossierReferenceForCustomProcedures && !String(details[safeProcName].referenceClient || '').trim()){
+        details[safeProcName].referenceClient = dossierReferenceForCustomProcedures;
+      }
+    });
     const hasAssProcedure = selected.some((value)=>normalizeProcedureName(getProcedureBaseName(String(value || '').trim())) === 'ass');
 
     const rawDateAffectation = String($('dateAffectation')?.value || '').trim();
@@ -18127,7 +18150,7 @@ function editDossier(clientId, index){
   if(!d) return;
   editingDossier = { clientId, index };
   editingOriginalProcedures = normalizeProcedures(d);
-  showView('creation');
+  showView('creation', { preserveCreationForm: true });
 
   $('selectClient').value = clientId;
   $('debiteurInput').value = d.debiteur || '';
@@ -24746,6 +24769,19 @@ function addCustomProcedure(){
   input.value = '';
   renderCustomProcedures();
   renderProcedureDetails();
+  prefillCustomProcedureAudienceReference(value);
+}
+
+function prefillCustomProcedureAudienceReference(procName){
+  const safeName = String(procName || '').trim();
+  if(!safeName) return;
+  const dossierReference = String($('referenceClientInput')?.value || '').trim();
+  if(!dossierReference) return;
+  const targetCard = getProcedureCardElements(document).find(card=>getProcedureCardName(card) === safeName);
+  const refInput = targetCard?.querySelector('input[data-field="referenceClient"]');
+  if(refInput && !String(refInput.value || '').trim()){
+    refInput.value = dossierReference;
+  }
 }
 
 function removeCustomProcedure(value){

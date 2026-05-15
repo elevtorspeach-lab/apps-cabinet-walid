@@ -878,13 +878,14 @@
               </div>
 
               <div class="panel-field">
-                <select id="statutInput">
-                  <option value="En cours" selected>En cours</option>
-                  <option value="Soldé">Soldé</option>
-                  <option value="Arrêt définitif">Arrêt définitif</option>
-                  <option value="Clôture">Clôture</option>
-                  <option value="Suspension">Suspension</option>
-                </select>
+                <input type="text" id="statutInput" list="statutOptions" value="En cours" autocomplete="off" placeholder="En cours, Soldé, Arrêt définitif, Clôture, Suspension" />
+                <datalist id="statutOptions">
+                  <option value="En cours"></option>
+                  <option value="Soldé"></option>
+                  <option value="Arrêt définitif"></option>
+                  <option value="Clôture"></option>
+                  <option value="Suspension"></option>
+                </datalist>
               </div>
             </div>
           </div>
