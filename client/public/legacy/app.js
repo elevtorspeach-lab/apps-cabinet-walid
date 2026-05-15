@@ -82,6 +82,8 @@ function buildSeedUsers(){
     passwordUpdatedAt: '',
     requirePasswordChange: false,
     role: user.role,
+    canEditData: true,
+    canManageTeam: true,
     clientIds: []
   }));
 }
@@ -817,6 +819,24 @@ function getRoleLabel(role){
   return key || '-';
 }
 
+function userCanEditData(user){
+  const role = normalizeUserRole(user?.role);
+  if(role === 'manager') return true;
+  if(role === 'admin') return user?.canEditData !== false;
+  return false;
+}
+
+function userCanManageTeam(user){
+  return normalizeUserRole(user?.role) === 'manager' && user?.canManageTeam !== false;
+}
+
+function getUserPermissionLabel(user){
+  const role = normalizeUserRole(user?.role);
+  if(role === 'manager') return userCanManageTeam(user) ? 'Gestion équipe' : 'Sans gestion équipe';
+  if(role === 'admin') return userCanEditData(user) ? 'Accès complet' : 'Lecture seule';
+  return 'Lecture seule';
+}
+
 function humanizeUserDisplayName(value){
   const raw = String(value || '').trim();
   if(!raw) return '';
@@ -1341,7 +1361,7 @@ function getAudienceViewerCacheKey(){
   const clientIds = Array.isArray(user.clientIds)
     ? [...user.clientIds].map(v=>Number(v)).filter(v=>Number.isFinite(v)).sort((a, b)=>a - b).join(',')
     : '';
-  return `${id}::${role}::${clientIds}`;
+  return `${id}::${role}::${userCanEditData(user) ? 'edit' : 'read'}::${clientIds}`;
 }
 
 function invalidateDerivedCaches(options = {}){
@@ -3915,6 +3935,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     { header: 'ref client', width: 30 },
     { header: 'Procédure', width: 22 },
     { header: 'debiteur ', width: 34 },
+    { header: 'Statut dossier', width: 20 },
     { header: 'Adresse', width: 42 },
     { header: 'Ville', width: 22 },
     ...(!omitWwAndMarque ? [
@@ -3941,6 +3962,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
       || normalizedHeader === 'procédure'
       || normalizedHeader === 'debiteur'
       || normalizedHeader === 'debiteur '
+      || normalizedHeader === 'statut dossier'
       || normalizedHeader === 'adresse'
       || normalizedHeader === 'caution'
       || normalizedHeader === 'adresse  caution'
@@ -3975,6 +3997,15 @@ function getSuiviExportProcedureNames(row){
       .filter(Boolean)
   )];
   return out.length ? out : [''];
+}
+
+function getSuiviExportStatusValue(dossier){
+  const snapshot = getDossierDisplayStatusSnapshot(dossier || {});
+  const statut = String(snapshot?.statut || '').trim() || 'En cours';
+  const detail = String(snapshot?.detail || '').trim();
+  return detail && normalizeLooseText(detail) !== normalizeLooseText(statut)
+    ? `${statut} - ${detail}`
+    : statut;
 }
 
 function collectSuiviProcedureExportValues(dossier, procedureName){
@@ -4039,6 +4070,7 @@ function buildSuiviExportTableRows(rows, options = {}){
         row.d?.referenceClient || '-',
         procedureName || '-',
         row.d?.debiteur || '-',
+        getSuiviExportStatusValue(row.d),
         row.d?.adresse || '-',
         row.d?.ville || '-'
       ];
@@ -5226,13 +5258,14 @@ window.isAdmin = isAdmin;
 window.canEditData = canEditData;
 window.canImportData = canImportData;
 window.canExportData = canExportData;
+window.canManageTeam = canManageTeam;
 
 function isDefaultManagerUser(user){
   return String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME;
 }
 
 function canEditData(){
-  return isManager() || isAdmin();
+  return userCanEditData(currentUser);
 }
 
 function canImportData(){
@@ -5252,7 +5285,7 @@ function canDeleteData(){
 }
 
 function canManageTeam(){
-  return isManager();
+  return userCanManageTeam(currentUser);
 }
 
 let viewerReadonlyUiObserver = null;
@@ -5335,7 +5368,9 @@ function getAccessibleViewsForCurrentUser(){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']);
   }
   if(isManager()){
-    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']);
+    const views = ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'recycle'];
+    if(canManageTeam()) views.push('equipe');
+    return new Set(views);
   }
   if(isAdmin()){
     return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture']);
@@ -8888,6 +8923,8 @@ function normalizeUser(rawUser){
   const passwordUpdatedAt = String(rawUser.passwordUpdatedAt || '').trim();
   const requirePasswordChange = false;
   const role = normalizeUserRole(rawUser.role);
+  const canEditDataValue = role === 'client' ? false : rawUser.canEditData !== false;
+  const canManageTeamValue = role === 'manager' ? rawUser.canManageTeam !== false : false;
   const clientIds = Array.isArray(rawUser.clientIds)
     ? [...new Set(rawUser.clientIds.map(v=>Number(v)).filter(v=>Number.isFinite(v)))]
     : [];
@@ -8902,6 +8939,8 @@ function normalizeUser(rawUser){
     passwordUpdatedAt,
     requirePasswordChange,
     role,
+    canEditData: canEditDataValue,
+    canManageTeam: canManageTeamValue,
     clientIds
   };
 }
@@ -10616,6 +10655,8 @@ function ensureManagerUser(users){
       passwordVersion: 0,
       passwordUpdatedAt: '',
       requirePasswordChange: false,
+      canEditData: true,
+      canManageTeam: true,
       clientIds: []
     };
     if(!existingUser || typeof existingUser !== 'object') return bootstrapUser;
@@ -10668,6 +10709,8 @@ function ensureManagerUser(users){
         id: userId,
         username: String(user?.username || '').trim(),
         role,
+        canEditData: role === 'client' ? false : user.canEditData !== false,
+        canManageTeam: role === 'manager' ? user.canManageTeam !== false : false,
         clientIds: normalizedClientIds
       };
       if(hasStoredPasswordHash(user)){
@@ -23886,12 +23929,21 @@ function updateTeamClientCount(){
 function updateTeamClientSelectorState(){
   const role = normalizeUserRole($('teamRole')?.value || 'client');
   const wrap = $('teamClientsWrap');
-  if(!wrap) return;
-  const disabled = role !== 'client';
-  wrap.style.opacity = disabled ? '0.6' : '1';
-  wrap.querySelectorAll('input[type="checkbox"]').forEach(i=> i.disabled = disabled);
+  if(wrap){
+    const disabled = role !== 'client';
+    wrap.style.opacity = disabled ? '0.6' : '1';
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(i=> i.disabled = disabled);
+  }
   const search = $('teamClientSearchInput');
-  if(search) search.disabled = disabled;
+  if(search) search.disabled = role !== 'client';
+  const adminPermissionWrap = $('teamAdminPermissionWrap');
+  if(adminPermissionWrap) adminPermissionWrap.style.display = role === 'admin' ? '' : 'none';
+  const adminPermissionSelect = $('teamAdminCanEdit');
+  if(adminPermissionSelect) adminPermissionSelect.disabled = role !== 'admin';
+  const managerPermissionWrap = $('teamManagerPermissionWrap');
+  if(managerPermissionWrap) managerPermissionWrap.style.display = role === 'manager' ? '' : 'none';
+  const managerPermissionSelect = $('teamManagerCanManage');
+  if(managerPermissionSelect) managerPermissionSelect.disabled = role !== 'manager';
 }
 
 function addClientFromTeam(){
@@ -23905,6 +23957,8 @@ function resetTeamForm(){
   if($('teamPassword')) $('teamPassword').value = '';
   if($('teamRole')) $('teamRole').value = 'client';
   if($('teamRole')) $('teamRole').disabled = false;
+  if($('teamAdminCanEdit')) $('teamAdminCanEdit').value = '1';
+  if($('teamManagerCanManage')) $('teamManagerCanManage').value = '1';
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes([]);
   updateTeamClientSelectorState();
@@ -23939,6 +23993,8 @@ async function upsertProvisionedUser(nextUsers, config, nextIdRef){
     id: existingUser ? Number(existingUser.id) : nextIdRef.value++,
     username,
     role,
+    canEditData: role === 'client' ? false : config?.canEditData !== false,
+    canManageTeam: role === 'manager' ? config?.canManageTeam !== false : false,
     clientIds,
     requirePasswordChange: false
   };
@@ -24027,6 +24083,8 @@ async function saveTeamUser(){
   if(!canManageTeam()) return alert('Accès refusé');
   const username = $('teamUsername')?.value?.trim() || '';
   const role = normalizeUserRole($('teamRole')?.value || 'client');
+  const adminCanEditData = role === 'admin' ? String($('teamAdminCanEdit')?.value || '1') !== '0' : true;
+  const managerCanManageTeam = role === 'manager' ? String($('teamManagerCanManage')?.value || '1') !== '0' : false;
   const rawPassword = normalizeLoginPassword($('teamPassword')?.value?.trim() || '');
   const password = role === 'client'
     ? (rawPassword || STANDARD_TEAM_DEFAULT_PASSWORD)
@@ -24063,13 +24121,23 @@ async function saveTeamUser(){
         username,
         password,
         role,
+        canEditData: role === 'client' ? false : adminCanEditData,
+        canManageTeam: role === 'manager' ? managerCanManageTeam : false,
         clientIds: finalClientIds
       })
     }, 10000);
     if(response.ok){
       const payload = await response.json().catch(()=>null);
       if(payload?.user){
-        const savedUser = normalizeUser(payload.user);
+        const savedUser = normalizeUser({
+          ...payload.user,
+          canEditData: Object.prototype.hasOwnProperty.call(payload.user, 'canEditData')
+            ? payload.user.canEditData
+            : (role === 'client' ? false : adminCanEditData),
+          canManageTeam: Object.prototype.hasOwnProperty.call(payload.user, 'canManageTeam')
+            ? payload.user.canManageTeam
+            : (role === 'manager' ? managerCanManageTeam : false)
+        });
         const existingIndex = USERS.findIndex(u=>Number(u?.id) === Number(savedUser?.id));
         if(existingIndex >= 0) USERS[existingIndex] = savedUser;
         else USERS.push(savedUser);
@@ -24095,10 +24163,14 @@ async function saveTeamUser(){
     if(isDefaultManagerUser(user)){
       nextUser.username = DEFAULT_MANAGER_USERNAME;
       nextUser.role = 'manager';
+      nextUser.canEditData = true;
+      nextUser.canManageTeam = true;
       nextUser.clientIds = [];
     }else{
       nextUser.username = username;
       nextUser.role = role;
+      nextUser.canEditData = role === 'client' ? false : adminCanEditData;
+      nextUser.canManageTeam = role === 'manager' ? managerCanManageTeam : false;
       nextUser.clientIds = finalClientIds;
     }
     if(password){
@@ -24116,6 +24188,8 @@ async function saveTeamUser(){
       passwordUpdatedAt: '',
       requirePasswordChange: false,
       role,
+      canEditData: role === 'client' ? false : adminCanEditData,
+      canManageTeam: role === 'manager' ? managerCanManageTeam : false,
       clientIds: finalClientIds
     };
     nextUser = await secureUserPassword(nextUser, password, { requirePasswordChange: false });
@@ -24147,9 +24221,12 @@ function editTeamUser(userId){
   if($('teamPassword')) $('teamPassword').value = '';
   if($('teamRole')) $('teamRole').value = normalizeUserRole(user.role);
   if($('teamRole')) $('teamRole').disabled = isDefaultManagerUser(user);
+  if($('teamAdminCanEdit')) $('teamAdminCanEdit').value = userCanEditData(user) ? '1' : '0';
+  if($('teamManagerCanManage')) $('teamManagerCanManage').value = userCanManageTeam(user) ? '1' : '0';
   if($('teamClientSearchInput')) $('teamClientSearchInput').value = '';
   renderTeamClientCheckboxes(Array.isArray(user.clientIds) ? user.clientIds : []);
   updateTeamClientSelectorState();
+  if(isDefaultManagerUser(user) && $('teamManagerCanManage')) $('teamManagerCanManage').disabled = true;
   if($('teamSaveBtn')) $('teamSaveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Mettre à jour';
 }
 
@@ -24163,6 +24240,10 @@ function deleteTeamUser(userId){
   const managerCount = USERS.filter(u=>u.role === 'manager').length;
   if(user.role === 'manager' && managerCount <= 1){
     return alert('Impossible de supprimer le dernier manager');
+  }
+  const teamManagerCount = USERS.filter(userCanManageTeam).length;
+  if(userCanManageTeam(user) && teamManagerCount <= 1){
+    return alert('Impossible de supprimer le dernier gestionnaire avec droit équipe');
   }
   if(currentUser?.id === userId){
     return alert('Impossible de supprimer l’utilisateur connecté');
@@ -24470,6 +24551,7 @@ function renderEquipe(options = {}){
 
   body.innerHTML = pagination.rows.map(u=>{
     const roleLabel = getRoleLabel(u.role);
+    const permissionLabel = getUserPermissionLabel(u);
     const clients = (Array.isArray(u.clientIds) ? u.clientIds : [])
       .map(getClientNameById)
       .join(', ') || '-';
@@ -24480,6 +24562,7 @@ function renderEquipe(options = {}){
       <tr>
         <td>${escapeHtml(u.username)}</td>
         <td>${escapeHtml(roleLabel)}</td>
+        <td>${escapeHtml(permissionLabel)}</td>
         <td>${escapeHtml(clients)}</td>
         <td>${escapeHtml(securityLabel)}</td>
         <td>
@@ -27486,8 +27569,8 @@ function setAudienceJugementAddFromEncoded(keyEncoded, value){
   if(!dossier) return false;
   const p = getAudienceProcedure(ci, di, procKey);
   const before = String(p?.jugementAdd || '').trim().toLowerCase();
-  if(before === nextValue) return false;
-  p.jugementAdd = nextValue;
+  const finalValue = before === nextValue ? '' : nextValue;
+  p.jugementAdd = finalValue;
   if(audienceDraft[key] && Object.prototype.hasOwnProperty.call(audienceDraft[key], 'jugementAdd')){
     delete audienceDraft[key].jugementAdd;
     if(!Object.keys(audienceDraft[key]).length) delete audienceDraft[key];
@@ -27499,7 +27582,7 @@ function setAudienceJugementAddFromEncoded(keyEncoded, value){
     field: 'procedureDetails.jugementAdd',
     procedure: procKey,
     before,
-    after: nextValue
+    after: finalValue
   });
   markAudienceRowsCacheDirty({
     preserveClientAccessCaches: true,

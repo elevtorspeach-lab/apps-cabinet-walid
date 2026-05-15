@@ -143,6 +143,8 @@ function buildBootstrapUsers() {
     passwordVersion: 0,
     passwordUpdatedAt: '',
     requirePasswordChange: false,
+    canEditData: true,
+    canManageTeam: true,
     role: user.role,
     clientIds: []
   }));
@@ -174,6 +176,8 @@ function ensureManagerUser(users) {
       passwordVersion: 0,
       passwordUpdatedAt: '',
       requirePasswordChange: false,
+      canEditData: true,
+      canManageTeam: true,
       clientIds: []
     };
     if (!existingUser || typeof existingUser !== 'object') {
@@ -231,6 +235,8 @@ function ensureManagerUser(users) {
         id: userId,
         username: String(user?.username || '').trim(),
         role,
+        canEditData: role === 'client' ? false : user.canEditData !== false,
+        canManageTeam: role === 'manager' ? user.canManageTeam !== false : false,
         clientIds: normalizedClientIds
       };
       if (hasStoredPasswordHash(user)) {
@@ -332,6 +338,8 @@ function createAuthSession(user) {
     userId: Number(user?.id) || 0,
     username: String(user?.username || '').trim().toLowerCase(),
     role: String(user?.role || '').trim().toLowerCase(),
+    canEditData: canUserEditData(user),
+    canManageTeam: canUserManageTeam(user),
     clientIds,
     issuedAt: Date.now(),
     expiresAt: Date.now() + AUTH_SESSION_TTL_MS
@@ -340,10 +348,63 @@ function createAuthSession(user) {
   return session;
 }
 
+function refreshAuthSessionsFromUsers(users) {
+  const normalizedUsers = ensureManagerUser(Array.isArray(users) ? users : []);
+  const usersById = new Map();
+  const usersByUsername = new Map();
+  normalizedUsers.forEach((user) => {
+    const id = Number(user?.id);
+    const username = String(user?.username || '').trim().toLowerCase();
+    if (Number.isFinite(id)) usersById.set(id, user);
+    if (username) usersByUsername.set(username, user);
+  });
+
+  for (const [token, session] of authSessions.entries()) {
+    const user = usersById.get(Number(session?.userId))
+      || usersByUsername.get(String(session?.username || '').trim().toLowerCase());
+    if (!user) {
+      authSessions.delete(token);
+      continue;
+    }
+    const clientIds = Array.isArray(user?.clientIds)
+      ? [...new Set(
+        user.clientIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )].sort((a, b) => a - b)
+      : [];
+    session.userId = Number(user?.id) || 0;
+    session.username = String(user?.username || '').trim().toLowerCase();
+    session.role = String(user?.role || '').trim().toLowerCase();
+    session.canEditData = canUserEditData(user);
+    session.canManageTeam = canUserManageTeam(user);
+    session.clientIds = clientIds;
+  }
+}
+
 function normalizeTeamRole(value) {
   const role = String(value || '').trim().toLowerCase();
   if (role === 'manager' || role === 'admin' || role === 'client') return role;
   return 'client';
+}
+
+function canUserEditData(user) {
+  const role = String(user?.role || '').trim().toLowerCase();
+  if (role === 'manager') return true;
+  if (role === 'admin') return user?.canEditData !== false;
+  return false;
+}
+
+function canSessionEditData(session) {
+  return canUserEditData(session);
+}
+
+function canUserManageTeam(user) {
+  return String(user?.role || '').trim().toLowerCase() === 'manager' && user?.canManageTeam !== false;
+}
+
+function canSessionManageTeam(session) {
+  return canUserManageTeam(session);
 }
 
 function cleanupAuthSessions() {
@@ -372,6 +433,13 @@ function requireApiAuth(req, res, next) {
   }
   session.expiresAt = Date.now() + AUTH_SESSION_TTL_MS;
   req.authSession = session;
+  next();
+}
+
+function requireEditAccess(req, res, next) {
+  if (!canSessionEditData(req.authSession)) {
+    return sendJsonError(res, 403, 'EDIT_FORBIDDEN', 'Edit access required.');
+  }
   next();
 }
 
@@ -643,7 +711,7 @@ function getStateScopeKeyForSession(session) {
 }
 
 function canSessionReplaceFullState(session) {
-  return getStateScopeKeyForSession(session) === 'all';
+  return getStateScopeKeyForSession(session) === 'all' && canSessionEditData(session);
 }
 
 function buildScopedStatePayloadEntry(state, session) {
@@ -1848,6 +1916,7 @@ async function persistJournalMutation(mutation, options = {}) {
       updatedAt: saved?.updatedAt
     });
     setCachedState(saved);
+    refreshAuthSessionsFromUsers(saved?.users);
   } else if (mutation?.type === 'dossier') {
     const patch = mutation?.body && typeof mutation.body === 'object' ? mutation.body : {};
     await db.applyDossierMutation(patch, {
@@ -1903,6 +1972,9 @@ async function persistJournalMutations(mutations, options = {}) {
     setCachedState(saved);
   } else {
     await writeStateSnapshot(saved, { clearJournal: false });
+    if (safeMutations.some((mutation) => mutation?.type === 'users')) {
+      refreshAuthSessionsFromUsers(saved?.users);
+    }
   }
   if (pendingSnapshotFlushTimer) {
     clearTimeout(pendingSnapshotFlushTimer);
@@ -2044,6 +2116,8 @@ app.post('/api/auth/bootstrap', async (req, res) => {
     user: {
       username: DEFAULT_MANAGER_USERNAME,
       role: 'manager',
+      canEditData: true,
+      canManageTeam: true,
       requirePasswordChange: false
     }
   });
@@ -2088,7 +2162,7 @@ app.get('/api/dossiers/paginated', requireApiAuth, async (req, res) => {
 
 app.use('/api/files', requireApiAuth);
 
-app.post('/api/files', async (req, res) => {
+app.post('/api/files', requireEditAccess, async (req, res) => {
   try {
     await fsp.mkdir(UPLOADS_DIR, { recursive: true });
     const body = getRequestBodyObject(req);
@@ -2119,7 +2193,7 @@ app.post('/api/files', async (req, res) => {
   }
 });
 
-app.post('/api/import-backups/excel', requireApiAuth, async (req, res) => {
+app.post('/api/import-backups/excel', requireApiAuth, requireEditAccess, async (req, res) => {
   try {
     const body = getRequestBodyObject(req);
     const originalName = sanitizeUploadFileName(body?.name || 'import.xlsx');
@@ -2169,7 +2243,7 @@ app.get('/api/files/:id/:name?', async (req, res) => {
   }
 });
 
-app.post('/api/dossiers/batch-update', requireApiAuth, async (req, res) => {
+app.post('/api/dossiers/batch-update', requireApiAuth, requireEditAccess, async (req, res) => {
   try {
     const body = getRequestBodyObject(req);
     const updates = Array.isArray(body.updates) ? body.updates : [];
@@ -2221,6 +2295,8 @@ app.post('/api/auth/login', async (req, res) => {
     user: {
       username: String(user.username || '').trim(),
       role: String(user.role || '').trim(),
+      canEditData: canUserEditData(user),
+      canManageTeam: canUserManageTeam(user),
       requirePasswordChange: false
     }
   });
@@ -2228,8 +2304,8 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
   try {
-    if (String(req.authSession?.role || '').trim().toLowerCase() !== 'manager') {
-      return sendJsonError(res, 403, 'FORBIDDEN', 'Manager access required.');
+    if (!canSessionManageTeam(req.authSession)) {
+      return sendJsonError(res, 403, 'FORBIDDEN', 'Team management access required.');
     }
     await ensureDataFile();
     const body = getRequestBodyObject(req);
@@ -2238,7 +2314,9 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
     const requestedId = Number(body?.id);
     const requestedUsername = String(body?.username || '').trim();
     const requestedPassword = normalizeLoginPassword(body?.password || '');
-    const requestedRole = normalizeTeamRole(body?.role || 'client');
+    let requestedRole = normalizeTeamRole(body?.role || 'client');
+    let requestedCanEditData = requestedRole === 'client' ? false : body?.canEditData !== false;
+    let requestedCanManageTeam = requestedRole === 'manager' ? body?.canManageTeam !== false : false;
     const requestedClientIds = requestedRole === 'client'
       ? [...new Set((Array.isArray(body?.clientIds) ? body.clientIds : [])
         .map((value) => Number(value))
@@ -2261,6 +2339,24 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
       ? Number(existingUser.id)
       : users.reduce((max, user) => Math.max(max, Number(user?.id) || 0), 0) + 1;
 
+    if (
+      String(existingUser?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME
+      || requestedUsername.toLowerCase() === DEFAULT_MANAGER_USERNAME
+    ) {
+      requestedRole = 'manager';
+      requestedCanEditData = true;
+      requestedCanManageTeam = true;
+    }
+
+    if (existingUser && canUserManageTeam(existingUser) && !requestedCanManageTeam) {
+      const remainingTeamManagers = users.filter((user) => (
+        Number(user?.id) !== Number(nextId) && canUserManageTeam(user)
+      ));
+      if (!remainingTeamManagers.length) {
+        return sendJsonError(res, 400, 'LAST_TEAM_MANAGER_REQUIRED', 'At least one manager must keep team management access.');
+      }
+    }
+
     const usernameTaken = users.some((user) => (
       String(user?.username || '').trim().toLowerCase() === requestedUsername.toLowerCase()
       && Number(user?.id) !== Number(nextId)
@@ -2274,6 +2370,8 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
       id: nextId,
       username: requestedUsername,
       role: requestedRole,
+      canEditData: requestedCanEditData,
+      canManageTeam: requestedCanManageTeam,
       clientIds: requestedClientIds,
       requirePasswordChange: false
     };
@@ -2293,6 +2391,7 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
 
     const refreshed = await db.loadFullState();
     setCachedState(refreshed);
+    refreshAuthSessionsFromUsers(refreshed?.users);
     return res.json({ ok: true, user: nextUser });
   } catch (err) {
     return sendJsonError(res, 500, 'TEAM_USER_UPSERT_FAILED', 'Team user save failed.', err);
@@ -2300,6 +2399,12 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
 });
 
 app.use('/api/state', requireApiAuth);
+app.use('/api/state', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+  return requireEditAccess(req, res, next);
+});
 
 app.get('/api/state', async (req, res) => {
   try {
@@ -2485,6 +2590,9 @@ app.post('/api/state', async (req, res) => {
       const statePayload = { ...body };
       delete statePayload._sourceId;
       delete statePayload._baseVersion;
+      if (Array.isArray(statePayload.users) && !canSessionManageTeam(req.authSession)) {
+        return { teamForbidden: true };
+      }
       if (isDangerousEmptyStateReplace(currentState, statePayload)) {
         return { emptyReplaceRejected: true, state: currentState };
       }
@@ -2509,12 +2617,16 @@ app.post('/api/state', async (req, res) => {
           };
         }
         setCachedState(saved);
+        refreshAuthSessionsFromUsers(saved?.users);
       }
       broadcastStateUpdated({ ...saved, sourceId });
       return { saved };
     });
     if (result?.conflict) {
       return sendConflictJson(res, result.state);
+    }
+    if (result?.teamForbidden) {
+      return sendJsonError(res, 403, 'TEAM_MANAGEMENT_FORBIDDEN', 'Team management access required.');
     }
     if (result?.emptyReplaceRejected) {
       return sendJsonError(
@@ -2604,6 +2716,9 @@ app.post('/api/state/upload-chunk', async (req, res) => {
       const nextState = session.mode === 'merge'
         ? mergeImportedState(currentState, statePayload)
         : statePayload;
+      if (Array.isArray(nextState?.users) && !canSessionManageTeam(req.authSession)) {
+        return { teamForbidden: true };
+      }
       if (session.mode !== 'merge' && isDangerousEmptyStateReplace(currentState, nextState)) {
         return { emptyReplaceRejected: true, state: currentState };
       }
@@ -2611,11 +2726,17 @@ app.post('/api/state/upload-chunk', async (req, res) => {
         await maybeWriteBackupSnapshot(currentState);
       }
       const saved = await writeState(nextState, { previousState: currentState });
+      if (Array.isArray(saved?.users)) {
+        refreshAuthSessionsFromUsers(saved.users);
+      }
       broadcastStateUpdated({ ...saved, sourceId: session.sourceId });
       return { saved };
     });
     if (result?.conflict) {
       return sendConflictJson(res, result.state);
+    }
+    if (result?.teamForbidden) {
+      return sendJsonError(res, 403, 'TEAM_MANAGEMENT_FORBIDDEN', 'Team management access required.');
     }
     if (result?.emptyReplaceRejected) {
       return sendJsonError(
@@ -2663,6 +2784,9 @@ app.post('/api/state/clients', async (req, res) => {
 
 app.post('/api/state/users', async (req, res) => {
   try {
+    if (!canSessionManageTeam(req.authSession)) {
+      return sendJsonError(res, 403, 'TEAM_MANAGEMENT_FORBIDDEN', 'Team management access required.');
+    }
     const result = await enqueueStateMutation(async () => {
       await ensureDataFile();
       const body = getRequestBodyObject(req);

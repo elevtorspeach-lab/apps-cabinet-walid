@@ -30,6 +30,20 @@ function EquipeSection() {
                 <option value="manager">Gestionnaire</option>
               </select>
             </div>
+            <div id="teamAdminPermissionWrap" className="form-group">
+              <label>Droit admin</label>
+              <select id="teamAdminCanEdit">
+                <option value="1">Accès complet</option>
+                <option value="0">Lecture seule</option>
+              </select>
+            </div>
+            <div id="teamManagerPermissionWrap" className="form-group">
+              <label>Droit gestionnaire</label>
+              <select id="teamManagerCanManage">
+                <option value="1">Gestion équipe</option>
+                <option value="0">Sans gestion équipe</option>
+              </select>
+            </div>
             <div id="teamClientsWrap" className="form-group full">
               <input type="text" id="teamClientSearchInput" placeholder="Rechercher client..." />
               <div id="teamClientCount" className="diligence-empty">0 client sélectionné</div>
@@ -48,6 +62,7 @@ function EquipeSection() {
               <tr>
                 <th>Username</th>
                 <th>Rôle</th>
+                <th>Droit</th>
                 <th>Clients autorisés</th>
                 <th>Sécurité</th>
                 <th>Actions</th>

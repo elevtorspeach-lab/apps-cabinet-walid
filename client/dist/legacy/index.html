@@ -550,6 +550,20 @@
                 <option value="manager">Gestionnaire</option>
               </select>
             </div>
+            <div id="teamAdminPermissionWrap" class="form-group">
+              <label>Droit admin</label>
+              <select id="teamAdminCanEdit">
+                <option value="1">Accès complet</option>
+                <option value="0">Lecture seule</option>
+              </select>
+            </div>
+            <div id="teamManagerPermissionWrap" class="form-group">
+              <label>Droit gestionnaire</label>
+              <select id="teamManagerCanManage">
+                <option value="1">Gestion équipe</option>
+                <option value="0">Sans gestion équipe</option>
+              </select>
+            </div>
             <div id="teamClientsWrap" class="form-group full">
               <input type="text" id="teamClientSearchInput" placeholder="Rechercher client..." />
               <div id="teamClientCount" class="diligence-empty">0 client sélectionné</div>
@@ -568,6 +582,7 @@
               <tr>
                 <th>Username</th>
                 <th>Rôle</th>
+                <th>Droit</th>
                 <th>Clients autorisés</th>
                 <th>Sécurité</th>
                 <th>Actions</th>
