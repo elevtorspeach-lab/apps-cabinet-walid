@@ -2521,6 +2521,17 @@ tr:hover{background:#f1f5f9}
   --audience-tone-shadow:rgba(34,141,147,.22);
 }
 
+#audienceSection .audience-checked-count.audience-tone-pink,
+#audienceSection #printAudienceBtn.audience-tone-pink{
+  --audience-tone-solid:#db2777;
+  --audience-tone-solid-2:#be185d;
+  --audience-tone-soft:#fce7f3;
+  --audience-tone-soft-2:#fbcfe8;
+  --audience-tone-border:#f9a8d4;
+  --audience-tone-text:#831843;
+  --audience-tone-shadow:rgba(219,39,119,.22);
+}
+
 #audienceSection .audience-checked-count.audience-tone-purple-dark,
 #audienceSection #printAudienceBtn.audience-tone-purple-dark,
 #audienceSection .audience-checked-count.audience-tone-purple-light,
@@ -2820,6 +2831,12 @@ tr:hover{background:#f1f5f9}
   border-color:#0f766e;
 }
 
+#filterAudienceColor.audience-color-select-pink{
+  background:#db2777;
+  color:#fff;
+  border-color:#be185d;
+}
+
 #filterAudienceColor.audience-color-select-closed{
   background:#6d28d9;
   color:#fff;
@@ -2848,6 +2865,11 @@ tr:hover{background:#f1f5f9}
 
 #filterAudienceColor option[value="document-ok"]{
   background:#0f766e;
+  color:#fff;
+}
+
+#filterAudienceColor option[value="pink"]{
+  background:#db2777;
   color:#fff;
 }
 
@@ -2994,6 +3016,7 @@ tr:hover{background:#f1f5f9}
 .color-btn.red{background:#991b1b}
 .color-btn.yellow{background:linear-gradient(135deg,var(--audience-pill-yellow-1) 0%, var(--audience-pill-yellow-2) 100%);color:#4f3a00}
 .color-btn.document-ok{background:linear-gradient(135deg,var(--audience-pill-document-1) 0%, var(--audience-pill-document-2) 100%)}
+.color-btn.pink{background:linear-gradient(135deg,#ec4899 0%, #be185d 100%)}
 .color-btn.purple-dark{background:#6d28d9}
 .color-btn.purple-light{background:#6d28d9}
 .color-btn.error{background:#991b1b}
@@ -3004,6 +3027,7 @@ tr.color-green{border-left:6px solid #166534;background:#a8d0b4}
 tr.color-red{border-left:6px solid #991b1b;background:#e4a6a6}
 tr.color-yellow{border-left:6px solid #ca8a04;background:#fde68a}
 tr.color-document-ok{border-left:6px solid #0f766e;background:#99f6e4}
+tr.color-pink{border-left:6px solid #db2777;background:#fbcfe8}
 tr.color-purple-dark{border-left:6px solid #6d28d9;background:#b18af0}
 tr.color-purple-light{border-left:6px solid #6d28d9;background:#b18af0}
 tr.color-green-purple{border-left:6px solid #6d28d9;background:linear-gradient(90deg,#b7e4c7 0%,#b7e4c7 48%,#c4b5fd 52%,#c4b5fd 100%)}
@@ -3186,6 +3210,7 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   #audienceSection tbody tr.color-red{border-left:6px solid #991b1b;background:#e4a6a6;}
   #audienceSection tbody tr.color-yellow{border-left:6px solid #ca8a04;background:#fde68a;}
   #audienceSection tbody tr.color-document-ok{border-left:6px solid #0f766e;background:#99f6e4;}
+  #audienceSection tbody tr.color-pink{border-left:6px solid #db2777;background:#fbcfe8;}
   #audienceSection tbody tr.color-purple-dark{border-left:6px solid #6d28d9;background:#b18af0;}
   #audienceSection tbody tr.color-purple-light{border-left:6px solid #6d28d9;background:#b18af0;}
   #audienceSection tbody tr.color-green-purple{border-left:6px solid #6d28d9;background:linear-gradient(90deg,#b7e4c7 0%,#b7e4c7 48%,#c4b5fd 52%,#c4b5fd 100%);}
@@ -4852,6 +4877,11 @@ td[data-label="Actions"] .btn-danger{
     background:#99f6e4;
   }
 
+#audienceSection tbody tr.color-pink td,
+#audienceSection tbody tr.color-pink:hover td{
+  background:#fbcfe8;
+}
+
 #audienceSection tbody tr.color-purple-dark td,
 #audienceSection tbody tr.color-purple-dark:hover td,
 #audienceSection tbody tr.color-purple-light td,
@@ -4869,6 +4899,8 @@ td[data-label="Actions"] .btn-danger{
 #audienceSection tbody tr.color-yellow:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
 #audienceSection tbody tr.color-document-ok td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
 #audienceSection tbody tr.color-document-ok:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-pink td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
+#audienceSection tbody tr.color-pink:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
 #audienceSection tbody tr.color-purple-dark td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
 #audienceSection tbody tr.color-purple-dark:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),
 #audienceSection tbody tr.color-purple-light td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input):not(.date-input-invalid),

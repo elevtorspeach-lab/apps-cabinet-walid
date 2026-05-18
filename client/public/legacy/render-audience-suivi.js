@@ -24,6 +24,7 @@ const AUDIENCE_FIELD_DATALISTS = {
   sort: 'audienceSortOptions',
   tribunal: 'audienceTribunalEditOptions'
 };
+const AUDIENCE_PRESET_SORT_OPTIONS = ['ATT NB'];
 let audienceFieldDatalistsRowsRef = null;
 let audienceFieldDatalistsMarkupKey = '';
 
@@ -36,6 +37,15 @@ function getAudienceFieldOptionValue(row, field){
 function collectAudienceFieldOptions(rows, field){
   const seen = new Set();
   const values = [];
+  if(field === 'sort'){
+    AUDIENCE_PRESET_SORT_OPTIONS.forEach(value=>{
+      const key = normalizeCaseInsensitiveSearchText(value);
+      if(key && !seen.has(key)){
+        seen.add(key);
+        values.push(value);
+      }
+    });
+  }
   (Array.isArray(rows) ? rows : []).forEach((row)=>{
     const value = getAudienceFieldOptionValue(row, field);
     if(!value) return;
@@ -107,6 +117,7 @@ function renderAudienceStatusEditor(row, keyEncoded, canEdit){
 
 function getAudienceDebiteurFrenchDisplay(value){
   const raw = String(value || '').trim();
+  return raw;
   if(!raw) return '';
   const hasLatin = (text)=>/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(String(text || ''));
   const stripArabic = (text)=>String(text || '')

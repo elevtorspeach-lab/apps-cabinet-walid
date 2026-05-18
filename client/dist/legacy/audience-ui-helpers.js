@@ -11,6 +11,7 @@ const AUDIENCE_ALLOWED_ROW_COLORS = new Set([
   'red',
   'yellow',
   'document-ok',
+  'pink',
   'purple-dark',
   'purple-light',
   'green-purple',

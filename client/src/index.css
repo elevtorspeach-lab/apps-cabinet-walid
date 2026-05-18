@@ -2926,6 +2926,17 @@ tr:hover{background:#f1f5f9}
   --audience-tone-shadow:rgba(34,141,147,.22);
 }
 
+#audienceSection .audience-checked-count.audience-tone-pink,
+#audienceSection #printAudienceBtn.audience-tone-pink{
+  --audience-tone-solid:#db2777;
+  --audience-tone-solid-2:#be185d;
+  --audience-tone-soft:#fce7f3;
+  --audience-tone-soft-2:#fbcfe8;
+  --audience-tone-border:#f9a8d4;
+  --audience-tone-text:#831843;
+  --audience-tone-shadow:rgba(219,39,119,.22);
+}
+
 #audienceSection .audience-checked-count.audience-tone-purple-dark,
 #audienceSection #printAudienceBtn.audience-tone-purple-dark,
 #audienceSection .audience-checked-count.audience-tone-purple-light,
@@ -3242,6 +3253,12 @@ tr:hover{background:#f1f5f9}
   border-color:#0f766e;
 }
 
+#filterAudienceColor.audience-color-select-pink{
+  background:#db2777;
+  color:#fff;
+  border-color:#be185d;
+}
+
 #filterAudienceColor.audience-color-select-closed{
   background:#6d28d9;
   color:#fff;
@@ -3270,6 +3287,11 @@ tr:hover{background:#f1f5f9}
 
 #filterAudienceColor option[value="document-ok"]{
   background:#0f766e;
+  color:#fff;
+}
+
+#filterAudienceColor option[value="pink"]{
+  background:#db2777;
   color:#fff;
 }
 
@@ -3416,6 +3438,7 @@ tr:hover{background:#f1f5f9}
 .color-btn.red{background:#991b1b}
 .color-btn.yellow{background:linear-gradient(135deg,var(--audience-pill-yellow-1) 0%, var(--audience-pill-yellow-2) 100%);color:#4f3a00}
 .color-btn.document-ok{background:linear-gradient(135deg,var(--audience-pill-document-1) 0%, var(--audience-pill-document-2) 100%)}
+.color-btn.pink{background:linear-gradient(135deg,#ec4899 0%, #be185d 100%)}
 .color-btn.purple-dark{background:#6d28d9}
 .color-btn.purple-light{background:#6d28d9}
 .color-btn.error{background:#991b1b}
@@ -3426,6 +3449,7 @@ tr.color-green{border-left:4px solid #10b981;background:rgba(16,185,129,0.06)}
 tr.color-red{border-left:4px solid #ef4444;background:rgba(239,68,68,0.06)}
 tr.color-yellow{border-left:4px solid #f59e0b;background:rgba(245,158,11,0.08)}
 tr.color-document-ok{border-left:4px solid #14b8a6;background:rgba(20,184,166,0.06)}
+tr.color-pink{border-left:4px solid #db2777;background:rgba(244,114,182,0.12)}
 tr.color-purple-dark{border-left:4px solid #8b5cf6;background:rgba(139,92,246,0.06)}
 tr.color-purple-light{border-left:4px solid #a78bfa;background:rgba(167,139,250,0.06)}
 tr.color-green-purple{border-left:4px solid #8b5cf6;background:linear-gradient(90deg, rgba(16,185,129,0.06) 0%, rgba(16,185,129,0.06) 48%, rgba(139,92,246,0.06) 52%, rgba(139,92,246,0.06) 100%)}
@@ -3592,6 +3616,7 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   #audienceSection tbody tr.color-red{border-left:4px solid #ef4444;background:rgba(239,68,68,0.06);}
   #audienceSection tbody tr.color-yellow{border-left:4px solid #f59e0b;background:rgba(245,158,11,0.08);}
   #audienceSection tbody tr.color-document-ok{border-left:4px solid #14b8a6;background:rgba(20,184,166,0.06);}
+  #audienceSection tbody tr.color-pink{border-left:4px solid #db2777;background:rgba(244,114,182,0.12);}
   #audienceSection tbody tr.color-purple-dark{border-left:4px solid #8b5cf6;background:rgba(139,92,246,0.06);}
   #audienceSection tbody tr.color-purple-light{border-left:4px solid #a78bfa;background:rgba(167,139,250,0.06);}
   #audienceSection tbody tr.color-green-purple{border-left:4px solid #8b5cf6;background:linear-gradient(90deg, rgba(16,185,129,0.06) 0%, rgba(16,185,129,0.06) 48%, rgba(139,92,246,0.06) 52%, rgba(139,92,246,0.06) 100%);}
@@ -5597,6 +5622,11 @@ td[data-label="Actions"] .btn-danger{
     background:#99f6e4;
   }
 
+#audienceSection tbody tr.color-pink td,
+#audienceSection tbody tr.color-pink:hover td{
+  background:#fbcfe8;
+}
+
 #audienceSection tbody tr.color-purple-dark td,
 #audienceSection tbody tr.color-purple-dark:hover td,
 #audienceSection tbody tr.color-purple-light td,
@@ -5614,6 +5644,8 @@ td[data-label="Actions"] .btn-danger{
 #audienceSection tbody tr.color-yellow:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
 #audienceSection tbody tr.color-document-ok td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
 #audienceSection tbody tr.color-document-ok:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
+#audienceSection tbody tr.color-pink td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
+#audienceSection tbody tr.color-pink:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
 #audienceSection tbody tr.color-purple-dark td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
 #audienceSection tbody tr.color-purple-dark:hover td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),
 #audienceSection tbody tr.color-purple-light td input:not(.audience-print-check):not(.audience-ref-missing):not(.audience-refclient-mismatch-input),

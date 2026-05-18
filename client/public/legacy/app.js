@@ -18,6 +18,7 @@ const PROCEDURE_FIELD_DATALIST_IDS = {
   sort: 'procedureSortOptions',
   tribunal: PROCEDURE_TRIBUNAL_DATALIST_ID
 };
+const PROCEDURE_PRESET_SORT_OPTIONS = ['ATT NB'];
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 2 * 60 * 1000;
 const PASSWORD_SETUP_MODE_FORCED = 'forced';
@@ -12469,6 +12470,10 @@ async function flushQueuedDossierPatchesNow(){
 
 async function persistDossierPatchNow(patch, options = {}){
   queueDeferredLocalStateSnapshot(null, { source: options.source || 'dossier', signature: '' });
+  if(options?.immediate === true){
+    await flushQueuedDossierPatchesNow();
+    return persistRemoteRequestNow('/state/dossiers', patch);
+  }
   const queueKey = getDossierPatchQueueKey(patch);
   if(!queueKey){
     await flushQueuedDossierPatchesNow();
@@ -13195,6 +13200,7 @@ function parseExcelData(rows, sheet = null){
     { color: 'red', hex: 'FDEAEA', ordonnanceStatus: '' },
     { color: 'yellow', hex: 'FFF9DB', ordonnanceStatus: 'ok' },
     { color: 'document-ok', hex: 'F4EDC9', ordonnanceStatus: '' },
+    { color: 'pink', hex: 'FFE4F1', ordonnanceStatus: '' },
     { color: 'yellow', hex: '77933C', ordonnanceStatus: 'ok' },
     { color: 'purple-dark', hex: 'EDE6FF', ordonnanceStatus: '' },
     { color: 'purple-light', hex: 'F5EEFF', ordonnanceStatus: '' }
@@ -16980,7 +16986,7 @@ function showExcelImportResult(summary, issuesText, options = {}){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'jugement-ok', 'jugement-att', 'purple-dark', 'purple-light', 'closed'];
+  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'jugement-ok', 'jugement-att', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
@@ -16992,14 +16998,14 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'jugement-ok', 'jugement-att', 'closed']);
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'jugement-ok', 'jugement-att', 'closed']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
 function getAudienceSelectionToneClass(color = selectedAudienceColor){
   const normalized = String(color || '').trim();
   const resolved = normalized === 'closed' ? 'purple-dark' : normalized;
-  const allowed = new Set(['blue', 'green', 'yellow', 'document-ok', 'purple-dark', 'purple-light']);
+  const allowed = new Set(['blue', 'green', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light']);
   if(!allowed.has(resolved)) return 'audience-tone-all';
   return `audience-tone-${resolved}`;
 }
@@ -17011,6 +17017,7 @@ function syncAudienceSelectionTone(){
     'audience-tone-green',
     'audience-tone-yellow',
     'audience-tone-document-ok',
+    'audience-tone-pink',
     'audience-tone-purple-dark',
     'audience-tone-purple-light'
   ];
@@ -18766,6 +18773,7 @@ async function exportBackupExcelImportable(){
       audienceRed: 'FFFDEAEA',
       audienceYellow: 'FFFFF9DB',
       audienceDocumentOk: 'FFF4EDC9',
+      audiencePink: 'FFFFE4F1',
       audiencePurpleDark: 'FFEDE6FF',
       audiencePurpleLight: 'FFF5EEFF',
       rowAlt: 'FFF8FAFC'
@@ -18776,6 +18784,7 @@ async function exportBackupExcelImportable(){
       red: palette.audienceRed,
       yellow: palette.audienceYellow,
       'document-ok': palette.audienceDocumentOk,
+      pink: palette.audiencePink,
       'purple-dark': palette.audiencePurpleDark,
       'purple-light': palette.audiencePurpleLight
     };
@@ -20499,22 +20508,10 @@ async function addDossier(){
     if(selected.length === 0) return alert('Choisir au moins une procédure');
 
     const details = collectProcedureDraftFromCards({ trimValues: true });
-    const dossierReferenceForCustomProcedures = String($('referenceClientInput')?.value || '').trim();
     customList.forEach((procName)=>{
       const safeProcName = String(procName || '').trim();
       if(!safeProcName) return;
       if(!details[safeProcName]) details[safeProcName] = {};
-      if(dossierReferenceForCustomProcedures && !String(details[safeProcName].referenceClient || '').trim()){
-        details[safeProcName].referenceClient = dossierReferenceForCustomProcedures;
-      }
-    });
-    selected.forEach((procName)=>{
-      const safeProcName = String(procName || '').trim();
-      if(!safeProcName || !isAudienceProcedure(safeProcName)) return;
-      if(!details[safeProcName] || typeof details[safeProcName] !== 'object') return;
-      if(dossierReferenceForCustomProcedures && !String(details[safeProcName].referenceClient || '').trim()){
-        details[safeProcName].referenceClient = dossierReferenceForCustomProcedures;
-      }
     });
     const hasAssProcedure = selected.some((value)=>normalizeProcedureName(getProcedureBaseName(String(value || '').trim())) === 'ass');
 
@@ -20639,7 +20636,11 @@ async function addDossier(){
     }
     handleDossierDataChange({ audience: dossierRequiresAudienceRefresh });
     if(dossierPatch){
-      await persistDossierPatchNow(dossierPatch, { source: 'dossier' });
+      const saved = await persistDossierPatchNow(dossierPatch, { source: 'dossier', immediate: true });
+      if(!saved){
+        alert('Mise à jour non sauvegardée sur le serveur. Réessayez avant de quitter.');
+        return;
+      }
     }else{
       queuePersistAppState();
     }
@@ -25607,7 +25608,7 @@ function getSelectedAudienceAppliedColorValue(){
   const targetColor = explicitSelectedColor && explicitSelectedColor !== 'all'
     ? explicitSelectedColor
     : filterSelectedColor;
-  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['blue', 'green', 'red', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed']);
   if(!allowed.has(targetColor) || targetColor === 'all') return '';
   return targetColor === 'closed' ? 'purple-dark' : targetColor;
 }
@@ -25756,8 +25757,14 @@ function buildAudienceMismatchRefClientSet(rows){
   return set;
 }
 
+function getAudienceProcedureReferenceDisplayValue(procData, draftData, dossier){
+  const draftReference = String(draftData?.refDossier || '').trim();
+  if(draftReference) return draftReference;
+  return String(procData?.referenceClient || '').trim();
+}
+
 function getAudienceRowDraftReferenceValue(row){
-  return String(row?.draft?.refDossier || row?.p?.referenceClient || row?.d?.referenceClient || '').trim();
+  return getAudienceProcedureReferenceDisplayValue(row?.p, row?.draft, row?.d);
 }
 
 function getAudiencePriorityBucket(row, duplicateKeySet, mismatchRefClientSet){
@@ -25859,7 +25866,7 @@ function applyAudienceTransientPinnedRowOrder(rows){
 
 function applyColorToSelectedAudienceRows(color){
   const targetColor = String(color || '').trim();
-  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed']);
   if(!allowed.has(targetColor) || !audiencePrintSelection.size) return false;
   const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   let changed = false;
@@ -26168,7 +26175,7 @@ function buildAudienceDiligenceExportTableRow(row){
     row?.c?.name || '',
     procedureValue,
     d.debiteur || d.adversaire || '',
-    getAudienceRowDraftReferenceValue(row) || d.referenceClient || '',
+    getAudienceRowDraftReferenceValue(row),
     normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim(),
     formatMixedDirectionExportText(sortValue),
     p.tribunal || ''
@@ -26434,6 +26441,7 @@ function getAudienceSortColorPriority(row){
   if(color === 'yellow') return 3;
   if(color === 'document-ok') return 4;
   if(color === 'purple-dark' || color === 'purple-light') return 5;
+  if(color === 'pink') return 6;
   return 6;
 }
 
@@ -26935,9 +26943,7 @@ function hasAudienceProcedureData(procData, draftData, dossier){
   if(isProtectedManualDossier(dossier)) return true;
   if(getAudiencePurpleStatusSnapshot(dossier)) return true;
   const fields = [
-    d.refDossier,
-    p.referenceClient,
-    dossier?.referenceClient,
+    getAudienceProcedureReferenceDisplayValue(p, d, dossier),
     d.dateAudience,
     p.audience,
     d.juge,
@@ -26966,15 +26972,14 @@ function buildAudienceRowsForClient(client, clientIndex, closedStatusLookup){
       const key = makeAudienceDraftKey(clientIndex, dossierIndex, procKey);
       const draft = audienceDraft[key] || {};
       if(!hasAudienceProcedureData(p, draft, dossier)) return;
-      const draftReferenceValue = String(draft?.refDossier || p?.referenceClient || dossier?.referenceClient || '').trim();
+      const draftReferenceValue = getAudienceProcedureReferenceDisplayValue(p, draft, dossier);
       const refDossier = normalizeAudienceDossierLookupKey(draftReferenceValue);
-      if(!refDossier) return;
       const procedureFilterKey = getAudienceProcedureFilterKey(procKey);
       const procedureNorm = procedureFilterKey === 'ASS'
         ? 'ass'
         : String(procKey || '').trim().toLowerCase();
       const duplicateRefDossier = procedureFilterKey === 'ASS'
-        ? normalizeAudienceDossierLookupKey(String(draft?.refDossier || p?.referenceClient || '').trim())
+        ? normalizeAudienceDossierLookupKey(draftReferenceValue)
         : refDossier;
       const debiteurNorm = String(dossier?.debiteur || '').trim().toLowerCase().replace(/\s+/g, ' ');
       const tribunalFilterKey = resolveAudienceTribunalFilterKey(draft?.tribunal ?? p?.tribunal ?? '');
@@ -27305,7 +27310,7 @@ function getAudienceRowsForSidebarProjectedCached(){
         client: String(row?.c?.name || '').trim() || '-',
         procedure: String(row?.draft?.procedure || row?.p?.nature || row?.d?.natureProcedure || '').trim() || '-',
         debiteur: String(row?.d?.debiteur || '').trim() || '-',
-        ref: String(row?.draft?.refDossier || row?.p?.referenceClient || '').trim() || '-',
+        ref: getAudienceRowDraftReferenceValue(row) || '-',
         juge: judgeValue || '-',
         tribunal: tribunalValue || '-',
         sort: sortValue || '-',
@@ -27315,7 +27320,7 @@ function getAudienceRowsForSidebarProjectedCached(){
         date: normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim() || '-',
         dateKey: calendarDateKey,
         sortTime,
-        ref: String(row?.draft?.refDossier || row?.p?.referenceClient || '').trim() || '-',
+        ref: getAudienceRowDraftReferenceValue(row) || '-',
         debiteur: String(row?.d?.debiteur || '').trim() || '-',
         tribunal: tribunalValue || '-',
         tribunalCategory: getSalleTribunalCategory(tribunalValue),
@@ -27496,7 +27501,7 @@ function setAudienceColor(ci, di, procKey, checked){
   if(!dossier) return;
   const p = getAudienceProcedure(ci, di, procKey);
   const undoEntry = buildAudienceColorUndoEntry(ci, di, procKey);
-  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'purple-dark', 'purple-light', 'closed']);
+  const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed']);
   if(!checked){
     detachAudienceImportBatchOwnership(p);
     applyAudienceWhiteColorState(p, dossier, '');
@@ -28477,7 +28482,19 @@ function collectProcedureDraftFromCards({ root = document, trimValues = false } 
     if(!name) return;
     draft[name] = {};
     card.querySelectorAll('input, select').forEach(fieldEl=>{
-      draft[name][fieldEl.dataset.field] = trimValues ? fieldEl.value.trim() : fieldEl.value;
+      const fieldName = fieldEl.dataset.field;
+      let fieldValue = trimValues ? fieldEl.value.trim() : fieldEl.value;
+      if(
+        trimValues
+        && !editingDossier
+        && fieldName === 'referenceClient'
+        && fieldEl.dataset.userEdited !== '1'
+        && fieldValue
+        && fieldValue === String($('referenceClientInput')?.value || '').trim()
+      ){
+        fieldValue = '';
+      }
+      draft[name][fieldName] = fieldValue;
     });
   });
   return draft;
@@ -28644,7 +28661,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       <input type="text" data-field="dateDepot" placeholder="Date affectation">
       <input type="text" data-field="banque" placeholder="Banque">
       <input type="text" data-field="depotLe" placeholder="Depot le">
-      <input type="text" data-field="referenceClient" placeholder="Reference dossier">
+      <input type="text" data-field="referenceClient" placeholder="Reference dossier" autocomplete="off">
       <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
       <input type="text" data-field="executionNo" placeholder="Execution N">
       <input type="text" data-field="notifBanque" placeholder="Notif banque">
@@ -28656,7 +28673,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
     return `
       <input type="text" data-field="dateDepot" placeholder="Date dépôt">
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
-      <input type="text" data-field="referenceClient" placeholder="Référence dossier">
+      <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
       <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
       <input type="text" data-field="executionNo" placeholder="Execution N°">
       <input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">
@@ -28669,7 +28686,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
     return `
       <input type="text" data-field="dateDepot" placeholder="Date d’affectation">
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
-      <input type="text" data-field="referenceClient" placeholder="Référence dossier">
+      <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
       <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
       <input type="text" data-field="notificationSort" placeholder="Sort notification">
       <input type="text" data-field="notificationNo" placeholder="Notification N°">
@@ -28706,7 +28723,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   return `
     <input type="text" data-field="dateDepot" placeholder="Date d’affectation">
     <input type="text" data-field="depotLe" placeholder="Dépôt le">
-    <input type="text" data-field="referenceClient" placeholder="Référence dossier">
+    <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
     <input type="text" data-field="audience" placeholder="Audience">
     <input type="text" data-field="juge" list="${PROCEDURE_FIELD_DATALIST_IDS.juge}" placeholder="Juge" autocomplete="off">
     <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
@@ -28892,6 +28909,9 @@ function collectKnownProcedureFieldLabels(field, draft = null){
   const safeField = String(field || '').trim();
   if(!safeField) return [];
   const labels = [];
+  if(safeField === 'sort'){
+    labels.push(...PROCEDURE_PRESET_SORT_OPTIONS);
+  }
   AppState.clients.forEach(client=>{
     (client?.dossiers || []).forEach(dossier=>{
       const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
@@ -29100,7 +29120,10 @@ function renderProcedureDetails(forceList, forceDraft){
     }
     div.querySelectorAll('input, select').forEach(fieldEl=>{
       ['input', 'change'].forEach(eventName=>{
-        fieldEl.addEventListener(eventName, ()=>updateProcedureCardRemoveButtonVisibility(div));
+        fieldEl.addEventListener(eventName, ()=>{
+          if(fieldEl.dataset.field === 'referenceClient') fieldEl.dataset.userEdited = '1';
+          updateProcedureCardRemoveButtonVisibility(div);
+        });
       });
     });
     div.querySelectorAll('input[data-field="juge"], input[data-field="sort"], input[data-field="tribunal"]').forEach(bindProcedureTribunalAutocomplete);
@@ -29139,19 +29162,6 @@ function addCustomProcedure(){
   input.value = '';
   renderCustomProcedures();
   renderProcedureDetails();
-  prefillCustomProcedureAudienceReference(value);
-}
-
-function prefillCustomProcedureAudienceReference(procName){
-  const safeName = String(procName || '').trim();
-  if(!safeName) return;
-  const dossierReference = String($('referenceClientInput')?.value || '').trim();
-  if(!dossierReference) return;
-  const targetCard = getProcedureCardElements(document).find(card=>getProcedureCardName(card) === safeName);
-  const refInput = targetCard?.querySelector('input[data-field="referenceClient"]');
-  if(refInput && !String(refInput.value || '').trim()){
-    refInput.value = dossierReference;
-  }
 }
 
 function removeCustomProcedure(value){
