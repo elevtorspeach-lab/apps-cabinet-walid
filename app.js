@@ -17991,9 +17991,6 @@ function getDiligenceSearchValues(row){
 }
 
 function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData, draftData, row = null){
-  const fileNames = Array.isArray(dossier?.files)
-    ? dossier.files.map(f=>String(f?.name || '').trim()).filter(Boolean)
-    : [];
   const resolvedStatus = String(row?.__resolvedStatus || dossier?.statut || '').trim();
   const resolvedStatusDetail = String(row?.__resolvedStatusDetail || dossier?.statutDetails || '').trim();
   const dossierValues = [
@@ -18021,17 +18018,30 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
     dossier?.statutDetails || '',
     resolvedStatus,
     resolvedStatusDetail,
-    dossier?.procedure || '',
-    ...(Array.isArray(dossier?.procedureList) ? dossier.procedureList : []),
-    ...fileNames
+    ''
   ];
   const procValues = [
-    procKey || '',
-    ...collectDeepValues(procedureData || {}),
-    ...collectDeepValues(draftData || {})
+    procedureData?.dateDepot || '',
+    procedureData?.depotLe || '',
+    procedureData?.juge || '',
+    procedureData?.sort || '',
+    procedureData?.observation || '',
+    draftData?.refClient || '',
+    draftData?.dateDepot || '',
+    draftData?.juge || '',
+    draftData?.sort || ''
   ];
+  const groupedValues = Array.isArray(row?.__dedupedAudienceRows)
+    ? row.__dedupedAudienceRows.flatMap(item=>[
+        item?.c?.name || '',
+        item?.d?.debiteur || '',
+        item?.d?.referenceClient || '',
+        ''
+      ])
+    : [];
+  const relatedGlobalRefs = getAudienceRelatedGlobalReferenceClients(row);
   // Audience filtering must stay scoped to the current procedure row.
-  return [...dossierValues, ...procValues]
+  return [...dossierValues, ...procValues, ...groupedValues, ...relatedGlobalRefs]
     .map(v=>normalizeCaseInsensitiveSearchText(v))
     .join(' ');
 }
@@ -18047,9 +18057,14 @@ function buildAudienceExactSearchTokens(row){
     const key = normalizeCaseInsensitiveSearchText(value);
     if(key) tokens.add(key);
   };
-  pushRefToken(getAudienceRowDraftReferenceValue(row));
   pushRefToken(row?.d?.referenceClient || '');
-  pushRefToken(row?.p?.referenceClient || '');
+  if(Array.isArray(row?.__dedupedAudienceRows)){
+    row.__dedupedAudienceRows.forEach(item=>{
+      pushRefToken(item?.d?.referenceClient || '');
+      pushTextToken(item?.d?.debiteur || '');
+    });
+  }
+  getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
   pushTextToken(row?.d?.debiteur || '');
   pushTextToken(row?.d?.statut || '');
   pushTextToken(row?.d?.statutDetails || '');
@@ -23069,59 +23084,43 @@ function getAudienceAutocompleteSuggestions(query){
   const rawQuery = String(query || '').trim();
   const normalizedQuery = normalizeCaseInsensitiveSearchText(rawQuery);
   if(!normalizedQuery) return [];
-  const baseRows = getAudienceRowsDedupedCached();
+  const baseRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
   const colorFilteredRows = filterAudienceColor === 'all'
     ? baseRows
     : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
   const scopedRows = getFilteredAudienceRows(colorFilteredRows);
   const suggestions = [];
   for(const row of scopedRows){
-    const dateValue = getAudienceRowDateValue(row);
     const clientName = String(row?.c?.name || '').trim();
     const refClient = String(
       row?.p?._refClientMismatch
         ? (row?.p?._refClientProvided || '')
         : (row?.d?.referenceClient || '')
     ).trim();
-    const refDossier = getAudienceRowDraftReferenceValue(row);
     const debiteur = String(row?.d?.debiteur || '').trim();
-    const dateKey = normalizeCaseInsensitiveSearchText(dateValue);
     const clientKey = normalizeCaseInsensitiveSearchText(clientName);
     const refClientKey = normalizeCaseInsensitiveSearchText(refClient);
-    const refDossierKey = normalizeCaseInsensitiveSearchText(refDossier);
     const debiteurKey = normalizeCaseInsensitiveSearchText(debiteur);
-    const dateMatch = !!dateKey && dateKey.includes(normalizedQuery);
     const clientMatch = !!clientKey && clientKey.includes(normalizedQuery);
     const refClientMatch = !!refClientKey && refClientKey.includes(normalizedQuery);
-    const refDossierMatch = !!refDossierKey && refDossierKey.includes(normalizedQuery);
     const debiteurMatch = !!debiteurKey && debiteurKey.includes(normalizedQuery);
-    if(!dateMatch && !clientMatch && !refClientMatch && !refDossierMatch && !debiteurMatch){
+    if(!clientMatch && !refClientMatch && !debiteurMatch){
       continue;
     }
     let score = computeAudienceRowContentScore(row);
-    if(dateMatch) score += 110;
-    if(refDossierMatch) score += 90;
     if(refClientMatch) score += 75;
     if(clientMatch) score += 60;
     if(debiteurMatch) score += 35;
-    if(dateKey.startsWith(normalizedQuery)) score += 18;
-    if(refDossierKey.startsWith(normalizedQuery)) score += 14;
     if(refClientKey.startsWith(normalizedQuery)) score += 10;
     if(clientKey.startsWith(normalizedQuery)) score += 8;
     suggestions.push({
       row,
       score,
-      applyValue: dateMatch
-        ? dateValue
-        : (refDossierMatch
-          ? refDossier
-          : (refClientMatch
-            ? refClient
-            : (clientName || debiteur || dateValue))),
-      dateValue,
+      applyValue: refClientMatch
+        ? refClient
+        : (clientName || debiteur || ''),
       clientName,
       refClient,
-      refDossier,
       debiteur
     });
   }
@@ -23143,8 +23142,8 @@ function renderAudienceAutocompleteSuggestions(){
     clearTimeout(audienceAutocompleteHideTimer);
     audienceAutocompleteHideTimer = null;
   }
-  const query = String(input.value || '').trim();
-  if(!query){
+  const query = input.value || '';
+  if(!String(query).trim()){
     hideAudienceAutocompleteSuggestions();
     return;
   }
@@ -23164,13 +23163,13 @@ function renderAudienceAutocompleteSuggestions(){
       aria-selected="false"
     >
       <span class="audience-search-suggestion-title">
-        <i class="fa-regular fa-calendar-days"></i>
-        <span>${highlightSearchMatchHtml(item.dateValue || '-', query)}</span>
+        <i class="fa-solid fa-filter"></i>
+        <span>${highlightSearchMatchHtml(item.clientName || item.refClient || item.debiteur || '-', query)}</span>
       </span>
       <span class="audience-search-suggestion-meta">
         <span>Client: ${highlightSearchMatchHtml(item.clientName || '-', query)}</span>
         <span>Réf client: ${highlightSearchMatchHtml(item.refClient || '-', query)}</span>
-        <span>Réf dossier: ${highlightSearchMatchHtml(item.refDossier || '-', query)}</span>
+        <span>Débiteur: ${highlightSearchMatchHtml(item.debiteur || '-', query)}</span>
       </span>
     </button>
   `).join('');
@@ -23181,7 +23180,7 @@ function applyAudienceAutocompleteSuggestion(index){
   const item = audienceAutocompleteItems[index];
   const input = $('filterAudience');
   if(!item || !input) return;
-  input.value = String(item.applyValue || item.dateValue || item.refDossier || item.refClient || item.clientName || '').trim();
+  input.value = String(item.applyValue || item.refClient || item.clientName || item.debiteur || '').trim();
   hideAudienceAutocompleteSuggestions();
   renderAudience();
   input.focus();
