@@ -211,6 +211,11 @@
       </div>
 
       <div class="audience-color-filter">
+        <label for="filterAudienceRefDossier">Référence dossier</label>
+        <input type="text" id="filterAudienceRefDossier" placeholder="" autocomplete="off" />
+      </div>
+
+      <div class="audience-color-filter">
         <label for="filterAudienceColor">Sort</label>
         <select id="filterAudienceColor">
           <option value="all">Toutes</option>
@@ -243,6 +248,12 @@
         <datalist id="filterAudienceTribunalOptions">
         </datalist>
       </div>
+
+      <div class="audience-color-filter">
+        <label for="filterAudienceDate">Date d'audience</label>
+        <input type="date" id="filterAudienceDate" />
+      </div>
+
     </div>
 
     <div class="audience-filter-import-row">
@@ -701,6 +712,7 @@
                 <div class="form-group creation-layout-card creation-top-inline-card">
                   <label>N / ref</label>
                   <input type="text" id="nRefInput" placeholder="N / ref" autocomplete="off"/>
+                  <div id="nRefError" class="creation-field-error">Cette référence N / ref existe déjà.</div>
                 </div>
               </div>
 
@@ -739,7 +751,7 @@
             <div class="creation-form-row creation-form-row-three">
               <div class="form-group creation-layout-card">
                 <label>Adresse</label>
-                <input type="text" id="adresseInput" placeholder="Adresse" dir="ltr"/>
+                <input type="text" id="adresseInput" placeholder="Adresse" dir="auto"/>
               </div>
 
               <div class="form-group creation-layout-card">
@@ -761,7 +773,7 @@
 
               <div class="form-group creation-layout-card">
                 <label>Adresse de caution</label>
-                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" dir="ltr"/>
+                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" dir="auto"/>
               </div>
 
               <div class="form-group creation-layout-card">

@@ -776,9 +776,9 @@ input:focus,select:focus,textarea:focus{border-color:#3b82f6;box-shadow:0 0 0 3p
 
 #adresseInput,
 #cautionAdresseInput{
-  direction:ltr;
-  unicode-bidi:isolate;
-  text-align:left;
+  unicode-bidi:plaintext;
+  text-align:start;
+  font:inherit;
 }
 
 /* ================== BUTTONS ================== */
@@ -3158,10 +3158,31 @@ tr:hover{background:#f1f5f9}
 }
 
 .audience-filter-row .audience-search-shell{
+  order:1;
   flex:0 1 560px;
   min-width:320px;
   max-width:560px;
   position:relative;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceRefDossier){
+  order:2;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceColor){
+  order:3;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceProcedure){
+  order:4;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceTribunal){
+  order:5;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceDate){
+  order:6;
 }
 
 .audience-filter-row .search-box{
@@ -5490,6 +5511,28 @@ td[data-label="Actions"] .btn-danger{
   border:1px solid #e2e8f0;
 }
 
+.audience-status-editor{
+  align-items:center;
+}
+
+.audience-status-select{
+  min-height:34px;
+  min-width:112px;
+  padding:6px 28px 6px 10px;
+  border:1px solid #93c5fd;
+  border-radius:999px;
+  background:#eff6ff;
+  color:#1d4ed8;
+  font-size:12px;
+  font-weight:900;
+  outline:none;
+}
+
+.audience-status-select:disabled{
+  opacity:.7;
+  cursor:not-allowed;
+}
+
 #diligenceSection .diligence-inline-input,
 #diligenceSection .diligence-inline-select{
   border-radius:12px;
@@ -5724,6 +5767,13 @@ td[data-label="Actions"] .btn-danger{
   color:#7c2d12;
   background:linear-gradient(135deg,#fed7aa 0%, #fdba74 100%);
   border-color:#fb923c;
+}
+
+.status-custom{
+  color:#9d174d;
+  background:linear-gradient(135deg,#fce7f3 0%, #f9a8d4 100%);
+  border-color:#f472b6;
+  box-shadow:0 12px 22px rgba(236,72,153,.22);
 }
 
 .stat-card{

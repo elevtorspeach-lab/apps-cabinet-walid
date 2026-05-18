@@ -96,6 +96,7 @@ let filterAudienceColor = 'all';
 let filterAudienceProcedure = 'all';
 let filterAudienceTribunal = 'all';
 let filterAudienceDate = '';
+let filterAudienceRefDossier = '';
 let filterAudienceErrorsOnly = false;
 let filterAudienceCheckedFirst = false;
 let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1 };
@@ -2179,6 +2180,28 @@ function getDossierDisplayStatusSnapshot(dossier){
   };
 }
 
+function getDossierStatusOptions(currentStatus = ''){
+  const baseStatuses = ['En cours', 'Soldé', 'Arrêt définitif', 'Clôture', 'Suspension'];
+  const seen = new Set();
+  const out = [];
+  const pushStatus = (value)=>{
+    const text = String(value || '').trim();
+    if(!text) return;
+    const key = normalizeLooseText(text).toLowerCase();
+    if(!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(text);
+  };
+  baseStatuses.forEach(pushStatus);
+  (AppState.clients || []).forEach((client)=>{
+    (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach((dossier)=>{
+      pushStatus(getDossierDisplayStatusSnapshot(dossier).statut);
+    });
+  });
+  pushStatus(currentStatus);
+  return out;
+}
+
 function getDossierNormalizedStatusKey(dossier){
   return normalizeLooseText(getDossierDisplayStatusSnapshot(dossier)?.statut || '').toLowerCase();
 }
@@ -2215,6 +2238,13 @@ function matchesSuiviFactureFilter(row, factureFilter = filterSuiviFacture){
 
 function getDossierCreatedAtSortValue(dossier){
   const raw = String(dossier?.createdAt || '').trim();
+  if(!raw) return 0;
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function getDossierSuiviSortValue(dossier){
+  const raw = String(dossier?.suiviUpdatedAt || dossier?.createdAt || '').trim();
   if(!raw) return 0;
   const ts = Date.parse(raw);
   return Number.isFinite(ts) ? ts : 0;
@@ -3928,9 +3958,10 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
   const omitWwAndMarque = shouldOmitSuiviWwAndMarqueColumns(rows);
   const omitCaution = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.caution);
   const omitCautionAdresse = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionAdresse);
+  const omitMontant2 = true;
   const columnDefs = [
     { header: 'Client', width: 22 },
-    { header: 'date affectation', width: 21 },
+    { header: 'Date d’affectation', width: 21 },
     { header: 'Type', width: 13 },
     { header: 'ref client', width: 30 },
     { header: 'Procédure', width: 22 },
@@ -3946,6 +3977,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     ...(!omitCautionAdresse ? [{ header: 'Adresse  caution', width: 36 }] : []),
     { header: 'CIN de caution', width: 22 },
     { header: 'Montant', width: 18 },
+    ...(!omitMontant2 ? [{ header: 'Montant 2', width: 18 }] : []),
     { header: 'Date depot', width: 18 },
     { header: 'Réf Ass', width: 26 },
     { header: 'Audience', width: 18 },
@@ -3982,9 +4014,45 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     omitWwAndMarque,
     omitCaution,
     omitCautionAdresse,
+    omitMontant2,
     colWidths,
     wrapColumnIndexes
   };
+}
+
+function getSuiviExportMontant2Value(dossier){
+  const groups = Array.isArray(dossier?.montantByProcedure) ? dossier.montantByProcedure : [];
+  const values = groups
+    .slice(1)
+    .map(group=>String(group?.montant || '').trim())
+    .filter(Boolean);
+  return values.length ? [...new Set(values)].join(', ') : '';
+}
+
+function getSuiviProcedureMontantValue(dossier, procedureName){
+  const groups = Array.isArray(dossier?.montantByProcedure) ? dossier.montantByProcedure : [];
+  const fallback = String(dossier?.montant || '').trim();
+  if(!groups.length) return fallback;
+
+  const rawProcedure = String(procedureName || '').trim();
+  const procedureKey = normalizeProcedureName(rawProcedure);
+  const baseProcedureKey = normalizeProcedureName(getProcedureBaseName(rawProcedure));
+  const groupMatchesProcedure = (group, matcher)=>{
+    const procedures = Array.isArray(group?.procedures) ? group.procedures : [];
+    return procedures.some(proc=>matcher(String(proc || '').trim()));
+  };
+  const exactGroup = groups.find(group=>groupMatchesProcedure(
+    group,
+    proc=>normalizeProcedureName(proc) === procedureKey
+  ));
+  const baseGroup = exactGroup || groups.find(group=>groupMatchesProcedure(
+    group,
+    proc=>normalizeProcedureName(getProcedureBaseName(proc)) === baseProcedureKey
+  ));
+  const matchedMontant = String(baseGroup?.montant || '').trim();
+  if(matchedMontant) return matchedMontant;
+  if(groups.length === 1) return String(groups[0]?.montant || '').trim() || fallback;
+  return fallback;
 }
 
 function getSuiviExportProcedureNames(row){
@@ -4024,7 +4092,8 @@ function collectSuiviProcedureExportValues(dossier, procedureName){
     return values.length ? [...new Set(values)].join(', ') : '';
   };
   return {
-    dateDepot: collect(proc=>proc.depotLe || proc.dateDepot || ''),
+    dateAffectation: collect(proc=>proc.dateDepot || ''),
+    dateDepot: collect(proc=>proc.depotLe || ''),
     reference: collect(proc=>proc.referenceClient || ''),
     audience: collect(proc=>proc.audience || ''),
     sort: collect(proc=>proc.sort || ''),
@@ -4056,6 +4125,7 @@ function buildSuiviExportTableRows(rows, options = {}){
   const omitWwAndMarque = options?.omitWwAndMarque === true;
   const omitCaution = options?.omitCaution === true;
   const omitCautionAdresse = options?.omitCautionAdresse === true;
+  const omitMontant2 = options?.omitMontant2 === true;
   return sourceRows.flatMap((row)=>{
     const procedures = getSuiviExportProcedureNames(row);
     return procedures.map((procedureName)=>{
@@ -4064,22 +4134,23 @@ function buildSuiviExportTableRows(rows, options = {}){
         ? row.tribunalList.join(', ')
         : '';
       const exportRow = [
-        row.c?.name || '-',
-        normalizeDateDDMMYYYY(row.d?.dateAffectation || '') || '-',
-        row.d?.type || '-',
-        row.d?.referenceClient || '-',
-        procedureName || '-',
-        row.d?.debiteur || '-',
+        row.c?.name || '',
+        normalizeDateDDMMYYYY(procedureValues.dateAffectation || row.d?.dateAffectation || '') || '',
+        row.d?.type || '',
+        row.d?.referenceClient || '',
+        procedureName || '',
+        row.d?.debiteur || '',
         getSuiviExportStatusValue(row.d),
-        row.d?.adresse || '-',
-        row.d?.ville || '-'
+        row.d?.adresse || '',
+        row.d?.ville || ''
       ];
       if(!omitWwAndMarque){
-        exportRow.push(row.d?.ww || '-', row.d?.marque || '-');
+        exportRow.push(row.d?.ww || '', row.d?.marque || '');
       }
-      if(!omitCaution) exportRow.push(row.d?.caution || '-');
-      if(!omitCautionAdresse) exportRow.push(row.d?.cautionAdresse || '-');
-      exportRow.push(row.d?.cautionCin || '-', row.d?.montant || '-');
+      if(!omitCaution) exportRow.push(row.d?.caution || '');
+      if(!omitCautionAdresse) exportRow.push(row.d?.cautionAdresse || '');
+      exportRow.push(row.d?.cautionCin || '', getSuiviProcedureMontantValue(row.d, procedureName) || '');
+      if(!omitMontant2) exportRow.push(getSuiviExportMontant2Value(row.d) || '');
       exportRow.push(
         procedureValues.dateDepot || '',
         procedureValues.reference || '',
@@ -4099,7 +4170,8 @@ function buildSuiviSelectedExportDataset(rowsOverride = null){
     tableRows: buildSuiviExportTableRows(dataset.rows, {
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
-      omitCautionAdresse: dataset.omitCautionAdresse
+      omitCautionAdresse: dataset.omitCautionAdresse,
+      omitMontant2: dataset.omitMontant2
     })
   };
 }
@@ -4110,7 +4182,8 @@ async function buildSuiviSelectedExportDatasetAsync(rowsOverride = null){
     return buildSuiviExportTableRows([row], {
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
-      omitCautionAdresse: dataset.omitCautionAdresse
+      omitCautionAdresse: dataset.omitCautionAdresse,
+      omitMontant2: dataset.omitMontant2
     });
   }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') });
   return {
@@ -6522,7 +6595,6 @@ function updateProcedureMontantGroupAmount(index, value){
 }
 
 function syncMainMontantToGroup1(value){
-  if(editingDossier) return;
   const normalized = String(value || '').trim();
   if(!procedureMontantGroups.length) return;
   if(!procedureMontantGroups[0]) return;
@@ -7709,6 +7781,57 @@ function clearCreationReferenceClientError(){
   }
 }
 
+function clearCreationNRefError(){
+  const input = $('nRefInput');
+  const error = $('nRefError');
+  if(input) input.classList.remove('input-invalid');
+  if(error){
+    error.classList.remove('visible');
+    error.innerHTML = '';
+    delete error.dataset.duplicateClientId;
+    delete error.dataset.duplicateDossierIndex;
+  }
+}
+
+function openDuplicateNRefDossierFromError(){
+  const error = $('nRefError');
+  const clientId = Number(error?.dataset?.duplicateClientId);
+  const dossierIndex = Number(error?.dataset?.duplicateDossierIndex);
+  if(Number.isFinite(clientId) && Number.isFinite(dossierIndex)){
+    editDossier(clientId, dossierIndex);
+    return;
+  }
+  const duplicate = findDuplicateNRef($('nRefInput')?.value || '', {
+    ignoreClientId: editingDossier?.clientId,
+    ignoreDossierIndex: editingDossier?.index
+  });
+  if(!duplicate) return;
+  editDossier(duplicate.clientId, duplicate.dossierIndex);
+}
+
+function showCreationNRefError(message, duplicate = null){
+  const input = $('nRefInput');
+  const error = $('nRefError');
+  if(input) input.classList.add('input-invalid');
+  if(error){
+    error.textContent = String(message || 'Cette référence N / ref existe déjà.');
+    if(duplicate && Number.isFinite(Number(duplicate.clientId)) && Number.isFinite(Number(duplicate.dossierIndex))){
+      const safeMessage = String(message || 'Cette référence N / ref existe déjà.');
+      error.dataset.duplicateClientId = String(duplicate.clientId);
+      error.dataset.duplicateDossierIndex = String(duplicate.dossierIndex);
+      error.innerHTML = `
+        <button type="button" class="creation-field-error-link" onclick="openDuplicateNRefDossierFromError()">
+          ${escapeHtml(safeMessage)} Cliquez pour ouvrir le dossier.
+        </button>
+      `;
+    }else{
+      delete error.dataset.duplicateClientId;
+      delete error.dataset.duplicateDossierIndex;
+    }
+    error.classList.add('visible');
+  }
+}
+
 function openDuplicateReferenceClientDossierFromError(){
   const error = $('referenceClientError');
   const clientId = Number(error?.dataset?.duplicateClientId);
@@ -7795,6 +7918,36 @@ function findDuplicateClientReference(referenceValue, options = {}){
   return null;
 }
 
+function findDuplicateNRef(value, options = {}){
+  const normalizedReference = normalizeReferenceValue(value);
+  if(!normalizedReference) return null;
+  const ignoreClientId = Number(options.ignoreClientId);
+  const ignoreDossierIndex = Number(options.ignoreDossierIndex);
+  for(const client of AppState.clients){
+    const clientId = Number(client?.id);
+    const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+    for(let index = 0; index < dossiers.length; index += 1){
+      if(
+        Number.isFinite(ignoreClientId)
+        && Number.isFinite(ignoreDossierIndex)
+        && clientId === ignoreClientId
+        && index === ignoreDossierIndex
+      ){
+        continue;
+      }
+      const dossier = dossiers[index];
+      if(normalizeReferenceValue(dossier?.nRef || '') !== normalizedReference) continue;
+      return {
+        clientId,
+        dossierIndex: index,
+        clientName: String(client?.name || '').trim(),
+        nRef: String(dossier?.nRef || '').trim()
+      };
+    }
+  }
+  return null;
+}
+
 function validateCreationReferenceClient(options = {}){
   const rawReference = String($('referenceClientInput')?.value || '').trim();
   if(!rawReference){
@@ -7817,6 +7970,28 @@ function validateCreationReferenceClient(options = {}){
   showCreationReferenceClientError(message, duplicate);
   if(options.focus !== false){
     $('referenceClientInput')?.focus();
+  }
+  return false;
+}
+
+function validateCreationNRef(options = {}){
+  const rawReference = String($('nRefInput')?.value || '').trim();
+  if(!rawReference){
+    clearCreationNRefError();
+    return true;
+  }
+  const duplicate = findDuplicateNRef(rawReference, {
+    ignoreClientId: editingDossier?.clientId,
+    ignoreDossierIndex: editingDossier?.index
+  });
+  if(!duplicate){
+    clearCreationNRefError();
+    return true;
+  }
+  const message = `Cette référence N / ref existe déjà${duplicate.clientName ? ` (${duplicate.clientName})` : ''}.`;
+  showCreationNRefError(message, duplicate);
+  if(options.focus !== false){
+    $('nRefInput')?.focus();
   }
   return false;
 }
@@ -16998,6 +17173,7 @@ function resetAudienceFiltersUi(){
   filterAudienceProcedure = 'all';
   filterAudienceTribunal = 'all';
   filterAudienceDate = '';
+  filterAudienceRefDossier = '';
   filterAudienceErrorsOnly = false;
   filterAudienceCheckedFirst = false;
   setSelectedAudienceColor('all', false);
@@ -17007,6 +17183,7 @@ function resetAudienceFiltersUi(){
   if($('filterAudienceProcedure')) $('filterAudienceProcedure').value = 'all';
   if($('filterAudienceTribunal')) $('filterAudienceTribunal').value = '';
   if($('filterAudienceDate')) $('filterAudienceDate').value = '';
+  if($('filterAudienceRefDossier')) $('filterAudienceRefDossier').value = '';
   if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
   const errBtn = $('audienceErrorsBtn');
   if(errBtn) errBtn.classList.remove('active');
@@ -19027,6 +19204,12 @@ function setupEvents(){
     e.target.value = '';
   });
   $('addDossierBtn')?.addEventListener('click', addDossier);
+  $('nRefInput')?.addEventListener('input', ()=>{
+    clearCreationNRefError();
+  });
+  $('nRefInput')?.addEventListener('blur', ()=>{
+    validateCreationNRef({ focus: false });
+  });
   $('referenceClientInput')?.addEventListener('input', ()=>{
     clearCreationReferenceClientError();
   });
@@ -19359,6 +19542,11 @@ function setupEvents(){
     filterAudienceDate = String(e.target?.value || '').trim();
     renderAudience();
   });
+  $('filterAudienceRefDossier')?.addEventListener('input', debounce((e)=>{
+    filterAudienceRefDossier = String(e.target?.value || '').trim();
+    paginationState.audience = 1;
+    renderAudience();
+  }, 220));
   $('filterAudienceCheckedOrder')?.addEventListener('change', (e)=>{
     filterAudienceCheckedFirst = String(e.target?.value || 'default') === 'checked-first';
     renderAudience();
@@ -20344,12 +20532,17 @@ async function addDossier(){
       return;
     }
     clearCreationDateAffectationError();
+    if(!validateCreationNRef()){
+      return;
+    }
     if(!validateCreationReferenceClient()){
       return;
     }
     const montantGroups = getProcedureMontantGroupsForSave();
     const montantInputValue = String($('montantInput')?.value || '').trim();
-    const montantFallbackRaw = montantInputValue || montantGroups.map(g=>String(g.montant || '').trim()).filter(Boolean).join(' | ');
+    const montantFallbackRaw = editingDossier
+      ? montantInputValue
+      : (montantInputValue || montantGroups.map(g=>String(g.montant || '').trim()).filter(Boolean).join(' | '));
     const montantFallback = getLowerMontantValue(montantFallbackRaw);
     const previousImportMeta = editingDossier
       ? AppState.clients.find(c=>c.id == editingDossier.clientId)?.dossiers?.[editingDossier.index]
@@ -20365,6 +20558,7 @@ async function addDossier(){
       isManualEntry: editingDossier ? previousImportMeta?.isManualEntry === true : true,
       isAudienceOrphanImport: previousImportMeta?.isAudienceOrphanImport === true,
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
+      suiviUpdatedAt: new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
       adversaire: $('adversaireInput')?.value.trim() || '',
       nRef: $('nRefInput')?.value.trim() || '',
@@ -20372,7 +20566,7 @@ async function addDossier(){
       referenceClient: $('referenceClientInput').value.trim(),
       dateAffectation: normalizedDateAffectation,
       gestionnaire: $('gestionnaireInput')?.value.trim() || '',
-      sanlamAdversaires: collectSanlamAdversaireDraft(),
+      sanlamAdversaires: normalizeSanlamAdversaireDraft(collectSanlamAdversaireDraft()),
       procedure: selected.join(', '),
       procedureList: selected.slice(),
       procedureDetails: details,
@@ -20637,6 +20831,10 @@ function getSuiviCreationPriority(row){
   return row?.d?.isManualEntry === true ? 1 : 0;
 }
 
+function getSuiviModificationPriority(row){
+  return String(row?.d?.suiviUpdatedAt || '').trim() ? 1 : 0;
+}
+
 function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
   if(pairCounts){
     const pairKeyA = a?.__suiviPairKey || buildSuiviRefDebiteurKey(a);
@@ -20651,6 +20849,12 @@ function compareSuiviRowsByReferenceProximity(a, b, pairCounts = null){
       const byPair = pairKeyA.localeCompare(pairKeyB, 'fr', { numeric: true, sensitivity: 'base' });
       if(byPair !== 0) return byPair;
     }
+  }
+
+  const modificationPriorityA = getSuiviModificationPriority(a);
+  const modificationPriorityB = getSuiviModificationPriority(b);
+  if(modificationPriorityA !== modificationPriorityB){
+    return modificationPriorityB - modificationPriorityA;
   }
 
   const creationPriorityA = getSuiviCreationPriority(a);
@@ -21166,6 +21370,11 @@ function normalizeAudienceReferenceSearchQuery(value){
   return refKey ? refKey : '';
 }
 
+function normalizeAudienceReferenceDossierFilterQuery(value){
+  const refKey = normalizeReferenceForAudienceLookup(value);
+  return refKey ? refKey : '';
+}
+
 function getAudienceReferenceSearchIndex(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
   if(sourceRows === audienceReferenceSearchIndexCacheInput){
@@ -21267,6 +21476,24 @@ function getAudienceRowsByReferenceQuery(rows, query){
     matchedRows.forEach(row=>matchedSet.add(row));
   });
   return [...matchedSet];
+}
+
+function audienceRowMatchesReferenceDossierFilter(row, refQuery){
+  const query = String(refQuery || '').trim();
+  if(!query) return true;
+  if(!row || typeof row !== 'object') return false;
+  const tokens = row?.__refDossierFilterTokens || (row.__refDossierFilterTokens = [
+    getAudienceRowDraftReferenceValue(row),
+    row?.p?.referenceClient || ''
+  ].map(normalizeReferenceForAudienceLookup).filter(Boolean));
+  return tokens.some(token=>token === query || token.startsWith(query) || token.includes(query));
+}
+
+function getAudienceRowsByReferenceDossierFilter(rows, query){
+  const refQuery = normalizeAudienceReferenceDossierFilterQuery(query);
+  if(!refQuery) return Array.isArray(rows) ? rows : [];
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return sourceRows.filter(row=>audienceRowMatchesReferenceDossierFilter(row, refQuery));
 }
 
 function getAudienceRowsByExactQuery(rows, query){
@@ -21375,6 +21602,7 @@ function compareAudienceRowsForDedupe(existing, next){
 
 function editDossier(clientId, index){
   if(!canEditData()) return alert('Accès refusé');
+  clearCreationNRefError();
   clearCreationReferenceClientError();
   clearCreationDateAffectationError();
   creationPinnedClientId = '';
@@ -21418,6 +21646,7 @@ function editDossier(clientId, index){
   if($('sanlamDateAccidentInput')) $('sanlamDateAccidentInput').value = d.sanlamDateAccident || '';
   if($('sanlamCinConducteurInput')) $('sanlamCinConducteurInput').value = d.sanlamCinConducteur || '';
   if($('sanlamSouscripteurInput')) $('sanlamSouscripteurInput').value = d.sanlamSouscripteur || '';
+  sanlamAdversaireDraft = normalizeSanlamAdversaireDraft(d.sanlamAdversaires);
   uploadedFiles = Array.isArray(d.files) ? d.files.map(f=>({ ...f })) : [];
   renderFileList();
 
@@ -21500,6 +21729,8 @@ function resetCreationForm(clientId = ''){
   customProcedures = [];
   uploadedFiles = [];
   procedureMontantGroups = [];
+  sanlamAdversaireDraft = {};
+  clearCreationNRefError();
   clearCreationReferenceClientError();
   clearCreationDateAffectationError();
 
@@ -21712,7 +21943,7 @@ function buildSuiviRowForDossier(client, dossier, index){
     c: client,
     d: dossier,
     index,
-    createdAtTs: getDossierCreatedAtSortValue(dossier),
+    createdAtTs: getDossierSuiviSortValue(dossier),
     procSource,
     procSet: new Set(procSource),
     hasPendingDepot: false,
@@ -25128,6 +25359,7 @@ function getAudienceFilterStateKey(){
     filterAudienceProcedure,
     filterAudienceTribunal,
     filterAudienceDate,
+    filterAudienceRefDossier,
     filterAudienceErrorsOnly ? '1' : '0',
     filterAudienceCheckedFirst ? 'checked-first' : 'default',
     selectedAudienceColor
@@ -25551,6 +25783,7 @@ function getFilteredAudienceRows(allRows = null, options = {}){
     filterAudienceProcedure,
     filterAudienceTribunal,
     filterAudienceDate,
+    filterAudienceRefDossier,
     filterAudienceErrorsOnly ? '1' : '0',
     strictPriorityColorFilter || priorityColor || 'all'
   ].join('||');
@@ -25562,6 +25795,7 @@ function getFilteredAudienceRows(allRows = null, options = {}){
     : getAudienceDuplicateKeySet(rows);
   const mismatchRefClientSet = buildAudienceMismatchRefClientSet(rows);
   const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
+  const targetRefDossier = normalizeAudienceReferenceDossierFilterQuery(filterAudienceRefDossier);
   const filtered = rows.filter(row=>{
     if(filterAudienceProcedure !== 'all' && row.__procFilterKey !== filterAudienceProcedure) return false;
     if(filterAudienceTribunal !== 'all' && row.__tribunalFilterKey !== filterAudienceTribunal) return false;
@@ -25569,6 +25803,7 @@ function getFilteredAudienceRows(allRows = null, options = {}){
       const rowDate = row.__audienceDateDisplay || (row.__audienceDateDisplay = getAudienceRowDateValue(row));
       if(targetDate && rowDate !== targetDate) return false;
     }
+    if(targetRefDossier && !audienceRowMatchesReferenceDossierFilter(row, targetRefDossier)) return false;
     if(filterAudienceErrorsOnly && !isAudienceRowInvalid(row, duplicateKeySet)) return false;
     if(strictPriorityColorFilter && !audienceRowMatchesColorFilter(row, strictPriorityColorFilter)) return false;
     return true;
@@ -27568,9 +27803,17 @@ function setAudienceJugementAddFromEncoded(keyEncoded, value){
   const dossier = client?.dossiers?.[di];
   if(!dossier) return false;
   const p = getAudienceProcedure(ci, di, procKey);
-  const before = String(p?.jugementAdd || '').trim().toLowerCase();
+  const before = getAudienceRowJugementAddStatus({
+    draft: audienceDraft?.[key] || {},
+    p
+  });
   const finalValue = before === nextValue ? '' : nextValue;
   p.jugementAdd = finalValue;
+  if(finalValue){
+    delete p._jugementAddCleared;
+  }else{
+    p._jugementAddCleared = true;
+  }
   if(audienceDraft[key] && Object.prototype.hasOwnProperty.call(audienceDraft[key], 'jugementAdd')){
     delete audienceDraft[key].jugementAdd;
     if(!Object.keys(audienceDraft[key]).length) delete audienceDraft[key];
@@ -27589,6 +27832,55 @@ function setAudienceJugementAddFromEncoded(keyEncoded, value){
     preserveClientListSummary: true
   });
   persistDossierReferenceNow(client.id, dossier, { source: 'audience-jugement-add' }).catch(()=>{});
+  if(isDeferredRenderSectionVisible('audience')){
+    renderAudienceKeepingPosition();
+  }else{
+    markDeferredRenderDirty('audience');
+  }
+  queueAudienceLinkedRenders();
+  return true;
+}
+
+function setAudienceDossierStatusFromEncoded(keyEncoded, value){
+  const key = decodeURIComponent(String(keyEncoded || ''));
+  const nextStatus = String(value || '').trim() || 'En cours';
+  if(!key) return false;
+  const { ci, di } = parseAudienceDraftKey(key);
+  const client = AppState.clients?.[ci];
+  if(!canEditData() || !canEditClient(client)) return false;
+  const dossier = client?.dossiers?.[di];
+  if(!dossier) return false;
+  const beforeSnapshot = getDossierDisplayStatusSnapshot(dossier);
+  const beforeStatus = String(beforeSnapshot?.statut || 'En cours').trim() || 'En cours';
+  if(beforeStatus === nextStatus) return false;
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.values(details).forEach((procDetails)=>{
+    if(!procDetails || typeof procDetails !== 'object') return;
+    delete procDetails._suppressAudienceStatusColor;
+    const explicitColor = String(procDetails.color || '').trim();
+    const beforeStatusColor = getAudienceStatusDerivedColor(beforeStatus);
+    if(explicitColor && explicitColor === beforeStatusColor){
+      procDetails.color = '';
+    }
+  });
+  dossier.statut = nextStatus;
+  if(nextStatus === 'En cours'){
+    dossier.statutDetails = '';
+  }
+  queueDossierHistoryEntry(dossier, {
+    source: 'audience',
+    field: 'statut',
+    before: beforeStatus,
+    after: nextStatus
+  });
+  markAudienceColorCachesDirty();
+  markAudienceRowsCacheDirty({
+    preserveClientAccessCaches: true,
+    preserveClientListSummary: true
+  });
+  persistDossierReferenceNow(client.id, dossier, { source: 'audience-status' }).catch(()=>{});
   if(isDeferredRenderSectionVisible('audience')){
     renderAudienceKeepingPosition();
   }else{
@@ -28250,6 +28542,17 @@ function collectSanlamAdversaireDraft(root = document){
   });
   sanlamAdversaireDraft = next;
   return next;
+}
+
+function normalizeSanlamAdversaireDraft(value){
+  const source = value && typeof value === 'object' ? value : {};
+  const out = {};
+  Object.entries(source).forEach(([key, rawValue])=>{
+    const idx = Number(key);
+    if(!Number.isFinite(idx) || idx < 2) return;
+    out[idx] = String(rawValue || '').trim();
+  });
+  return out;
 }
 
 function getSanlamVariantIndexes(procList){

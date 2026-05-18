@@ -100,6 +100,11 @@ function AudienceSection() {
             <label htmlFor="filterAudienceDate">Date d&apos;audience</label>
             <input type="date" id="filterAudienceDate" />
           </div>
+
+          <div className="audience-color-filter">
+            <label htmlFor="filterAudienceRefDossier">Référence dossier</label>
+            <input type="text" id="filterAudienceRefDossier" placeholder="" autoComplete="off" />
+          </div>
         </div>
 
         <div className="audience-filter-import-row">

@@ -18,8 +18,12 @@ const AUDIENCE_ALLOWED_ROW_COLORS = new Set([
 ]);
 
 function getStatusBadgeClass(status){
-  const value = String(status || 'En cours');
-  return STATUS_BADGE_CLASS_BY_VALUE[value] || 'status-encours';
+  const value = String(status || 'En cours').trim() || 'En cours';
+  if(STATUS_BADGE_CLASS_BY_VALUE[value]) return STATUS_BADGE_CLASS_BY_VALUE[value];
+  if(value === 'Soldé') return 'status-solde';
+  if(value === 'Arrêt définitif') return 'status-arret';
+  if(value === 'Clôture') return 'status-cloture';
+  return value === 'En cours' ? 'status-encours' : 'status-custom';
 }
 
 function renderStatusBadge(status){
@@ -38,7 +42,18 @@ function getAudienceStatusDerivedColor(status){
   const value = String(status || '').trim();
   if(value === 'Soldé') return 'purple-dark';
   if(value === 'Arrêt définitif') return 'purple-light';
+  if(value === 'Clôture') return 'green';
+  if(value === 'Suspension') return 'yellow';
   return '';
+}
+
+function isAudienceRowStatusColorSuppressed(row){
+  return String(row?.p?._suppressAudienceStatusColor || '').trim() === '1';
+}
+
+function getAudienceRowStatusDerivedColor(row){
+  if(isAudienceRowStatusColorSuppressed(row)) return '';
+  return getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
 }
 
 function getAudienceRowOrdonnanceSourceValue(row){
@@ -64,6 +79,7 @@ function getAudienceRowOrdonnanceColor(row){
 function getAudienceRowJugementAddStatus(row){
   const explicitValue = String(row?.draft?.jugementAdd || row?.p?.jugementAdd || '').trim().toLowerCase();
   if(explicitValue === 'ok' || explicitValue === 'att') return explicitValue;
+  if(row?.p?._jugementAddCleared === true) return '';
   const sortValue = normalizeCaseInsensitiveSearchText(row?.draft?.sort ?? row?.p?.sort ?? '');
   if(!sortValue) return '';
   const hasJugement = sortValue.includes('jugement') || /\bj\b/.test(sortValue);
@@ -83,7 +99,7 @@ function isAudienceRowOrdonnanceColorSuppressed(row){
 
 function getAudienceRowRefClientMismatchFallbackColor(row, options = {}){
   if(!row?.p?._refClientMismatch) return '';
-  const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
+  const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
   const fallbackOrdonnanceColor = options.includeOrdonnanceColor === false
     ? ''
     : getAudienceRowOrdonnanceColor(row);
@@ -93,7 +109,7 @@ function getAudienceRowRefClientMismatchFallbackColor(row, options = {}){
 }
 
 function getAudienceRowEffectiveColor(row){
-  const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
+  const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
   const ordonnanceColor = getAudienceRowOrdonnanceColor(row);
   const explicitColor = String(row?.p?.color || '').trim();
   const ordonnanceColorSuppressed = isAudienceRowOrdonnanceColorSuppressed(row);
@@ -122,7 +138,7 @@ function audienceRowMatchesColorFilter(row, color){
     return getAudienceRowOrdonnanceColor(row) === targetColor;
   }
   if(targetColor === 'purple-dark' || targetColor === 'purple-light'){
-    const statusDerivedColor = getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
+    const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
     return statusDerivedColor === targetColor;
   }
   return getAudienceRowEffectiveColor(row) === targetColor;

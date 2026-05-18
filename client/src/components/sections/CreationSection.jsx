@@ -50,6 +50,7 @@ function CreationSection() {
                 <div id="nRefFieldContainer" className="form-group creation-layout-card creation-top-inline-card">
                   <label>N / ref</label>
                   <input type="text" id="nRefInput" placeholder="N / ref" autoComplete="off" />
+                  <div id="nRefError" className="creation-field-error">Cette référence N / ref existe déjà.</div>
                 </div>
               </div>
 
@@ -92,7 +93,7 @@ function CreationSection() {
             <div className="creation-form-row creation-form-row-three">
               <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Adresse</label>
-                <input type="text" id="adresseInput" placeholder="Adresse" dir="ltr" />
+                <input type="text" id="adresseInput" placeholder="Adresse" dir="auto" />
               </div>
 
               <div className="form-group creation-layout-card creation-secondary-highlight-field">
@@ -114,7 +115,7 @@ function CreationSection() {
 
               <div className="form-group creation-layout-card">
                 <label>Adresse de caution</label>
-                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" dir="ltr" />
+                <input type="text" id="cautionAdresseInput" placeholder="Adresse de caution" dir="auto" />
               </div>
 
               <div className="form-group creation-layout-card">

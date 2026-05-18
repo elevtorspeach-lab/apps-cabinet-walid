@@ -82,6 +82,29 @@ function renderAudienceRowsHtml(rows, duplicateKeySet){
   return rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
 }
 
+function renderAudienceStatusEditor(row, keyEncoded, canEdit){
+  const statusSnapshot = getDossierDisplayStatusSnapshot(row?.d || {});
+  const statusValue = String(statusSnapshot?.statut || 'En cours').trim() || 'En cours';
+  const statusDetail = String(statusSnapshot?.detail || '').trim();
+  const options = typeof getDossierStatusOptions === 'function'
+    ? getDossierStatusOptions(statusValue)
+    : ['En cours', 'Soldé', 'Arrêt définitif', 'Clôture', 'Suspension', statusValue].filter(Boolean);
+  const statusOptionsListId = `audienceStatusOptions-${String(keyEncoded || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  const inputHtml = `
+    <input class="audience-status-select" value="${escapeAttr(statusValue)}" list="${statusOptionsListId}" ${canEdit ? '' : 'disabled'}
+      onchange="setAudienceDossierStatusFromEncoded('${keyEncoded}', this.value)"
+      onblur="setAudienceDossierStatusFromEncoded('${keyEncoded}', this.value)"
+      onkeydown="if(event.key === 'Enter'){ event.preventDefault(); this.blur(); }">
+    <datalist id="${statusOptionsListId}">
+      ${options.map(option=>`<option value="${escapeAttr(option)}"></option>`).join('')}
+    </datalist>
+  `;
+  if(!statusDetail || normalizeLooseText(statusDetail) === normalizeLooseText(statusValue)){
+    return inputHtml;
+  }
+  return `<div class="status-display audience-status-editor">${inputHtml}<div class="status-detail">${escapeHtml(statusDetail)}</div></div>`;
+}
+
 function renderSuiviRowsHtml(rows){
   return rows.map(renderSuiviRowHtml).join('');
 }
@@ -280,7 +303,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
       <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
-      <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
+      <td data-label="Statut">${renderAudienceStatusEditor(row, keyEncoded, canEdit)}</td>
       <td data-label="Jugement ADD">
         <div class="audience-jugement-add">
           <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
@@ -392,7 +415,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
           <div class="date-inline-error" ${dateDepotInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
         </div>
       </td>
-      <td data-label="Statut">${renderStatusDisplay(resolvedStatus, resolvedStatusDetail)}</td>
+      <td data-label="Statut">${renderAudienceStatusEditor(row, keyEncoded, canEdit)}</td>
       <td data-label="Jugement ADD">
         <div class="audience-jugement-add">
           <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
@@ -882,8 +905,13 @@ function renderAudience(options = {}){
   if(!canUseWorker){
     if(exactMatchedRows){
       queueFinalizeAudienceRender(exactMatchedRows);
+    }else if(audienceQuery){
+      queueFinalizeAudienceRender(colorFilteredRows.filter(row=>{
+        const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft, row));
+        return haystack.includes(audienceQuery);
+      }));
     }else{
-      queueFinalizeAudienceRender(getAudienceRows());
+      queueFinalizeAudienceRender(colorFilteredRows);
     }
     return;
   }
@@ -903,14 +931,20 @@ function renderAudience(options = {}){
       if(requestId !== audienceFilterRequestSeq) return;
       if(currentStateKey !== audienceFilterStateKey) return;
       if(!Array.isArray(filteredIndexes)){
-        queueFinalizeAudienceRender(getAudienceRows(), audienceFilterStateKey, requestId);
+        queueFinalizeAudienceRender(colorFilteredRows.filter(row=>{
+          const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft, row));
+          return haystack.includes(audienceQuery);
+        }), audienceFilterStateKey, requestId);
         return;
       }
       queueFinalizeAudienceRender(filteredIndexes.map(idx=>colorFilteredRows[idx]).filter(Boolean), audienceFilterStateKey, requestId);
     })
     .catch(()=>{
       if(requestId !== audienceFilterRequestSeq) return;
-      queueFinalizeAudienceRender(getAudienceRows(), audienceFilterStateKey, requestId);
+      queueFinalizeAudienceRender(colorFilteredRows.filter(row=>{
+        const haystack = row.__haystack || (row.__haystack = buildAudienceSearchHaystack(row.c?.name, row.d, row.procKey, row.p, row.draft, row));
+        return haystack.includes(audienceQuery);
+      }), audienceFilterStateKey, requestId);
     });
 }
 

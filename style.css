@@ -724,9 +724,9 @@ input:focus,select:focus,textarea:focus{border-color:#3b82f6;box-shadow:0 0 0 3p
 
 #adresseInput,
 #cautionAdresseInput{
-  direction:ltr;
-  unicode-bidi:isolate;
-  text-align:left;
+  unicode-bidi:plaintext;
+  text-align:start;
+  font:inherit;
 }
 
 /* ================== BUTTONS ================== */
@@ -2736,10 +2736,31 @@ tr:hover{background:#f1f5f9}
 }
 
 .audience-filter-row .audience-search-shell{
+  order:1;
   flex:0 1 560px;
   min-width:320px;
   max-width:560px;
   position:relative;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceRefDossier){
+  order:2;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceColor){
+  order:3;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceProcedure){
+  order:4;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceTribunal){
+  order:5;
+}
+
+.audience-filter-row .audience-color-filter:has(#filterAudienceDate){
+  order:6;
 }
 
 .audience-filter-row .search-box{
