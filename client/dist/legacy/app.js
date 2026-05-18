@@ -3959,6 +3959,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
   const omitWwAndMarque = shouldOmitSuiviWwAndMarqueColumns(rows);
   const omitCaution = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.caution);
   const omitCautionAdresse = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionAdresse);
+  const omitCautionRc = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionRc);
   const omitMontant2 = true;
   const columnDefs = [
     { header: 'Client', width: 22 },
@@ -3977,6 +3978,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     ...(!omitCaution ? [{ header: 'Caution', width: 28 }] : []),
     ...(!omitCautionAdresse ? [{ header: 'Adresse  caution', width: 36 }] : []),
     { header: 'CIN de caution', width: 22 },
+    ...(!omitCautionRc ? [{ header: 'RC', width: 18 }] : []),
     { header: 'Montant', width: 18 },
     ...(!omitMontant2 ? [{ header: 'Montant 2', width: 18 }] : []),
     { header: 'Date depot', width: 18 },
@@ -4015,6 +4017,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     omitWwAndMarque,
     omitCaution,
     omitCautionAdresse,
+    omitCautionRc,
     omitMontant2,
     colWidths,
     wrapColumnIndexes
@@ -4126,6 +4129,7 @@ function buildSuiviExportTableRows(rows, options = {}){
   const omitWwAndMarque = options?.omitWwAndMarque === true;
   const omitCaution = options?.omitCaution === true;
   const omitCautionAdresse = options?.omitCautionAdresse === true;
+  const omitCautionRc = options?.omitCautionRc === true;
   const omitMontant2 = options?.omitMontant2 === true;
   return sourceRows.flatMap((row)=>{
     const procedures = getSuiviExportProcedureNames(row);
@@ -4150,7 +4154,9 @@ function buildSuiviExportTableRows(rows, options = {}){
       }
       if(!omitCaution) exportRow.push(row.d?.caution || '');
       if(!omitCautionAdresse) exportRow.push(row.d?.cautionAdresse || '');
-      exportRow.push(row.d?.cautionCin || '', getSuiviProcedureMontantValue(row.d, procedureName) || '');
+      exportRow.push(row.d?.cautionCin || '');
+      if(!omitCautionRc) exportRow.push(row.d?.cautionRc || '');
+      exportRow.push(getSuiviProcedureMontantValue(row.d, procedureName) || '');
       if(!omitMontant2) exportRow.push(getSuiviExportMontant2Value(row.d) || '');
       exportRow.push(
         procedureValues.dateDepot || '',
@@ -4172,6 +4178,7 @@ function buildSuiviSelectedExportDataset(rowsOverride = null){
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
       omitCautionAdresse: dataset.omitCautionAdresse,
+      omitCautionRc: dataset.omitCautionRc,
       omitMontant2: dataset.omitMontant2
     })
   };
@@ -4184,6 +4191,7 @@ async function buildSuiviSelectedExportDatasetAsync(rowsOverride = null){
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
       omitCautionAdresse: dataset.omitCautionAdresse,
+      omitCautionRc: dataset.omitCautionRc,
       omitMontant2: dataset.omitMontant2
     });
   }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') });
@@ -19601,17 +19609,9 @@ function setupEvents(){
     btn.addEventListener('click', ()=>{
       const color = btn.dataset.color;
       if(color === 'all'){
-        filterAudienceErrorsOnly = false;
-        const errBtn = $('audienceErrorsBtn');
-        if(errBtn) errBtn.classList.remove('active');
         clearAudiencePrintSelection({ immediate: true });
-        filterAudienceCheckedFirst = false;
-        if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
-        filterAudienceColor = 'all';
-        const colorSel = $('filterAudienceColor');
-        if(colorSel) colorSel.value = 'all';
-        setSelectedAudienceColor('all', false);
-        syncAudienceColorFilterSelectAppearance();
+        resetAudienceFiltersUi();
+        paginationState.audience = 1;
         renderAudience();
         return;
       }
@@ -19679,8 +19679,93 @@ function setSelectedAudienceColor(color, syncFilter){
 }
 
 // ================== NAV ==================
+function hasPendingAudienceDateFilteredDraft(){
+  if(currentView !== 'audience') return false;
+  if(!normalizeIsoDateToDDMMYYYY(filterAudienceDate)) return false;
+  return Object.keys(audienceDraft || {}).length > 0;
+}
+
+function ensureAudienceUnsavedChangesModal(){
+  let modal = $('audienceUnsavedChangesModal');
+  if(modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'audienceUnsavedChangesModal';
+  modal.className = 'modal-backdrop audience-unsaved-modal';
+  modal.style.display = 'none';
+  modal.innerHTML = `
+    <div class="modal-card audience-unsaved-card" role="dialog" aria-modal="true" aria-labelledby="audienceUnsavedChangesTitle">
+      <div class="modal-head">
+        <h2 id="audienceUnsavedChangesTitle"><i class="fa-solid fa-triangle-exclamation"></i> Modifications non enregistrées</h2>
+        <button id="closeAudienceUnsavedChangesModalBtn" class="btn-primary" type="button">
+          <i class="fa-solid fa-check"></i> Compris
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="audience-unsaved-notice">
+          <div class="audience-unsaved-icon"><i class="fa-solid fa-floppy-disk"></i></div>
+          <div>
+            <strong>Enregistrez les modifications avant de quitter Audience.</strong>
+            <p>Vous avez modifié des lignes avec une date d'audience filtrée. Cliquez sur <b>Enregistrer</b> pour sauvegarder toutes les pages, puis changez de rubrique.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const card = modal.querySelector('.audience-unsaved-card');
+  if(card){
+    card.style.maxWidth = '560px';
+    card.style.width = 'min(560px, calc(100vw - 32px))';
+  }
+  const notice = modal.querySelector('.audience-unsaved-notice');
+  if(notice){
+    notice.style.display = 'flex';
+    notice.style.gap = '14px';
+    notice.style.alignItems = 'flex-start';
+    notice.style.padding = '16px';
+    notice.style.border = '1px solid #bfdbfe';
+    notice.style.borderRadius = '14px';
+    notice.style.background = 'linear-gradient(180deg,#eff6ff,#f8fbff)';
+    notice.style.color = '#0f172a';
+  }
+  const icon = modal.querySelector('.audience-unsaved-icon');
+  if(icon){
+    icon.style.width = '42px';
+    icon.style.height = '42px';
+    icon.style.borderRadius = '12px';
+    icon.style.display = 'inline-flex';
+    icon.style.alignItems = 'center';
+    icon.style.justifyContent = 'center';
+    icon.style.flex = '0 0 auto';
+    icon.style.color = '#1d4ed8';
+    icon.style.background = '#dbeafe';
+  }
+  const close = ()=>closeAudienceUnsavedChangesModal();
+  modal.querySelector('#closeAudienceUnsavedChangesModalBtn')?.addEventListener('click', close);
+  modal.addEventListener('click', (event)=>{
+    if(event.target === modal) close();
+  });
+  return modal;
+}
+
+function closeAudienceUnsavedChangesModal(){
+  const modal = $('audienceUnsavedChangesModal');
+  if(modal) modal.style.display = 'none';
+}
+
+function warnPendingAudienceDateFilteredDraft(){
+  showAudienceSaveFeedback('Veuillez cliquer sur Enregistrer avant de quitter cette page.', 'muted');
+  const modal = ensureAudienceUnsavedChangesModal();
+  modal.style.display = 'flex';
+  setTimeout(()=>modal.querySelector('#closeAudienceUnsavedChangesModalBtn')?.focus(), 0);
+}
+
 function showView(v, options = {}){
   const nextView = resolveAccessibleView(v);
+  if(nextView !== 'audience' && hasPendingAudienceDateFilteredDraft()){
+    warnPendingAudienceDateFilteredDraft();
+    return;
+  }
   if(nextView === 'creation' && options.newDossier === true){
     creationPinnedClientId = '';
     resetCreationForm();
@@ -21234,24 +21319,16 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
     dossier?.statutDetails || '',
     resolvedStatus,
     resolvedStatusDetail,
-    dossier?.procedure || '',
-    ...(Array.isArray(dossier?.procedureList) ? dossier.procedureList : [])
+    ''
   ];
   const procValues = [
-    procKey || '',
-    procedureData?.referenceClient || '',
-    procedureData?.audience || '',
     procedureData?.dateDepot || '',
     procedureData?.depotLe || '',
-    procedureData?.tribunal || '',
     procedureData?.juge || '',
     procedureData?.sort || '',
     procedureData?.observation || '',
     draftData?.refClient || '',
-    draftData?.refDossier || '',
-    draftData?.dateAudience || '',
     draftData?.dateDepot || '',
-    draftData?.tribunal || '',
     draftData?.juge || '',
     draftData?.sort || ''
   ];
@@ -21260,10 +21337,7 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
         item?.c?.name || '',
         item?.d?.debiteur || '',
         item?.d?.referenceClient || '',
-        getAudienceRowDraftReferenceValue(item),
-        item?.p?.referenceClient || '',
-        item?.p?.tribunal || '',
-        item?.procKey || ''
+        ''
       ])
     : [];
   const relatedGlobalRefs = getAudienceRelatedGlobalReferenceClients(row);
@@ -21284,23 +21358,14 @@ function buildAudienceExactSearchTokens(row){
     const key = normalizeCaseInsensitiveSearchText(value);
     if(key) tokens.add(key);
   };
-  pushRefToken(getAudienceRowDraftReferenceValue(row));
   pushRefToken(row?.d?.referenceClient || '');
-  pushRefToken(row?.p?.referenceClient || '');
   if(Array.isArray(row?.__dedupedAudienceRows)){
     row.__dedupedAudienceRows.forEach(item=>{
-      pushRefToken(getAudienceRowDraftReferenceValue(item));
       pushRefToken(item?.d?.referenceClient || '');
-      pushRefToken(item?.p?.referenceClient || '');
       pushTextToken(item?.d?.debiteur || '');
-      pushTextToken(item?.draft?.dateAudience || '');
-      pushTextToken(item?.p?.audience || '');
     });
   }
   getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
-  pushTextToken(getAudienceRowDateValue(row));
-  pushTextToken(row?.draft?.dateAudience || '');
-  pushTextToken(row?.p?.audience || '');
   pushTextToken(row?.d?.debiteur || '');
   pushTextToken(row?.d?.statut || '');
   pushTextToken(row?.d?.statutDetails || '');
@@ -25526,7 +25591,11 @@ function shouldHandleAudienceSaveShortcut(event){
 function handleAudienceSaveShortcut(event){
   if(!shouldHandleAudienceSaveShortcut(event)) return;
   event.preventDefault();
-  saveAllAudience({ feedback: true });
+  if(!normalizeIsoDateToDDMMYYYY(filterAudienceDate)){
+    saveAllAudience({ feedback: true });
+    return;
+  }
+  showAudienceSaveFeedback('Cliquez sur Enregistrer pour sauvegarder toutes les pages.', 'muted');
 }
 
 function clearAudiencePrintSelection(options = {}){
@@ -27780,7 +27849,7 @@ function updateAudienceDraft(key, field, value){
     juge: 'procedureDetails.juge',
     sort: 'procedureDetails.sort'
   };
-  if(fieldMap[field] && hasMeaningfulChange){
+  if(fieldMap[field] && hasMeaningfulChange && !shouldDeferAudienceServerSaveUntilButton()){
     queueDossierHistoryEntry(dossier, {
       source: 'audience',
       field: fieldMap[field],
@@ -28254,10 +28323,10 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   }else{
     updateAudienceDraft(key, targetField, inputEl.value);
   }
-  saveAudienceDraftEntry(key, { clearDraft: true, rerender: true });
   if(typeof inputEl.blur === 'function'){
     inputEl.blur();
   }
+  showAudienceSaveFeedback('Modification prête. Cliquez sur Enregistrer pour sauvegarder.', 'muted');
 }
 
 function saveAllAudience(options = {}){
@@ -28449,11 +28518,24 @@ function persistAudienceDraftDossiersNow(){
   return entries.length;
 }
 
+function shouldAutoPersistAudienceDraftDossiers(){
+  if(normalizeIsoDateToDDMMYYYY(filterAudienceDate)) return false;
+  const draftEntries = Object.entries(audienceDraft || {});
+  return draftEntries.length > 0;
+}
+
+function shouldDeferAudienceServerSaveUntilButton(){
+  return !!normalizeIsoDateToDDMMYYYY(filterAudienceDate);
+}
+
 function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
-    persistAudienceDraftDossiersNow();
+    if(shouldDeferAudienceServerSaveUntilButton()) return;
+    if(shouldAutoPersistAudienceDraftDossiers()){
+      persistAudienceDraftDossiersNow();
+    }
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
   }, 1200);
 }

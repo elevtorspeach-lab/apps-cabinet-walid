@@ -17,19 +17,19 @@ function AudienceSection() {
                 <button className="color-btn yellow" data-color="yellow">ORD OK</button>
                 <button className="color-btn document-ok" data-color="document-ok">Document OK</button>
                 <button className="color-btn pink" data-color="pink">ATT NB</button>
-                <button className="color-btn purple-dark" data-color="closed">Soldé / Arrêt définitif</button>
+                <button className="color-btn purple-dark" data-color="closed">{"Sold\u00e9 / Arr\u00eat d\u00e9finitif"}</button>
               </div>
             </div>
           </div>
 
           <div className="audience-actions-right">
             <label id="audienceCheckedCount" className="audience-checked-count" htmlFor="audiencePageSelectionToggle">
-              <input id="audiencePageSelectionToggle" type="checkbox" aria-label="Cocher ou décocher toute la page audience" />
-              <span className="label">Cochés</span>
+              <input id="audiencePageSelectionToggle" type="checkbox" aria-label={"Cocher ou d\u00e9cocher toute la page audience"} />
+              <span className="label">{"Coch\u00e9s"}</span>
               <span id="audienceCheckedCountValue" className="value">0</span>
             </label>
             <button id="undoAudienceColorBtn" className="btn-primary" type="button" disabled>
-              <i className="fa-solid fa-rotate-left"></i> Précédent
+              <i className="fa-solid fa-rotate-left"></i> {"Pr\u00e9c\u00e9dent"}
             </button>
             <button id="printAudienceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-square-check"></i> Cocher
@@ -38,7 +38,7 @@ function AudienceSection() {
               <i className="fa-solid fa-check-double"></i> Cocher page
             </button>
             <button id="clearAllPrintAudienceBtn" className="btn-primary" type="button">
-              <i className="fa-solid fa-eraser"></i> Décocher page
+              <i className="fa-solid fa-eraser"></i> {"D\u00e9cocher page"}
             </button>
             <button id="exportAudienceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-file-export"></i> Exporter
@@ -50,7 +50,7 @@ function AudienceSection() {
               <i className="fa-solid fa-list-check"></i> DILLIGENCE
             </button>
             <button id="previewAudienceBtn" className="btn-primary" type="button">
-              <i className="fa-regular fa-eye"></i> Aperçu Excel
+              <i className="fa-regular fa-eye"></i> {"Aper\u00e7u Excel"}
             </button>
           </div>
         </div>
@@ -59,9 +59,22 @@ function AudienceSection() {
           <div className="audience-search-shell">
             <div className="search-box audience-search-box">
               <i className="fa-solid fa-filter"></i>
-              <input type="text" id="filterAudience" placeholder="Filter global (date / client / réf client / réf dossier)..." autoComplete="off" />
+              <input type="text" id="filterAudience" placeholder={"Filter global (client / r\u00e9f client / d\u00e9biteur / juge / sort)..."} autoComplete="off" />
             </div>
           </div>
+
+          <div className="audience-color-filter">
+            <label htmlFor="filterAudienceRefDossier">{"R\u00e9f\u00e9rence dossier"}</label>
+            <input type="text" id="filterAudienceRefDossier" placeholder="" autoComplete="off" />
+          </div>
+
+
+          <div className="audience-color-filter">
+            <label htmlFor="filterAudienceDate">Date d&apos;audience</label>
+            <input type="date" id="filterAudienceDate" />
+          </div>
+
+
 
           <div className="audience-color-filter">
             <label htmlFor="filterAudienceColor">Sort</label>
@@ -74,12 +87,12 @@ function AudienceSection() {
               <option value="pink">ATT NB</option>
               <option value="jugement-ok">ADD J OK</option>
               <option value="jugement-att">J ATT ADD</option>
-              <option value="closed">Soldé / Arrêt définitif</option>
+              <option value="closed">{"Sold\u00e9 / Arr\u00eat d\u00e9finitif"}</option>
             </select>
           </div>
 
           <div className="audience-color-filter">
-            <label htmlFor="filterAudienceProcedure">Procédure</label>
+            <label htmlFor="filterAudienceProcedure">{"Proc\u00e9dure"}</label>
             <select id="filterAudienceProcedure">
               <option value="all">Toutes</option>
             </select>
@@ -96,16 +109,6 @@ function AudienceSection() {
             />
             <datalist id="filterAudienceTribunalOptions">
             </datalist>
-          </div>
-
-          <div className="audience-color-filter">
-            <label htmlFor="filterAudienceDate">Date d&apos;audience</label>
-            <input type="date" id="filterAudienceDate" />
-          </div>
-
-          <div className="audience-color-filter">
-            <label htmlFor="filterAudienceRefDossier">Référence dossier</label>
-            <input type="text" id="filterAudienceRefDossier" placeholder="" autoComplete="off" />
           </div>
         </div>
 
@@ -130,15 +133,15 @@ function AudienceSection() {
             <tr>
               <th></th>
               <th>Client</th>
-              <th>Référence Client</th>
-              <th>Débiteur</th>
-              <th>Référence dossier</th>
+              <th>{"R\u00e9f\u00e9rence Client"}</th>
+              <th>{"D\u00e9biteur"}</th>
+              <th>{"R\u00e9f\u00e9rence dossier"}</th>
               <th>Date d&apos;audience</th>
               <th>Juge</th>
               <th>Sort</th>
               <th>Tribunal</th>
-              <th>Procédure</th>
-              <th>Date dépôt</th>
+              <th>{"Proc\u00e9dure"}</th>
+              <th>{"Date d\u00e9p\u00f4t"}</th>
               <th>Statut</th>
               <th>Jugement ADD</th>
               <th>Actions</th>

@@ -207,13 +207,18 @@
       <div class="audience-search-shell">
         <div class="search-box audience-search-box">
           <i class="fa-solid fa-filter"></i>
-          <input type="text" id="filterAudience" placeholder="Filter global (date / client / réf client / réf dossier)..." autocomplete="off" />
+          <input type="text" id="filterAudience" placeholder="Filter global (client / réf client / débiteur / juge / sort)..." autocomplete="off" />
         </div>
       </div>
 
       <div class="audience-color-filter">
         <label for="filterAudienceRefDossier">Référence dossier</label>
         <input type="text" id="filterAudienceRefDossier" placeholder="" autocomplete="off" />
+      </div>
+
+      <div class="audience-color-filter">
+        <label for="filterAudienceDate">Date d'audience</label>
+        <input type="date" id="filterAudienceDate" />
       </div>
 
       <div class="audience-color-filter">
@@ -249,11 +254,6 @@
         />
         <datalist id="filterAudienceTribunalOptions">
         </datalist>
-      </div>
-
-      <div class="audience-color-filter">
-        <label for="filterAudienceDate">Date d'audience</label>
-        <input type="date" id="filterAudienceDate" />
       </div>
 
     </div>

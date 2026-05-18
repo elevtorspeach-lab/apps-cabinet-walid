@@ -3727,6 +3727,7 @@ function buildSuiviSelectedExportDatasetBase(){
   const omitWwAndMarque = shouldOmitSuiviWwAndMarqueColumns(rows);
   const omitCaution = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.caution);
   const omitCautionAdresse = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionAdresse);
+  const omitCautionRc = shouldOmitSuiviExportColumn(rows, (row)=>row?.d?.cautionRc);
   const columnDefs = [
     { header: 'Client', width: 22 },
     { header: 'date affectation', width: 21 },
@@ -3742,6 +3743,7 @@ function buildSuiviSelectedExportDatasetBase(){
     ] : []),
     ...(!omitCaution ? [{ header: 'Caution', width: 28 }] : []),
     ...(!omitCautionAdresse ? [{ header: 'Adresse  caution', width: 36 }] : []),
+    ...(!omitCautionRc ? [{ header: 'RC', width: 18 }] : []),
     { header: 'Date depot', width: 18 },
     { header: 'Réf Ass', width: 26 },
     { header: 'Audience', width: 18 },
@@ -3776,6 +3778,7 @@ function buildSuiviSelectedExportDatasetBase(){
     omitWwAndMarque,
     omitCaution,
     omitCautionAdresse,
+    omitCautionRc,
     colWidths,
     wrapColumnIndexes
   };
@@ -3841,6 +3844,7 @@ function buildSuiviExportTableRows(rows, options = {}){
   const omitWwAndMarque = options?.omitWwAndMarque === true;
   const omitCaution = options?.omitCaution === true;
   const omitCautionAdresse = options?.omitCautionAdresse === true;
+  const omitCautionRc = options?.omitCautionRc === true;
   return sourceRows.flatMap((row)=>{
     const procedures = getSuiviExportProcedureNames(row);
     return procedures.map((procedureName)=>{
@@ -3863,6 +3867,7 @@ function buildSuiviExportTableRows(rows, options = {}){
       }
       if(!omitCaution) exportRow.push(row.d?.caution || '-');
       if(!omitCautionAdresse) exportRow.push(row.d?.cautionAdresse || '-');
+      if(!omitCautionRc) exportRow.push(row.d?.cautionRc || '-');
       exportRow.push(
         procedureValues.dateDepot || '',
         procedureValues.reference || '',
@@ -3882,7 +3887,8 @@ function buildSuiviSelectedExportDataset(){
     tableRows: buildSuiviExportTableRows(dataset.rows, {
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
-      omitCautionAdresse: dataset.omitCautionAdresse
+      omitCautionAdresse: dataset.omitCautionAdresse,
+      omitCautionRc: dataset.omitCautionRc
     })
   };
 }
@@ -3893,7 +3899,8 @@ async function buildSuiviSelectedExportDatasetAsync(){
     return buildSuiviExportTableRows([row], {
       omitWwAndMarque: dataset.omitWwAndMarque,
       omitCaution: dataset.omitCaution,
-      omitCautionAdresse: dataset.omitCautionAdresse
+      omitCautionAdresse: dataset.omitCautionAdresse,
+      omitCautionRc: dataset.omitCautionRc
     });
   }, { chunkSize: 80, onProgress: makeProgressReporter('Export suivi') });
   return {
@@ -16563,17 +16570,9 @@ function setupEvents(){
     btn.addEventListener('click', ()=>{
       const color = btn.dataset.color;
       if(color === 'all'){
-        filterAudienceErrorsOnly = false;
-        const errBtn = $('audienceErrorsBtn');
-        if(errBtn) errBtn.classList.remove('active');
         clearAudiencePrintSelection({ immediate: true });
-        filterAudienceCheckedFirst = false;
-        if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'default';
-        filterAudienceColor = 'all';
-        const colorSel = $('filterAudienceColor');
-        if(colorSel) colorSel.value = 'all';
-        setSelectedAudienceColor('all', false);
-        syncAudienceColorFilterSelectAppearance();
+        resetAudienceFiltersUi();
+        paginationState.audience = 1;
         renderAudience();
         return;
       }

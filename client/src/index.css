@@ -3170,9 +3170,9 @@ tr:hover{background:#f1f5f9}
 
 .audience-filter-row .audience-search-shell{
   order:1;
-  flex:0 1 560px;
+  flex:0 1 448px;
   min-width:320px;
-  max-width:560px;
+  max-width:448px;
   position:relative;
 }
 
@@ -3180,19 +3180,19 @@ tr:hover{background:#f1f5f9}
   order:2;
 }
 
-.audience-filter-row .audience-color-filter:has(#filterAudienceColor){
+.audience-filter-row .audience-color-filter:has(#filterAudienceDate){
   order:3;
 }
 
-.audience-filter-row .audience-color-filter:has(#filterAudienceProcedure){
+.audience-filter-row .audience-color-filter:has(#filterAudienceColor){
   order:4;
 }
 
-.audience-filter-row .audience-color-filter:has(#filterAudienceTribunal){
+.audience-filter-row .audience-color-filter:has(#filterAudienceProcedure){
   order:5;
 }
 
-.audience-filter-row .audience-color-filter:has(#filterAudienceDate){
+.audience-filter-row .audience-color-filter:has(#filterAudienceTribunal){
   order:6;
 }
 
