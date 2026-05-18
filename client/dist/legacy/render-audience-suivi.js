@@ -105,6 +105,28 @@ function renderAudienceStatusEditor(row, keyEncoded, canEdit){
   return `<div class="status-display audience-status-editor">${inputHtml}<div class="status-detail">${escapeHtml(statusDetail)}</div></div>`;
 }
 
+function getAudienceDebiteurFrenchDisplay(value){
+  const raw = String(value || '').trim();
+  if(!raw) return '';
+  const hasLatin = (text)=>/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(String(text || ''));
+  const stripArabic = (text)=>String(text || '')
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const parts = raw
+    .split(/[\r\n|/\\]+/)
+    .map(part=>stripArabic(part))
+    .filter(Boolean);
+  const candidates = parts.filter(hasLatin);
+  if(candidates.length){
+    return candidates
+      .sort((a, b)=>b.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g, '').length - a.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g, '').length)[0]
+      .trim();
+  }
+  const latinOnly = stripArabic(raw);
+  return hasLatin(latinOnly) ? latinOnly : raw;
+}
+
 function renderSuiviRowsHtml(rows){
   return rows.map(renderSuiviRowHtml).join('');
 }
@@ -292,7 +314,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
-      <td data-label="Débiteur">${escapeHtml(d.debiteur || '-')}</td>
+      <td data-label="Débiteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(d.debiteur) || '-')}</td>
       <td data-label="Référence dossier">
         <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
         ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
@@ -394,7 +416,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
-      <td data-label="DÃ©biteur">${escapeHtml(d.debiteur || '-')}</td>
+      <td data-label="DÃ©biteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(d.debiteur) || '-')}</td>
       <td data-label="RÃ©fÃ©rence dossier">
         <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
         ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
