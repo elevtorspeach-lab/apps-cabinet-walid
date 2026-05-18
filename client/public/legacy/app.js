@@ -21292,43 +21292,16 @@ function getDiligenceSearchHaystack(row){
 }
 
 function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData, draftData, row = null){
-  const resolvedStatus = String(row?.__resolvedStatus || dossier?.statut || '').trim();
-  const resolvedStatusDetail = String(row?.__resolvedStatusDetail || dossier?.statutDetails || '').trim();
   const dossierValues = [
     clientName || '',
     dossier?.debiteur || '',
-    dossier?.nRef || '',
-    dossier?.boiteNo || '',
     dossier?.referenceClient || '',
-    dossier?.dateAffectation || '',
-    dossier?.gestionnaire || '',
-    dossier?.ville || '',
-    dossier?.adresse || '',
-    dossier?.montant || '',
-    dossier?.ww || '',
-    dossier?.marque || '',
-    dossier?.type || '',
-    dossier?.caution || '',
-    dossier?.cautionAdresse || '',
-    dossier?.cautionVille || '',
-    dossier?.cautionCin || '',
-    dossier?.cautionRc || '',
-    dossier?.note || '',
-    dossier?.avancement || '',
-    dossier?.statut || '',
-    dossier?.statutDetails || '',
-    resolvedStatus,
-    resolvedStatusDetail,
     ''
   ];
   const procValues = [
-    procedureData?.dateDepot || '',
-    procedureData?.depotLe || '',
     procedureData?.juge || '',
     procedureData?.sort || '',
-    procedureData?.observation || '',
     draftData?.refClient || '',
-    draftData?.dateDepot || '',
     draftData?.juge || '',
     draftData?.sort || ''
   ];
@@ -21367,10 +21340,6 @@ function buildAudienceExactSearchTokens(row){
   }
   getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
   pushTextToken(row?.d?.debiteur || '');
-  pushTextToken(row?.d?.statut || '');
-  pushTextToken(row?.d?.statutDetails || '');
-  pushTextToken(row?.__resolvedStatus || '');
-  pushTextToken(row?.__resolvedStatusDetail || '');
   return [...tokens];
 }
 
