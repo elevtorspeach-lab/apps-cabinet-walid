@@ -48,10 +48,6 @@ function buildSidebarUserLabel(identity, isClient, isAdminOrManager) {
 function Sidebar() {
   const [isClient, setIsClient] = useState(typeof window !== 'undefined' && typeof window.isViewer === 'function' ? window.isViewer() : false);
   const [canManageTeam, setCanManageTeam] = useState(typeof window !== 'undefined' && typeof window.canManageTeam === 'function' ? window.canManageTeam() : false);
-  const [isAdminOrManager, setIsAdminOrManager] = useState(typeof window !== 'undefined' && (
-    (typeof window.isAdmin === 'function' && window.isAdmin()) ||
-    (typeof window.isManager === 'function' && window.isManager())
-  ));
   const [currentUserLabel, setCurrentUserLabel] = useState('');
 
   const updateRoles = useCallback(() => {
@@ -69,7 +65,6 @@ function Sidebar() {
 
     setIsClient((prev) => (prev === nextIsClient ? prev : nextIsClient));
     setCanManageTeam((prev) => (prev === nextCanManageTeam ? prev : nextCanManageTeam));
-    setIsAdminOrManager((prev) => (prev === nextIsAdminOrManager ? prev : nextIsAdminOrManager));
     setCurrentUserLabel((prev) => {
       const nextLabel = buildSidebarUserLabel(identity, nextIsClient, nextIsAdminOrManager);
       return prev === nextLabel ? prev : nextLabel;
