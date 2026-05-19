@@ -6665,7 +6665,8 @@ function syncProcedureMontantGroups(selectedProcedures){
     procedures: group.procedures.filter(proc=>selected.includes(proc))
   })).filter(group=>group.procedures.length > 0);
 
-  const allowSecondGroup = hasMultipleAffectationDatesForSelection(selected)
+  const allowSecondGroup = procedureMontantGroups.length > 1
+    || hasMultipleAffectationDatesForSelection(selected)
     || hasNewProceduresComparedToOriginal(selected);
 
   // In "new dossier" mode, keep a single montant group only.
@@ -21688,7 +21689,7 @@ function editDossier(clientId, index){
   const standard = new Set(['ASS','Restitution','Commandement','Nantissement','Redressement','Vérification de créance','Liquidation judiciaire','SFDC','SAISIE ARR\u00caT','S/bien','Injonction']);
   const procs = normalizeProcedures(d);
   procedureMontantGroups = normalizeProcedureMontantGroups(d.montantByProcedure, procs, d.montant || '');
-  if(!hasMultipleAffectationDatesForSelection(procs)){
+  if(procedureMontantGroups.length <= 1 && !hasMultipleAffectationDatesForSelection(procs)){
     const now = Date.now();
     const mainMontantValue = String(d.montant || '').trim()
       || String(procedureMontantGroups[0]?.montant || '').trim()
