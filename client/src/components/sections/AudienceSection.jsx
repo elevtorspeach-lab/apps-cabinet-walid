@@ -16,7 +16,7 @@ function AudienceSection() {
                 <button className="color-btn green" data-color="green">ATT ORD</button>
                 <button className="color-btn yellow" data-color="yellow">ORD OK</button>
                 <button className="color-btn document-ok" data-color="document-ok">Document OK</button>
-                <button className="color-btn pink" data-color="pink">ATT NB</button>
+                <button className="color-btn pink" data-color="pink">ATT DELEGATION</button>
                 <button className="color-btn purple-dark" data-color="closed">{"Sold\u00e9 / Arr\u00eat d\u00e9finitif"}</button>
               </div>
             </div>
@@ -84,7 +84,7 @@ function AudienceSection() {
               <option value="green">ATT ORD</option>
               <option value="yellow">ORD OK</option>
               <option value="document-ok">Document OK</option>
-              <option value="pink">ATT NB</option>
+              <option value="pink">ATT DELEGATION</option>
               <option value="jugement-ok">ADD J OK</option>
               <option value="jugement-att">J ATT ADD</option>
               <option value="closed">{"Sold\u00e9 / Arr\u00eat d\u00e9finitif"}</option>

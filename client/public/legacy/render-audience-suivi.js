@@ -24,7 +24,7 @@ const AUDIENCE_FIELD_DATALISTS = {
   sort: 'audienceSortOptions',
   tribunal: 'audienceTribunalEditOptions'
 };
-const AUDIENCE_PRESET_SORT_OPTIONS = ['ATT NB'];
+const AUDIENCE_PRESET_SORT_OPTIONS = ['ATT DELEGATION'];
 let audienceFieldDatalistsRowsRef = null;
 let audienceFieldDatalistsMarkupKey = '';
 
@@ -920,14 +920,9 @@ function renderAudience(options = {}){
   const colorFilteredRows = filterAudienceColor === 'all'
     ? baseRows
     : baseRows.filter(row=>audienceRowMatchesColorFilter(row, filterAudienceColor));
-  const referenceMatchedRows = audienceQuery && typeof getAudienceRowsByReferenceQuery === 'function'
-    ? getAudienceRowsByReferenceQuery(colorFilteredRows, audienceQuery)
-    : null;
-  const exactMatchedRows = Array.isArray(referenceMatchedRows)
-    ? referenceMatchedRows
-    : (audienceQuery
+  const exactMatchedRows = audienceQuery
     ? getAudienceRowsByExactQuery(colorFilteredRows, audienceQuery)
-    : null);
+    : null;
   const canUseWorker = (
     !!audienceQuery
     && !exactMatchedRows

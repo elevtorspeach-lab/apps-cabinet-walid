@@ -21313,9 +21313,7 @@ function buildAudienceSearchHaystack(clientName, dossier, procKey, procedureData
         ''
       ])
     : [];
-  const relatedGlobalRefs = getAudienceRelatedGlobalReferenceClients(row);
-  // Audience filtering must stay scoped to the current procedure row.
-  return [...dossierValues, ...procValues, ...groupedValues, ...relatedGlobalRefs]
+  return [...dossierValues, ...procValues, ...groupedValues]
     .map(v=>normalizeCaseInsensitiveSearchText(v))
     .join(' ');
 }
@@ -21338,7 +21336,6 @@ function buildAudienceExactSearchTokens(row){
       pushTextToken(item?.d?.debiteur || '');
     });
   }
-  getAudienceRelatedGlobalReferenceClients(row).forEach(pushRefToken);
   pushTextToken(row?.d?.debiteur || '');
   return [...tokens];
 }
@@ -23868,7 +23865,7 @@ function getDiligenceExportColumnDefinitions(){
       key: 'juge',
       header: 'Juge',
       width: 28,
-      assOnly: true,
+      keepEmpty: true,
       getValue: (row)=>row?.details?.juge || ''
     },
     {
@@ -24000,6 +23997,7 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Notif Conservateur', width: 24, getValue: (row)=>row?.details?.notifConservateur || '' },
       { header: 'Notif débiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
       { header: 'Ref expertise', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
+      { header: 'Juge', width: 28, getValue: (row)=>row?.details?.juge || '' },
       { header: 'Ord', width: 18, getValue: (row)=>row?.details?.ord || '' },
       { header: 'Expert', width: 24, getValue: (row)=>row?.details?.expert || '' },
       { header: 'Sort', width: 22, getValue: (row)=>row?.details?.sort || '' },
@@ -24025,7 +24023,7 @@ function finalizeDiligenceExportDataset(rows){
     return cells;
   });
   const activeIndexes = columns.reduce((list, _column, index)=>{
-    if(activeColumnIndexes.has(index)) list.push(index);
+    if(_column?.keepEmpty || activeColumnIndexes.has(index)) list.push(index);
     return list;
   }, []);
   const activeColumns = activeIndexes.map((index)=>columns[index]);
