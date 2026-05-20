@@ -73,7 +73,7 @@ function shouldShowDiligenceSaisieArretColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 26;
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 25;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     if(cmdMode !== 'default') return 24;
@@ -117,9 +117,8 @@ function buildDiligenceHeadHtml(){
       <th>R&eacute;f&eacute;rence client</th>
       <th>Lot du</th>
       <th>Gestionnaire</th>
-      <th>Beneficient</th>
-      <th>D&eacute;biteur EP</th>
-      <th>D&eacute;biteur AP</th>
+      <th>D&eacute;biteur FR</th>
+      <th>D&eacute;biteur AR</th>
       <th>CIN/RC</th>
       <th>Adresse</th>
       <th>Ville</th>
@@ -127,14 +126,14 @@ function buildDiligenceHeadHtml(){
       <th>RIB</th>
       <th>Banque FR</th>
       <th>Banque AR</th>
-      <th>Adresse branche</th>
+      <th>Adresse Banque</th>
       <th>Avocat</th>
       <th>Observation</th>
       <th>D&eacute;p&ocirc;t</th>
       <th>Ref dossier</th>
       <th>Sort ORD</th>
       <th>Execution N&deg;</th>
-      <th>Sort PLE</th>
+      <th>Sort plie</th>
       <th>Notif banque</th>
       <th>Notif d&eacute;biteur</th>
       <th>Tribunal</th>
@@ -256,7 +255,6 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const hideWrap = (html)=> shouldHideTail ? `<div style="display:none">${html}</div>` : html;
   if(diligenceVirtualCompactProcedureMode === 'saisiearret' && isSaisieArretProcedure){
     const cinRcValue = row.details?.cinRc || row.details?.cin || row.dossier?.cin || row.dossier?.cautionCin || '';
-    const beneficientValue = row.details?.beneficient || row.details?.beneficiaire || '';
     const debiteurEpValue = row.details?.debiteurEp || row.dossier?.debiteur || '';
     const debiteurApValue = row.details?.debiteurAp || '';
     const adresseValue = row.details?.adresse || row.dossier?.adresse || '';
@@ -278,7 +276,6 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${escapeHtml(refClientValue || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
         <td>${escapeHtml(row.dossier?.gestionnaire || '-')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'beneficient', beneficientValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurAp', debiteurApValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'cinRc', cinRcValue)}</td>

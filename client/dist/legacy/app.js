@@ -23270,6 +23270,21 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       </select>
     `;
   }
+  if(field === 'sortPle'){
+    const status = normalized;
+    if(!row?.canEdit){
+      return escapeHtml(status || '-');
+    }
+    return `
+      <select
+        class="diligence-inline-select"
+        onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="" ${status === '' ? 'selected' : ''}>-</option>
+        <option value="att plie" ${status === 'att plie' ? 'selected' : ''}>att plie</option>
+        <option value="plie ok" ${status === 'plie ok' ? 'selected' : ''}>plie ok</option>
+      </select>
+    `;
+  }
   if(field === 'certificatNonAppelStatus'){
     const status = normalized || 'att certificat non appel';
     if(!row?.canEdit){
@@ -23966,7 +23981,7 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
       { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
       { header: 'Execution N°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
-      { header: 'Sort PLE', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
+      { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
       { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
