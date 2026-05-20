@@ -490,6 +490,7 @@ const RECYCLE_ARCHIVE_MAX_ENTRIES = 8000;
 const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
+  cin: 'CIN',
   adversaire: 'Adversaire',
   nRef: 'N / ref',
   boiteNo: 'Boîte N°',
@@ -1264,6 +1265,7 @@ function collectDossierDiffEntries(prevDossier, nextDossier){
   const entries = [];
   const dossierFields = [
     'debiteur',
+    'cin',
     'nRef',
     'boiteNo',
     'referenceClient',
@@ -6601,6 +6603,12 @@ function updateProcedureMontantGroupAmount(index, value){
   const group = procedureMontantGroups[index];
   if(!group) return;
   group.montant = String(value || '').trim();
+  if(index === 0){
+    const montantInput = $('montantInput');
+    if(montantInput && String(montantInput.value || '').trim() !== group.montant){
+      montantInput.value = group.montant;
+    }
+  }
 }
 
 function syncMainMontantToGroup1(value){
@@ -12340,9 +12348,9 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
   };
   const pathname = routeBySlice[sliceKey];
   if(!pathname){
-    return persistRemoteRequestNow('/state', payload);
+    return persistRemoteRequestNow('/state', payload, options);
   }
-  return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue });
+  return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue }, options);
 }
 
 async function persistClientPatchNow(patch, options = {}){
@@ -19296,7 +19304,7 @@ function setupEvents(){
 
   const renderClientsDebounced = debounce(renderClients, 120);
   const renderSuiviDebounced = debounce(renderSuivi, 120);
-  const renderAudienceDebounced = debounce(renderAudience, 220);
+  const renderAudienceDebounced = debounce(renderAudience, 420);
   const renderDiligenceDebounced = debounce(renderDiligence, 120);
   const filterTeamClientListDebounced = debounce(filterTeamClientList, 120);
   $('audienceTableContainer')?.addEventListener('scroll', queueAudienceVirtualRender, { passive: true });
@@ -19680,93 +19688,8 @@ function setSelectedAudienceColor(color, syncFilter){
 }
 
 // ================== NAV ==================
-function hasPendingAudienceDateFilteredDraft(){
-  if(currentView !== 'audience') return false;
-  if(!normalizeIsoDateToDDMMYYYY(filterAudienceDate)) return false;
-  return Object.keys(audienceDraft || {}).length > 0;
-}
-
-function ensureAudienceUnsavedChangesModal(){
-  let modal = $('audienceUnsavedChangesModal');
-  if(modal) return modal;
-  modal = document.createElement('div');
-  modal.id = 'audienceUnsavedChangesModal';
-  modal.className = 'modal-backdrop audience-unsaved-modal';
-  modal.style.display = 'none';
-  modal.innerHTML = `
-    <div class="modal-card audience-unsaved-card" role="dialog" aria-modal="true" aria-labelledby="audienceUnsavedChangesTitle">
-      <div class="modal-head">
-        <h2 id="audienceUnsavedChangesTitle"><i class="fa-solid fa-triangle-exclamation"></i> Modifications non enregistrées</h2>
-        <button id="closeAudienceUnsavedChangesModalBtn" class="btn-primary" type="button">
-          <i class="fa-solid fa-check"></i> Compris
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="audience-unsaved-notice">
-          <div class="audience-unsaved-icon"><i class="fa-solid fa-floppy-disk"></i></div>
-          <div>
-            <strong>Enregistrez les modifications avant de quitter Audience.</strong>
-            <p>Vous avez modifié des lignes avec une date d'audience filtrée. Cliquez sur <b>Enregistrer</b> pour sauvegarder toutes les pages, puis changez de rubrique.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  const card = modal.querySelector('.audience-unsaved-card');
-  if(card){
-    card.style.maxWidth = '560px';
-    card.style.width = 'min(560px, calc(100vw - 32px))';
-  }
-  const notice = modal.querySelector('.audience-unsaved-notice');
-  if(notice){
-    notice.style.display = 'flex';
-    notice.style.gap = '14px';
-    notice.style.alignItems = 'flex-start';
-    notice.style.padding = '16px';
-    notice.style.border = '1px solid #bfdbfe';
-    notice.style.borderRadius = '14px';
-    notice.style.background = 'linear-gradient(180deg,#eff6ff,#f8fbff)';
-    notice.style.color = '#0f172a';
-  }
-  const icon = modal.querySelector('.audience-unsaved-icon');
-  if(icon){
-    icon.style.width = '42px';
-    icon.style.height = '42px';
-    icon.style.borderRadius = '12px';
-    icon.style.display = 'inline-flex';
-    icon.style.alignItems = 'center';
-    icon.style.justifyContent = 'center';
-    icon.style.flex = '0 0 auto';
-    icon.style.color = '#1d4ed8';
-    icon.style.background = '#dbeafe';
-  }
-  const close = ()=>closeAudienceUnsavedChangesModal();
-  modal.querySelector('#closeAudienceUnsavedChangesModalBtn')?.addEventListener('click', close);
-  modal.addEventListener('click', (event)=>{
-    if(event.target === modal) close();
-  });
-  return modal;
-}
-
-function closeAudienceUnsavedChangesModal(){
-  const modal = $('audienceUnsavedChangesModal');
-  if(modal) modal.style.display = 'none';
-}
-
-function warnPendingAudienceDateFilteredDraft(){
-  showAudienceSaveFeedback('Veuillez cliquer sur Enregistrer avant de quitter cette page.', 'muted');
-  const modal = ensureAudienceUnsavedChangesModal();
-  modal.style.display = 'flex';
-  setTimeout(()=>modal.querySelector('#closeAudienceUnsavedChangesModalBtn')?.focus(), 0);
-}
-
 function showView(v, options = {}){
   const nextView = resolveAccessibleView(v);
-  if(nextView !== 'audience' && hasPendingAudienceDateFilteredDraft()){
-    warnPendingAudienceDateFilteredDraft();
-    return;
-  }
   if(nextView === 'creation' && options.newDossier === true){
     creationPinnedClientId = '';
     resetCreationForm();
@@ -20621,6 +20544,8 @@ async function addDossier(){
     if(!validateCreationReferenceClient()){
       return;
     }
+    const sanlamAdversairesForSave = getSanlamAdversairesForSave(selected);
+    applySanlamAdversairesToProcedureDetails(details, sanlamAdversairesForSave, selected);
     const montantGroups = getProcedureMontantGroupsForSave();
     const montantInputValue = String($('montantInput')?.value || '').trim();
     const montantFallbackRaw = editingDossier
@@ -20643,13 +20568,14 @@ async function addDossier(){
       createdAt: String(previousImportMeta?.createdAt || '').trim() || new Date().toISOString(),
       suiviUpdatedAt: new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
+      cin: $('cinInput')?.value.trim() || '',
       adversaire: $('adversaireInput')?.value.trim() || '',
       nRef: $('nRefInput')?.value.trim() || '',
       boiteNo: $('boiteNoInput')?.value.trim() || '',
       referenceClient: $('referenceClientInput').value.trim(),
       dateAffectation: normalizedDateAffectation,
       gestionnaire: $('gestionnaireInput')?.value.trim() || '',
-      sanlamAdversaires: normalizeSanlamAdversaireDraft(collectSanlamAdversaireDraft()),
+      sanlamAdversaires: sanlamAdversairesForSave,
       procedure: selected.join(', '),
       procedureList: selected.slice(),
       procedureDetails: details,
@@ -21647,9 +21573,11 @@ function editDossier(clientId, index){
   editingDossier = { clientId, index };
   editingOriginalProcedures = normalizeProcedures(d);
   showView('creation');
+  updateClientDropdown({ force: true, immediate: true });
 
   $('selectClient').value = clientId;
   $('debiteurInput').value = d.debiteur || '';
+  if($('cinInput')) $('cinInput').value = d.cin || '';
   if($('adversaireInput')) $('adversaireInput').value = d.adversaire || '';
   if($('nRefInput')) $('nRefInput').value = d.nRef || '';
   if($('boiteNoInput')) $('boiteNoInput').value = d.boiteNo || '';
@@ -21679,7 +21607,7 @@ function editDossier(clientId, index){
   if($('sanlamDateAccidentInput')) $('sanlamDateAccidentInput').value = d.sanlamDateAccident || '';
   if($('sanlamCinConducteurInput')) $('sanlamCinConducteurInput').value = d.sanlamCinConducteur || '';
   if($('sanlamSouscripteurInput')) $('sanlamSouscripteurInput').value = d.sanlamSouscripteur || '';
-  sanlamAdversaireDraft = normalizeSanlamAdversaireDraft(d.sanlamAdversaires);
+  sanlamAdversaireDraft = getSanlamAdversaireDraftFromDossier(d);
   uploadedFiles = Array.isArray(d.files) ? d.files.map(f=>({ ...f })) : [];
   renderFileList();
 
@@ -21718,6 +21646,8 @@ function editDossier(clientId, index){
     ...procs,
     ...detailsKeys
   ])];
+  const sanlamContainer = $('sanlamAdversairesContainer');
+  if(sanlamContainer) sanlamContainer.innerHTML = '';
   renderProcedureDetails(renderProcList);
   applyProcedureDraftToCards(details);
   renderCreationFactureStatus(d);
@@ -21800,6 +21730,15 @@ function closeDossierModal(){
   if(modal) modal.style.display = 'none';
 }
 
+function getSanlamAdversaireDetailRows(dossier){
+  const source = getSanlamAdversaireDraftFromDossier(dossier);
+  return Object.entries(source)
+    .map(([key, value])=>[Number(key), String(value || '').trim()])
+    .filter(([idx, value])=>Number.isFinite(idx) && idx >= 2 && value)
+    .sort((a, b)=>a[0] - b[0])
+    .map(([idx, value])=>[`Adversaire ${idx} (Sanlam)`, value]);
+}
+
 function openDossierDetails(clientId, index){
   flushAllDossierHistoryPendingEntries();
   const client = AppState.clients.find(c=>c.id == clientId);
@@ -21816,6 +21755,7 @@ function openDossierDetails(clientId, index){
     ['Client', client.name || '-'],
     ['N / ref', dossier.nRef || '-'],
     ['Débiteur', dossier.debiteur || '-'],
+    ['CIN', dossier.cin || '-'],
     ['Adversaire', dossier.adversaire || '-'],
     ['Boîte N°', dossier.boiteNo || '-'],
     ['Référence Client', dossier.referenceClient || '-'],
@@ -21844,7 +21784,8 @@ function openDossierDetails(clientId, index){
     ['Sinistre n°', dossier.sanlamSinistre || '-'],
     ['Date accident', dossier.sanlamDateAccident || '-'],
     ['CIN conducteur', dossier.sanlamCinConducteur || '-'],
-    ['Souscripteur', dossier.sanlamSouscripteur || '-']
+    ['Souscripteur', dossier.sanlamSouscripteur || '-'],
+    ...getSanlamAdversaireDetailRows(dossier)
   ];
 
 
@@ -22635,7 +22576,10 @@ function getDiligenceProcedureFilterValue(procedure){
 function getDiligenceProcedureVariantValue(procedure){
   const raw = String(procedure || '').trim();
   if(!raw) return '';
-  return parseProcedureToken(raw) || raw;
+  const parsed = parseProcedureToken(raw) || raw;
+  const base = getDiligenceProcedureFilterValue(parsed);
+  if(base === 'SAISIE ARRÊT') return base;
+  return parsed;
 }
 
 function getDiligenceRowProcedureFilterValue(row){
@@ -22665,6 +22609,10 @@ function hasDiligenceCasablancaTpiAssRow(rows){
 
 function isDiligenceCommandementProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'Commandement';
+}
+
+function isDiligenceSaisieArretProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'SAISIE ARRÊT';
 }
 
 function getDiligenceCommandementHeaderMode(rows){
@@ -22771,6 +22719,7 @@ function getDiligenceRows(){
         if(
           baseProc !== 'ASS'
           && baseProc !== 'SFDC'
+          && baseProc !== 'SAISIE ARRÊT'
           && baseProc !== 'S/bien'
           && baseProc !== 'Injonction'
           && baseProc !== 'Commandement'
@@ -23978,6 +23927,12 @@ function shouldShowDiligenceCommandementColumnsForRows(rows){
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceCommandementProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceSaisieArretColumnsForRows(rows){
+  if(isDiligenceSaisieArretProcedure(filterDiligenceProcedure)) return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceSaisieArretProcedure(row?.procedure));
+}
+
 function buildDiligenceExportRowCells(row, columns){
   return columns.map((column)=>{
     const value = typeof column.getValue === 'function' ? column.getValue(row) : '';
@@ -23987,6 +23942,44 @@ function buildDiligenceExportRowCells(row, columns){
 
 function finalizeDiligenceExportDataset(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
+  const showSaisieArretColumns = shouldShowDiligenceSaisieArretColumnsForRows(sourceRows);
+  if(showSaisieArretColumns){
+    const columns = [
+      { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
+      { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
+      { header: 'Lot du', width: 18, getValue: (row)=>row?.details?.lotDu || '' },
+      { header: 'Gestionnaire', width: 22, getValue: (row)=>row?.dossier?.gestionnaire || '' },
+      { header: 'Beneficient', width: 24, getValue: (row)=>row?.details?.beneficient || row?.details?.beneficiaire || '' },
+      { header: 'Debiteur EP', width: 28, getValue: (row)=>row?.details?.debiteurEp || row?.dossier?.debiteur || '' },
+      { header: 'Debiteur AP', width: 28, getValue: (row)=>row?.details?.debiteurAp || '' },
+      { header: 'CIN/RC', width: 18, getValue: (row)=>row?.details?.cinRc || row?.details?.cin || row?.dossier?.cin || row?.dossier?.cautionCin || '' },
+      { header: 'Adresse', width: 34, getValue: (row)=>row?.details?.adresse || row?.dossier?.adresse || '' },
+      { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
+      { header: 'Montant', width: 18, getValue: (row)=>row?.details?.montant || row?.dossier?.montant || '' },
+      { header: 'RIB', width: 26, getValue: (row)=>row?.details?.rib || '' },
+      { header: 'Banque FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
+      { header: 'Banque AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
+      { header: 'Adresse branche', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
+      { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
+      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
+      { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
+      { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
+      { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
+      { header: 'Execution N°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
+      { header: 'Sort PLE', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
+      { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
+      { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
+      { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
+      { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+    ];
+    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    return {
+      rows: sourceRows,
+      headers: columns.map((column)=>column.header),
+      tableRows,
+      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+    };
+  }
   const showCommandementColumns = shouldShowDiligenceCommandementColumnsForRows(sourceRows);
   if(showCommandementColumns){
     const columns = [
@@ -25559,11 +25552,7 @@ function shouldHandleAudienceSaveShortcut(event){
 function handleAudienceSaveShortcut(event){
   if(!shouldHandleAudienceSaveShortcut(event)) return;
   event.preventDefault();
-  if(!normalizeIsoDateToDDMMYYYY(filterAudienceDate)){
-    saveAllAudience({ feedback: true });
-    return;
-  }
-  showAudienceSaveFeedback('Cliquez sur Enregistrer pour sauvegarder toutes les pages.', 'muted');
+  saveAllAudience({ feedback: true });
 }
 
 function clearAudiencePrintSelection(options = {}){
@@ -25768,8 +25757,8 @@ function formatAudienceDateDisplayValue(value){
 function normalizeIsoDateToDDMMYYYY(value){
   const text = String(value || '').trim();
   const m = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if(!m) return '';
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return normalizeDateDDMMYYYY(text);
 }
 
 function getAudienceRowRefClientDisplayKey(row){
@@ -26207,6 +26196,7 @@ function buildAudienceDiligenceExportTableRow(row){
   const draft = row?.draft || {};
   const procedureValue = getProcedureBaseName(row?.procKey || p?.procedure || '') || String(row?.procKey || p?.procedure || '').trim();
   const audienceDateRaw = draft.dateAudience || p.audience || '';
+  const jugeValue = draft.juge || p.juge || '';
   const sortValue = draft.sort || p.sort || '';
   return [
     row?.c?.name || '',
@@ -26214,6 +26204,7 @@ function buildAudienceDiligenceExportTableRow(row){
     d.debiteur || d.adversaire || '',
     getAudienceRowDraftReferenceValue(row),
     normalizeDateDDMMYYYY(audienceDateRaw) || String(audienceDateRaw || '').trim(),
+    jugeValue,
     formatMixedDirectionExportText(sortValue),
     p.tribunal || ''
   ];
@@ -26225,13 +26216,14 @@ function buildAudienceDiligenceExportDatasetBase(rowsOverride = null){
     : getSelectedAudienceRowsForExport();
   return {
     rows,
-    headers: ['client', 'Proc\u00e9dure', 'debiteur', 'R\u00e9f Ass', 'Audience', 'Sort', 'Tribunal'],
+    headers: ['client', 'Proc\u00e9dure', 'debiteur', 'R\u00e9f Ass', 'Audience', 'Juge', 'Sort', 'Tribunal'],
     colWidths: [
       { wch: 20 },
       { wch: 16 },
       { wch: 30 },
       { wch: 22 },
       { wch: 16 },
+      { wch: 22 },
       { wch: 30 },
       { wch: 34 }
     ]
@@ -27801,7 +27793,7 @@ function updateAudienceDraft(key, field, value){
     juge: 'procedureDetails.juge',
     sort: 'procedureDetails.sort'
   };
-  if(fieldMap[field] && hasMeaningfulChange && !shouldDeferAudienceServerSaveUntilButton()){
+  if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
       source: 'audience',
       field: fieldMap[field],
@@ -28278,7 +28270,6 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   if(typeof inputEl.blur === 'function'){
     inputEl.blur();
   }
-  showAudienceSaveFeedback('Modification prête. Cliquez sur Enregistrer pour sauvegarder.', 'muted');
 }
 
 function saveAllAudience(options = {}){
@@ -28403,6 +28394,59 @@ function saveAllAudience(options = {}){
         after
       });
     }
+    if(data.jugementAdd!==undefined){
+      const before = getAudienceRowJugementAddStatus({
+        draft: {},
+        p
+      });
+      const after = String(data.jugementAdd || '').trim().toLowerCase();
+      p.jugementAdd = after;
+      if(after){
+        delete p._jugementAddCleared;
+      }else{
+        p._jugementAddCleared = true;
+      }
+      if(before !== after){
+        detachAudienceImportBatchOwnership(p);
+        queueDossierHistoryEntry(dossier, {
+          source: 'audience',
+          field: 'procedureDetails.jugementAdd',
+          procedure: procKey,
+          before,
+          after
+        });
+      }
+    }
+    if(data.dossierStatus!==undefined && dossier){
+      const beforeSnapshot = getDossierDisplayStatusSnapshot(dossier);
+      const beforeStatus = String(beforeSnapshot?.statut || 'En cours').trim() || 'En cours';
+      const afterStatus = String(data.dossierStatus || '').trim() || 'En cours';
+      if(beforeStatus !== afterStatus){
+        const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+          ? dossier.procedureDetails
+          : {};
+        Object.values(details).forEach((procDetails)=>{
+          if(!procDetails || typeof procDetails !== 'object') return;
+          delete procDetails._suppressAudienceStatusColor;
+          const explicitColor = String(procDetails.color || '').trim();
+          const beforeStatusColor = getAudienceStatusDerivedColor(beforeStatus);
+          if(explicitColor && explicitColor === beforeStatusColor){
+            procDetails.color = '';
+          }
+        });
+        dossier.statut = afterStatus;
+        if(afterStatus === 'En cours'){
+          dossier.statutDetails = '';
+        }
+        queueDossierHistoryEntry(dossier, {
+          source: 'audience',
+          field: 'statut',
+          before: beforeStatus,
+          after: afterStatus
+        });
+        markAudienceColorCachesDirty();
+      }
+    }
   });
 
   const reconciliation = shouldReconcileAudienceRefs
@@ -28471,20 +28515,14 @@ function persistAudienceDraftDossiersNow(){
 }
 
 function shouldAutoPersistAudienceDraftDossiers(){
-  if(normalizeIsoDateToDDMMYYYY(filterAudienceDate)) return false;
   const draftEntries = Object.entries(audienceDraft || {});
   return draftEntries.length > 0;
-}
-
-function shouldDeferAudienceServerSaveUntilButton(){
-  return !!normalizeIsoDateToDDMMYYYY(filterAudienceDate);
 }
 
 function queueAudienceAutoSave(){
   if(audienceAutoSaveTimer) clearTimeout(audienceAutoSaveTimer);
   audienceAutoSaveTimer = setTimeout(()=>{
     audienceAutoSaveTimer = null;
-    if(shouldDeferAudienceServerSaveUntilButton()) return;
     if(shouldAutoPersistAudienceDraftDossiers()){
       persistAudienceDraftDossiersNow();
     }
@@ -28586,10 +28624,11 @@ function activateProcedureCheckboxes(procList){
 
 function collectSanlamAdversaireDraft(root = document){
   const next = { ...(sanlamAdversaireDraft || {}) };
-  root.querySelectorAll('#sanlamAdversairesContainer input[data-sanlam-adversaire-index]').forEach(input=>{
+  root.querySelectorAll('input[data-sanlam-adversaire-index]').forEach(input=>{
     const idx = Number(input.dataset.sanlamAdversaireIndex);
     if(!Number.isFinite(idx) || idx < 2) return;
-    next[idx] = String(input.value || '').trim();
+    const value = String(input.value || '').trim();
+    next[idx] = value;
   });
   sanlamAdversaireDraft = next;
   return next;
@@ -28606,6 +28645,22 @@ function normalizeSanlamAdversaireDraft(value){
   return out;
 }
 
+function getSanlamAdversaireDraftFromDossier(dossier){
+  const out = normalizeSanlamAdversaireDraft(dossier?.sanlamAdversaires);
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.entries(details).forEach(([procName, procDetails])=>{
+    if(getProcedureBaseName(procName) !== 'Sanlam') return;
+    const idx = getProcedureVariantIndex(procName);
+    if(!Number.isFinite(idx) || idx < 2) return;
+    if(procDetails && typeof procDetails === 'object' && procDetails.adversaire !== undefined){
+      out[idx] = String(procDetails.adversaire || '').trim();
+    }
+  });
+  return out;
+}
+
 function getSanlamVariantIndexes(procList){
   const indexes = new Set();
   (procList || []).forEach(name=>{
@@ -28614,6 +28669,39 @@ function getSanlamVariantIndexes(procList){
     if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
   });
   return [...indexes].sort((a, b)=>a - b);
+}
+
+function applySanlamAdversairesToProcedureDetails(details, adversaires, procList){
+  if(!details || typeof details !== 'object') return details;
+  const source = normalizeSanlamAdversaireDraft(adversaires);
+  const indexes = new Set(getSanlamVariantIndexes(procList));
+  Object.keys(source).forEach(key=>{
+    const idx = Number(key);
+    if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
+  });
+  [...indexes].sort((a, b)=>a - b).forEach(idx=>{
+    const procName = `Sanlam${idx}`;
+    if(!details[procName] || typeof details[procName] !== 'object'){
+      details[procName] = {};
+    }
+    details[procName].adversaire = String(source[idx] || '').trim();
+  });
+  return details;
+}
+
+function getSanlamAdversairesForSave(procList){
+  const draft = normalizeSanlamAdversaireDraft(collectSanlamAdversaireDraft());
+  const out = {};
+  const indexes = new Set(getSanlamVariantIndexes(procList));
+  document.querySelectorAll('#sanlamAdversairesContainer input[data-sanlam-adversaire-index]').forEach(input=>{
+    const idx = Number(input.dataset.sanlamAdversaireIndex);
+    if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
+  });
+  [...indexes].sort((a, b)=>a - b).forEach(idx=>{
+    out[idx] = String(draft[idx] || '').trim();
+  });
+  sanlamAdversaireDraft = out;
+  return out;
 }
 
 function renderSanlamAdversaireFields(procList){
@@ -29031,6 +29119,7 @@ function renderProcedureDetails(forceList, forceDraft){
   const selected = Array.isArray(forceList)
     ? forceList.slice()
     : [...document.querySelectorAll('.proc-check:checked')].map(cb=>cb.value);
+  const hasExplicitSanlamSelection = selected.some(value=>getProcedureBaseName(String(value || '').trim()).toLowerCase() === 'sanlam');
   selected.push(...getFilledProcedureDraftNames(draft));
   if(!Array.isArray(forceList)){
     selected.push(...customProcedures);
@@ -29060,6 +29149,13 @@ function renderProcedureDetails(forceList, forceDraft){
   selected.forEach(v => {
     const raw = String(v || '').trim();
     if(!raw) return;
+    if(
+      !Array.isArray(forceList)
+      && getProcedureBaseName(raw).toLowerCase() === 'sanlam'
+      && !hasExplicitSanlamSelection
+    ){
+      return;
+    }
     const key = raw.toLowerCase();
     const canonical = standardMap[key] || raw;
     const canonicalKey = canonical.toLowerCase();

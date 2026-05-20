@@ -94,8 +94,11 @@ function renderAudienceRowsHtml(rows, duplicateKeySet){
 
 function renderAudienceStatusEditor(row, keyEncoded, canEdit){
   const statusSnapshot = getDossierDisplayStatusSnapshot(row?.d || {});
-  const statusValue = String(statusSnapshot?.statut || 'En cours').trim() || 'En cours';
-  const statusDetail = String(statusSnapshot?.detail || '').trim();
+  const draftStatus = row?.draft && Object.prototype.hasOwnProperty.call(row.draft, 'dossierStatus')
+    ? String(row.draft.dossierStatus || '').trim()
+    : '';
+  const statusValue = draftStatus || String(statusSnapshot?.statut || 'En cours').trim() || 'En cours';
+  const statusDetail = draftStatus ? '' : String(statusSnapshot?.detail || '').trim();
   const options = typeof getDossierStatusOptions === 'function'
     ? getDossierStatusOptions(statusValue)
     : ['En cours', 'Soldé', 'Arrêt définitif', 'Clôture', 'Suspension', statusValue].filter(Boolean);
@@ -927,7 +930,7 @@ function renderAudience(options = {}){
     !!audienceQuery
     && !exactMatchedRows
     && audienceQuery.length >= 2
-    && colorFilteredRows.length >= 1500
+    && colorFilteredRows.length >= 300
     && !!getAudienceFilterWorker()
   );
   if(!canUseWorker){

@@ -85,12 +85,17 @@ function CreationSection() {
                 <input type="text" id="debiteurInput" placeholder="Nom du débiteur" />
               </div>
               <div className="form-group creation-layout-card">
-                <label>Adversaire</label>
-                <input type="text" id="adversaireInput" placeholder="Nom de l'adversaire" />
+                <label>CIN</label>
+                <input type="text" id="cinInput" placeholder="CIN du débiteur" />
               </div>
             </div>
 
-            <div className="creation-form-row creation-form-row-three">
+            <div className="creation-form-row creation-form-row-four">
+              <div className="form-group creation-layout-card">
+                <label>Adversaire</label>
+                <input type="text" id="adversaireInput" placeholder="Nom de l'adversaire" />
+              </div>
+
               <div className="form-group creation-layout-card creation-secondary-highlight-field">
                 <label>Adresse</label>
                 <input type="text" id="adresseInput" placeholder="Adresse" dir="auto" />

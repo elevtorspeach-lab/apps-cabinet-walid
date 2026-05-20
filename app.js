@@ -6051,6 +6051,12 @@ function updateProcedureMontantGroupAmount(index, value){
   const group = procedureMontantGroups[index];
   if(!group) return;
   group.montant = String(value || '').trim();
+  if(index === 0){
+    const montantInput = $('montantInput');
+    if(montantInput && String(montantInput.value || '').trim() !== group.montant){
+      montantInput.value = group.montant;
+    }
+  }
 }
 
 function syncMainMontantToGroup1(value){
@@ -16268,7 +16274,7 @@ function setupEvents(){
 
   const renderClientsDebounced = debounce(renderClients, 120);
   const renderSuiviDebounced = debounce(renderSuivi, 120);
-  const renderAudienceDebounced = debounce(renderAudience, 220);
+  const renderAudienceDebounced = debounce(renderAudience, 420);
   const renderDiligenceDebounced = debounce(renderDiligence, 120);
   const filterTeamClientListDebounced = debounce(filterTeamClientList, 120);
   $('audienceTableContainer')?.addEventListener('scroll', queueAudienceVirtualRender, { passive: true });
@@ -17477,6 +17483,8 @@ async function addDossier(){
     if(!validateCreationReferenceClient()){
       return;
     }
+    const sanlamAdversairesForSave = getSanlamAdversairesForSave(selected);
+    applySanlamAdversairesToProcedureDetails(details, sanlamAdversairesForSave, selected);
     const montantGroups = getProcedureMontantGroupsForSave();
     const montantInputValue = String($('montantInput')?.value || '').trim();
     const montantFallbackRaw = montantInputValue || montantGroups.map(g=>String(g.montant || '').trim()).filter(Boolean).join(' | ');
@@ -17499,7 +17507,7 @@ async function addDossier(){
       referenceClient: $('referenceClientInput').value.trim(),
       dateAffectation: normalizedDateAffectation,
       gestionnaire: $('gestionnaireInput')?.value.trim() || '',
-      sanlamAdversaires: collectSanlamAdversaireDraft(),
+      sanlamAdversaires: sanlamAdversairesForSave,
       procedure: selected.join(', '),
       procedureList: selected.slice(),
       procedureDetails: details,
@@ -18173,7 +18181,7 @@ function editDossier(clientId, index){
   if($('sanlamDateAccidentInput')) $('sanlamDateAccidentInput').value = d.sanlamDateAccident || '';
   if($('sanlamCinConducteurInput')) $('sanlamCinConducteurInput').value = d.sanlamCinConducteur || '';
   if($('sanlamSouscripteurInput')) $('sanlamSouscripteurInput').value = d.sanlamSouscripteur || '';
-  sanlamAdversaireDraft = { ...(d.sanlamAdversaires || {}) };
+  sanlamAdversaireDraft = getSanlamAdversaireDraftFromDossier(d);
   uploadedFiles = Array.isArray(d.files) ? d.files.map(f=>({ ...f })) : [];
   renderFileList();
 
@@ -18212,6 +18220,8 @@ function editDossier(clientId, index){
     ...procs,
     ...detailsKeys
   ])];
+  const sanlamContainer = $('sanlamAdversairesContainer');
+  if(sanlamContainer) sanlamContainer.innerHTML = '';
   renderProcedureDetails(renderProcList);
   applyProcedureDraftToCards(details);
   const addBtn = $('addDossierBtn');
@@ -18291,6 +18301,15 @@ function closeDossierModal(){
   if(modal) modal.style.display = 'none';
 }
 
+function getSanlamAdversaireDetailRows(dossier){
+  const source = getSanlamAdversaireDraftFromDossier(dossier);
+  return Object.entries(source)
+    .map(([key, value])=>[Number(key), String(value || '').trim()])
+    .filter(([idx, value])=>Number.isFinite(idx) && idx >= 2 && value)
+    .sort((a, b)=>a[0] - b[0])
+    .map(([idx, value])=>[`Adversaire ${idx} (Sanlam)`, value]);
+}
+
 function openDossierDetails(clientId, index){
   flushAllDossierHistoryPendingEntries();
   const client = AppState.clients.find(c=>c.id == clientId);
@@ -18335,7 +18354,8 @@ function openDossierDetails(clientId, index){
     ['Sinistre n°', dossier.sanlamSinistre || '-'],
     ['Date accident', dossier.sanlamDateAccident || '-'],
     ['CIN conducteur', dossier.sanlamCinConducteur || '-'],
-    ['Souscripteur', dossier.sanlamSouscripteur || '-']
+    ['Souscripteur', dossier.sanlamSouscripteur || '-'],
+    ...getSanlamAdversaireDetailRows(dossier)
   ];
 
 
@@ -24172,13 +24192,41 @@ function activateProcedureCheckboxes(procList){
 
 function collectSanlamAdversaireDraft(root = document){
   const next = { ...(sanlamAdversaireDraft || {}) };
-  root.querySelectorAll('#sanlamAdversairesContainer input[data-sanlam-adversaire-index]').forEach(input=>{
+  root.querySelectorAll('input[data-sanlam-adversaire-index]').forEach(input=>{
     const idx = Number(input.dataset.sanlamAdversaireIndex);
     if(!Number.isFinite(idx) || idx < 2) return;
-    next[idx] = String(input.value || '').trim();
+    const value = String(input.value || '').trim();
+    next[idx] = value;
   });
   sanlamAdversaireDraft = next;
   return next;
+}
+
+function normalizeSanlamAdversaireDraft(value){
+  const source = value && typeof value === 'object' ? value : {};
+  const out = {};
+  Object.entries(source).forEach(([key, rawValue])=>{
+    const idx = Number(key);
+    if(!Number.isFinite(idx) || idx < 2) return;
+    out[idx] = String(rawValue || '').trim();
+  });
+  return out;
+}
+
+function getSanlamAdversaireDraftFromDossier(dossier){
+  const out = normalizeSanlamAdversaireDraft(dossier?.sanlamAdversaires);
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.entries(details).forEach(([procName, procDetails])=>{
+    if(getProcedureBaseName(procName) !== 'Sanlam') return;
+    const idx = getProcedureVariantIndex(procName);
+    if(!Number.isFinite(idx) || idx < 2) return;
+    if(procDetails && typeof procDetails === 'object' && procDetails.adversaire !== undefined){
+      out[idx] = String(procDetails.adversaire || '').trim();
+    }
+  });
+  return out;
 }
 
 function getSanlamVariantIndexes(procList){
@@ -24189,6 +24237,39 @@ function getSanlamVariantIndexes(procList){
     if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
   });
   return [...indexes].sort((a, b)=>a - b);
+}
+
+function applySanlamAdversairesToProcedureDetails(details, adversaires, procList){
+  if(!details || typeof details !== 'object') return details;
+  const source = normalizeSanlamAdversaireDraft(adversaires);
+  const indexes = new Set(getSanlamVariantIndexes(procList));
+  Object.keys(source).forEach(key=>{
+    const idx = Number(key);
+    if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
+  });
+  [...indexes].sort((a, b)=>a - b).forEach(idx=>{
+    const procName = `Sanlam${idx}`;
+    if(!details[procName] || typeof details[procName] !== 'object'){
+      details[procName] = {};
+    }
+    details[procName].adversaire = String(source[idx] || '').trim();
+  });
+  return details;
+}
+
+function getSanlamAdversairesForSave(procList){
+  const draft = collectSanlamAdversaireDraft();
+  const out = {};
+  const indexes = new Set(getSanlamVariantIndexes(procList));
+  document.querySelectorAll('#sanlamAdversairesContainer input[data-sanlam-adversaire-index]').forEach(input=>{
+    const idx = Number(input.dataset.sanlamAdversaireIndex);
+    if(Number.isFinite(idx) && idx >= 2) indexes.add(idx);
+  });
+  [...indexes].sort((a, b)=>a - b).forEach(idx=>{
+    out[idx] = String(draft[idx] || '').trim();
+  });
+  sanlamAdversaireDraft = out;
+  return out;
 }
 
 function renderSanlamAdversaireFields(procList){
@@ -24603,6 +24684,7 @@ function renderProcedureDetails(forceList, forceDraft){
   const selected = Array.isArray(forceList)
     ? forceList.slice()
     : [...document.querySelectorAll('.proc-check:checked')].map(cb=>cb.value);
+  const hasExplicitSanlamSelection = selected.some(value=>getProcedureBaseName(String(value || '').trim()).toLowerCase() === 'sanlam');
   selected.push(...getFilledProcedureDraftNames(draft));
   if(!Array.isArray(forceList)){
     selected.push(...customProcedures);
@@ -24630,6 +24712,13 @@ function renderProcedureDetails(forceList, forceDraft){
   selected.forEach(v => {
     const raw = String(v || '').trim();
     if(!raw) return;
+    if(
+      !Array.isArray(forceList)
+      && getProcedureBaseName(raw).toLowerCase() === 'sanlam'
+      && !hasExplicitSanlamSelection
+    ){
+      return;
+    }
     const key = raw.toLowerCase();
     const canonical = standardMap[key] || raw;
     const canonicalKey = canonical.toLowerCase();

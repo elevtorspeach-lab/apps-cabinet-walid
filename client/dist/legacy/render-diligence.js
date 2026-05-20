@@ -66,7 +66,14 @@ function shouldShowDiligenceCommandementColumns(rows){
   return !!list.length && list.every(row=>isDiligenceCommandementProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceSaisieArretColumns(rows){
+  if(isDiligenceSaisieArretProcedure(filterDiligenceProcedure)) return true;
+  const list = Array.isArray(rows) ? rows : [];
+  return !!list.length && list.every(row=>isDiligenceSaisieArretProcedure(row?.procedure));
+}
+
 function getDiligenceColCount(){
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 26;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     if(cmdMode !== 'default') return 24;
@@ -86,22 +93,54 @@ function getDiligenceCompactProcedureMode(rows = []){
   if(diligenceVirtualShowCommandementColumns || diligenceVirtualShowAssColumns) return 'mixed';
   const explicitFilter = getDiligenceProcedureFilterValue(filterDiligenceProcedure);
   if(explicitFilter === 'SFDC') return 'sfdc';
+  if(explicitFilter === 'SAISIE ARRÊT') return 'saisiearret';
   if(explicitFilter === 'S/bien') return 'sbien';
   if(explicitFilter === 'Injonction') return 'injonction';
   const list = Array.isArray(rows) ? rows : [];
   const executionTypes = [...new Set(
     list
       .map(row=>getDiligenceProcedureFilterValue(row?.procedureFilterValue || row?.procedure || ''))
-      .filter(value=>value === 'SFDC' || value === 'S/bien' || value === 'Injonction')
+      .filter(value=>value === 'SFDC' || value === 'SAISIE ARRÊT' || value === 'S/bien' || value === 'Injonction')
   )];
   if(executionTypes.length !== 1) return 'mixed';
   if(executionTypes[0] === 'SFDC') return 'sfdc';
+  if(executionTypes[0] === 'SAISIE ARRÊT') return 'saisiearret';
   if(executionTypes[0] === 'S/bien') return 'sbien';
   if(executionTypes[0] === 'Injonction') return 'injonction';
   return 'mixed';
 }
 
 function buildDiligenceHeadHtml(){
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret'){
+    return `
+      <th>Client</th>
+      <th>R&eacute;f&eacute;rence client</th>
+      <th>Lot du</th>
+      <th>Gestionnaire</th>
+      <th>Beneficient</th>
+      <th>D&eacute;biteur EP</th>
+      <th>D&eacute;biteur AP</th>
+      <th>CIN/RC</th>
+      <th>Adresse</th>
+      <th>Ville</th>
+      <th>Montant</th>
+      <th>RIB</th>
+      <th>Banque FR</th>
+      <th>Banque AR</th>
+      <th>Adresse branche</th>
+      <th>Avocat</th>
+      <th>Observation</th>
+      <th>D&eacute;p&ocirc;t</th>
+      <th>Ref dossier</th>
+      <th>Sort ORD</th>
+      <th>Execution N&deg;</th>
+      <th>Sort PLE</th>
+      <th>Notif banque</th>
+      <th>Notif d&eacute;biteur</th>
+      <th>Tribunal</th>
+      <th>Bo&icirc;te</th>
+    `;
+  }
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     const cmdExpanded = cmdMode !== 'default';
@@ -163,6 +202,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
   const isAssProcedure = isDiligenceAssProcedure(row?.procedure);
   const isCommandementProcedure = isDiligenceCommandementProcedure(row?.procedure);
+  const isSaisieArretProcedure = isDiligenceSaisieArretProcedure(row?.procedure);
   const isChecked = isDiligenceSelectedForPrint(row);
   const refClientValue = typeof getDiligenceGroupedReferenceClientDisplay === 'function'
     ? getDiligenceGroupedReferenceClientDisplay(row)
@@ -214,6 +254,55 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const avisHeader = (diligenceVirtualShowAssColumns && !(isAssNbLayoutValue || isAssNotifierLayoutValue)) ? '' : 'Sort exécution';
   const shouldHideTail = isAssProcedure && !(isAssNbLayoutValue || isAssNotifierLayoutValue);
   const hideWrap = (html)=> shouldHideTail ? `<div style="display:none">${html}</div>` : html;
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret' && isSaisieArretProcedure){
+    const cinRcValue = row.details?.cinRc || row.details?.cin || row.dossier?.cin || row.dossier?.cautionCin || '';
+    const beneficientValue = row.details?.beneficient || row.details?.beneficiaire || '';
+    const debiteurEpValue = row.details?.debiteurEp || row.dossier?.debiteur || '';
+    const debiteurApValue = row.details?.debiteurAp || '';
+    const adresseValue = row.details?.adresse || row.dossier?.adresse || '';
+    const montantValue = row.details?.montant || row.dossier?.montant || '';
+    const banqueFrValue = row.details?.banqueFr || row.details?.banque || '';
+    const adresseBrancheValue = row.details?.adresseBranche || row.details?.adresseBanque || '';
+    return `
+      <tr>
+        <td>
+          <label class="diligence-client-cell">
+            <input
+              type="checkbox"
+              class="diligence-print-check"
+              ${isChecked ? 'checked' : ''}
+              onchange="toggleDiligencePrintSelectionEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}', this.checked)">
+            <span>${escapeHtml(row.clientName || '-')}</span>
+          </label>
+        </td>
+        <td>${escapeHtml(refClientValue || '-')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
+        <td>${escapeHtml(row.dossier?.gestionnaire || '-')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'beneficient', beneficientValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurAp', debiteurApValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'cinRc', cinRcValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', adresseValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', montantValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'rib', row.details?.rib || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueFr', banqueFrValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueAr', row.details?.banqueAr || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresseBranche', adresseBrancheValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'avocat', row.details?.avocat || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'depotLe', row.details?.depotLe || row.details?.dateDepot || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', getDiligenceReferenceDossierValue(row))}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', row.details?.executionNo || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'sortPle', row.details?.sortPle || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'notifBanque', row.details?.notifBanque || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'notifDebiteur', row.details?.notifDebiteur || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
+      </tr>
+    `;
+  }
   if(diligenceVirtualShowCommandementColumns && isCommandementProcedure){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     const cmdExpanded = cmdMode !== 'default';
