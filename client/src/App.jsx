@@ -8,13 +8,14 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
+const LEGACY_ASSET_VERSION = '20260521-team-history-3'
 const LEGACY_SCRIPTS = [
-  '/legacy/state-persistence.js',
-  '/legacy/audience-ui-helpers.js',
-  '/legacy/render-audience-suivi.js',
-  '/legacy/render-diligence.js',
-  '/legacy/render-dashboard.js',
-  '/legacy/app.js',
+  `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,
+  `/legacy/audience-ui-helpers.js?v=${LEGACY_ASSET_VERSION}`,
+  `/legacy/render-audience-suivi.js?v=${LEGACY_ASSET_VERSION}`,
+  `/legacy/render-diligence.js?v=${LEGACY_ASSET_VERSION}`,
+  `/legacy/render-dashboard.js?v=${LEGACY_ASSET_VERSION}`,
+  `/legacy/app.js?v=${LEGACY_ASSET_VERSION}`,
 ]
 
 const LEGACY_LOADER_PROMISE_KEY = '__cabinetLegacyScriptsPromise'

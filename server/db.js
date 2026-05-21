@@ -22,7 +22,8 @@ const COLLECTION_DEFAULTS = {
   audienceDraft: {},
   recycleBin: [],
   recycleArchive: [],
-  importHistory: []
+  importHistory: [],
+  teamHistory: []
 };
 
 function logDatabaseError(context, error, details = {}) {
@@ -428,7 +429,8 @@ async function loadFullState() {
       audienceDraft: {},
       recycleBin: [],
       recycleArchive: [],
-      importHistory: []
+      importHistory: [],
+      teamHistory: []
     };
 
     collectionRows.forEach((row) => {

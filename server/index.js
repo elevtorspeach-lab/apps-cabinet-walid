@@ -82,6 +82,7 @@ const DEFAULT_STATE = {
   recycleBin: [],
   recycleArchive: [],
   importHistory: [],
+  teamHistory: [],
   version: 0,
   updatedAt: new Date().toISOString()
 };
@@ -407,6 +408,92 @@ function canSessionManageTeam(session) {
   return canUserManageTeam(session);
 }
 
+const TEAM_HISTORY_MAX_ENTRIES = 500;
+
+function getServerRoleLabel(role) {
+  const value = String(role || '').trim().toLowerCase();
+  if (value === 'manager') return 'Manager';
+  if (value === 'admin') return 'Admin';
+  if (value === 'client') return 'Client';
+  return value || '-';
+}
+
+function getServerUserPermissionLabel(user) {
+  const role = String(user?.role || '').trim().toLowerCase();
+  if (role === 'manager') return user?.canManageTeam === false ? 'Manager sans gestion equipe' : 'Manager complet';
+  if (role === 'admin') return user?.canEditData === false ? 'Lecture seule' : 'Modification autorisee';
+  return 'Acces client';
+}
+
+function getServerClientNameById(state, id) {
+  const targetId = Number(id);
+  const client = (Array.isArray(state?.clients) ? state.clients : [])
+    .find((item) => Number(item?.id) === targetId);
+  return String(client?.name || id || '').trim() || '-';
+}
+
+function formatServerTeamHistoryClientList(state, clientIds) {
+  const ids = Array.isArray(clientIds) ? clientIds : [];
+  return ids.map((id) => getServerClientNameById(state, id)).filter(Boolean).join(', ') || '-';
+}
+
+function getServerTeamUserSnapshot(state, user) {
+  if (!user || typeof user !== 'object') return null;
+  const clientIds = Array.isArray(user.clientIds)
+    ? user.clientIds.map((value) => Number(value)).filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
+    : [];
+  return {
+    username: String(user.username || '').trim(),
+    role: normalizeTeamRole(user.role),
+    permission: getServerUserPermissionLabel(user),
+    clients: formatServerTeamHistoryClientList(state, clientIds)
+  };
+}
+
+function buildServerTeamHistoryDetails(state, beforeUser, afterUser, options = {}) {
+  const before = getServerTeamUserSnapshot(state, beforeUser);
+  const after = getServerTeamUserSnapshot(state, afterUser);
+  const details = [];
+  const pushChange = (label, previousValue, nextValue) => {
+    const prev = String(previousValue ?? '').trim() || '-';
+    const next = String(nextValue ?? '').trim() || '-';
+    if (prev !== next) details.push(`${label}: ${prev} -> ${next}`);
+  };
+  if (!before && after) {
+    details.push(`Compte cree: ${after.username}`);
+    details.push(`Role: ${getServerRoleLabel(after.role)}`);
+    details.push(`Droit: ${after.permission}`);
+    if (after.clients !== '-') details.push(`Clients: ${after.clients}`);
+    if (options.passwordChanged === true) details.push('Mot de passe defini');
+    return details;
+  }
+  if (before && after) {
+    pushChange('Username', before.username, after.username);
+    pushChange('Role', getServerRoleLabel(before.role), getServerRoleLabel(after.role));
+    pushChange('Droit', before.permission, after.permission);
+    pushChange('Clients', before.clients, after.clients);
+    if (options.passwordChanged === true) details.push('Mot de passe modifie');
+  }
+  return details.length ? details : ['Aucun changement visible'];
+}
+
+function appendServerTeamHistory(state, entry) {
+  const current = Array.isArray(state?.teamHistory) ? state.teamHistory : [];
+  return [
+    ...current,
+    {
+      id: `team_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+      at: new Date().toISOString(),
+      action: String(entry?.action || 'update').trim() || 'update',
+      target: String(entry?.target || '-').trim() || '-',
+      actor: String(entry?.actor || '-').trim() || '-',
+      actorRole: String(entry?.actorRole || '').trim(),
+      summary: String(entry?.summary || 'Modification equipe').trim(),
+      details: Array.isArray(entry?.details) ? entry.details.map((item) => String(item || '').trim()).filter(Boolean) : []
+    }
+  ].slice(-TEAM_HISTORY_MAX_ENTRIES);
+}
+
 function cleanupAuthSessions() {
   const now = Date.now();
   for (const [token, session] of authSessions.entries()) {
@@ -551,6 +638,9 @@ function normalizeStoredState(rawState, previousState = null) {
     importHistory: hasOwn('importHistory')
       ? (Array.isArray(sourceState.importHistory) ? sourceState.importHistory : [])
       : (Array.isArray(previous.importHistory) ? previous.importHistory : []),
+    teamHistory: hasOwn('teamHistory')
+      ? (Array.isArray(sourceState.teamHistory) ? sourceState.teamHistory : [])
+      : (Array.isArray(previous.teamHistory) ? previous.teamHistory : []),
     version: nextVersion,
     updatedAt: new Date().toISOString()
   };
@@ -933,7 +1023,8 @@ function buildPagedStateExport(state, options = {}, exportMetadata = null) {
       audienceDraft: state?.audienceDraft && typeof state.audienceDraft === 'object' ? state.audienceDraft : {},
       recycleBin: Array.isArray(state?.recycleBin) ? state.recycleBin : [],
       recycleArchive: Array.isArray(state?.recycleArchive) ? state.recycleArchive : [],
-      importHistory: Array.isArray(state?.importHistory) ? state.importHistory : []
+      importHistory: Array.isArray(state?.importHistory) ? state.importHistory : [],
+      teamHistory: Array.isArray(state?.teamHistory) ? state.teamHistory : []
     } : null
   };
 }
@@ -2384,15 +2475,35 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
       nextUser = secureServerUserPassword(nextUser, requestedPassword, { requirePasswordChange: false });
     }
 
-    await db.upsertUserState(nextUser, {
-      version: Number(state?.version || 0) + 1,
-      updatedAt: new Date().toISOString()
+    const nextUsers = users.slice();
+    if (existingIndex >= 0) nextUsers[existingIndex] = nextUser;
+    else nextUsers.push(nextUser);
+    const action = existingUser ? 'update' : 'create';
+    const target = String(nextUser.username || requestedUsername || '-').trim() || '-';
+    const details = buildServerTeamHistoryDetails(state, existingUser, nextUser, {
+      passwordChanged: !!requestedPassword
     });
-
-    const refreshed = await db.loadFullState();
-    setCachedState(refreshed);
+    const nextTeamHistory = appendServerTeamHistory(state, {
+      action,
+      target,
+      actor: String(req.authSession?.username || '-').trim() || '-',
+      actorRole: String(req.authSession?.role || '').trim(),
+      summary: action === 'create' ? `Creation du compte ${target}` : `Modification du compte ${target}`,
+      details
+    });
+    const refreshed = await writeState({
+      ...state,
+      users: nextUsers,
+      teamHistory: nextTeamHistory
+    }, { previousState: state });
     refreshAuthSessionsFromUsers(refreshed?.users);
-    return res.json({ ok: true, user: nextUser });
+    return res.json({
+      ok: true,
+      user: nextUser,
+      version: Number(refreshed?.version || 0),
+      updatedAt: String(refreshed?.updatedAt || ''),
+      teamHistory: Array.isArray(refreshed?.teamHistory) ? refreshed.teamHistory : nextTeamHistory
+    });
   } catch (err) {
     return sendJsonError(res, 500, 'TEAM_USER_UPSERT_FAILED', 'Team user save failed.', err);
   }

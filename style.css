@@ -2661,6 +2661,7 @@ tr:hover{background:#f1f5f9}
   display:flex;
   align-items:center;
   justify-content:flex-end;
+  gap:8px;
 }
 
 .import-history-delete{

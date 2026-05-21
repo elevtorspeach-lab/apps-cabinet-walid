@@ -6,6 +6,7 @@ function buildPersistedStateSignature({
   recycleBin = [],
   recycleArchive = [],
   importHistory = [],
+  teamHistory = [],
   version = Number.NaN,
   updatedAt = ''
 } = {}){
@@ -20,7 +21,8 @@ function buildPersistedStateSignature({
     draft,
     recycleBin,
     recycleArchive,
-    importHistory
+    importHistory,
+    teamHistory
   );
 }
 
@@ -38,6 +40,7 @@ function normalizePersistedStateSource(rawState){
   const loadedRecycleBin = normalizeRecycleBinEntries(rawState?.recycleBin);
   const loadedRecycleArchive = normalizeRecycleArchiveEntries(rawState?.recycleArchive);
   const loadedImportHistory = normalizeImportHistoryEntries(rawState?.importHistory);
+  const loadedTeamHistory = normalizeTeamHistoryEntries(rawState?.teamHistory);
   const nextUsers = ensureManagerUser(loadedUsers);
   const nextSignature = buildPersistedStateSignature({
     clients: loadedClients,
@@ -47,6 +50,7 @@ function normalizePersistedStateSource(rawState){
     recycleBin: loadedRecycleBin,
     recycleArchive: loadedRecycleArchive,
     importHistory: loadedImportHistory,
+    teamHistory: loadedTeamHistory,
     version: Number(rawState?.version),
     updatedAt: rawState?.updatedAt
   });
@@ -58,6 +62,7 @@ function normalizePersistedStateSource(rawState){
     recycleBin: loadedRecycleBin,
     recycleArchive: loadedRecycleArchive,
     importHistory: loadedImportHistory,
+    teamHistory: loadedTeamHistory,
     signature: nextSignature
   };
 }
@@ -137,6 +142,7 @@ async function applyPersistedStateSource(normalizedState, options = {}){
   AppState.recycleBin = normalizedState.recycleBin;
   AppState.recycleArchive = normalizedState.recycleArchive;
   AppState.importHistory = normalizedState.importHistory;
+  AppState.teamHistory = normalizedState.teamHistory;
   lastPersistedStateSignature = normalizedState.signature || buildPersistedStateSignature({
     clients: AppState.clients,
     salleAssignments: AppState.salleAssignments,
@@ -144,7 +150,8 @@ async function applyPersistedStateSource(normalizedState, options = {}){
     audienceDraft,
     recycleBin: AppState.recycleBin,
     recycleArchive: AppState.recycleArchive,
-    importHistory: AppState.importHistory
+    importHistory: AppState.importHistory,
+    teamHistory: AppState.teamHistory
   });
   syncCurrentUserFromUsers();
 

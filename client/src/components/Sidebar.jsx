@@ -152,6 +152,12 @@ function Sidebar() {
             <i className="fa-solid fa-user-group"></i> Equipe
           </div>
         )}
+
+        {canManageTeam && (
+          <div id="teamHistoryLink" className="nav-link" onClick={() => window.showView && window.showView('teamHistory')}>
+            <i className="fa-solid fa-clock-rotate-left"></i> Historique
+          </div>
+        )}
         
         {!isClient && (
           <div id="recycleLink" className="nav-link" onClick={() => window.showView && window.showView('recycle')}>

@@ -4,6 +4,7 @@ import DiligenceSection from './sections/DiligenceSection'
 import SalleSection from './sections/SalleSection'
 import FactureSection from './sections/FactureSection'
 import EquipeSection from './sections/EquipeSection'
+import TeamHistorySection from './sections/TeamHistorySection'
 import ClientSection from './sections/ClientSection'
 import CreationSection from './sections/CreationSection'
 import SuiviSection from './sections/SuiviSection'
@@ -19,6 +20,7 @@ function ContentArea() {
         <SalleSection />
         <FactureSection />
         <EquipeSection />
+        <TeamHistorySection />
         <ClientSection />
         <CreationSection />
         <SuiviSection />

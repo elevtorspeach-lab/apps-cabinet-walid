@@ -82,10 +82,13 @@
       </div>
     <div id="equipeLink" class="nav-link">
         <i class="fa-solid fa-user-group"></i> Equipe
-      </div>
+    </div>
+    <div id="teamHistoryLink" class="nav-link">
+        <i class="fa-solid fa-clock-rotate-left"></i> Historique
+    </div>
     <div id="recycleLink" class="nav-link">
         <i class="fa-solid fa-trash-arrow-up"></i> Corbeille
-      </div>
+    </div>
 
     <button id="logoutBtn" class="btn-danger logout-btn">
       <i class="fa-solid fa-right-from-bracket"></i> Déconnecter
@@ -607,6 +610,40 @@
       </div>
     </div>
   
+    <!-- HISTORIQUE EQUIPE -->
+    <div id="teamHistorySection" class="section" style="display:none;">
+      <h1><i class="fa-solid fa-clock-rotate-left"></i> Historique</h1>
+      <div id="teamHistoryLocked" class="diligence-empty" style="display:none;">
+        Reserve au gestionnaire.
+      </div>
+      <div id="teamHistoryPanel">
+        <div class="clients-toolbar" style="margin-bottom:12px;">
+          <div class="search-box" style="flex:1;">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="teamHistorySearchInput" placeholder="Rechercher utilisateur, action, detail..." />
+          </div>
+          <button id="teamHistoryRefreshBtn" class="btn-primary" type="button">
+            <i class="fa-solid fa-rotate"></i> Actualiser
+          </button>
+        </div>
+        <div class="table-container" id="teamHistoryTableContainer">
+          <table>
+            <thead>
+              <tr>
+                <th>Date & heure</th>
+                <th>Utilisateur</th>
+                <th>Action</th>
+                <th>Compte cible</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="teamHistoryBody"></tbody>
+          </table>
+        </div>
+        <div id="teamHistoryPagination" class="table-pagination"></div>
+      </div>
+    </div>
+
 
     <!-- CLIENTS -->
     <div id="clientSection" class="section" style="display:none;">

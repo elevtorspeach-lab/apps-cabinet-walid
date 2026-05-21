@@ -283,6 +283,7 @@ let audienceCheckedOrderedRowsCacheInput = null;
 let audienceCheckedOrderedRowsCacheVersion = -1;
 let audienceCheckedOrderedRowsCacheOutput = [];
 let audienceFilterOptionsRowsRef = null;
+let audienceFilterOptionsDateKey = '';
 const audienceFilterOptionsMetaCache = new WeakMap();
 let audienceDuplicateKeySetCacheInput = null;
 let audienceDuplicateKeySetCacheOutput = new Set();
@@ -294,6 +295,7 @@ let audienceExactSearchIndexCacheInput = null;
 let audienceExactSearchIndexCacheOutput = null;
 let audienceSelectedExportRowsCacheInput = null;
 let audienceSelectedExportRowsCacheVersion = -1;
+let audienceSelectedExportRowsCacheTribunalKey = 'all';
 let audienceSelectedExportRowsCacheOutput = [];
 let audienceSelectionCountRowsRef = null;
 let audienceSelectionCountVersion = -1;
@@ -1339,6 +1341,7 @@ function markAudienceRowsCacheDirty(options = {}){
   audienceErrorRowsCacheOutput = [];
   audienceSelectedExportRowsCacheInput = null;
   audienceSelectedExportRowsCacheVersion = -1;
+  audienceSelectedExportRowsCacheTribunalKey = 'all';
   audienceSelectedExportRowsCacheOutput = [];
   lastAudienceRenderedRows = [];
   lastAudienceRenderedPageRows = [];
@@ -1368,6 +1371,11 @@ function markAudienceColorCachesDirty(){
   audienceSelectionCountRowsRef = null;
   audienceSelectionCountVersion = -1;
   audienceSelectionCountValue = 0;
+  diligenceRowsCache = null;
+  diligenceFilteredRowsCacheInput = null;
+  diligenceFilteredRowsCacheKey = '';
+  diligenceFilteredRowsCacheOutput = [];
+  diligenceFilterOrdonnanceRowsRef = null;
   lastAudienceRenderCacheKey = '';
   lastAudienceRenderIdentityKey = '';
   audienceVirtualLastRange = { start: -1, end: -1 };
@@ -3009,6 +3017,24 @@ function getExportXlsxWorker(){
   }
 }
 
+function resetExportXlsxWorker(){
+  if(exportXlsxWorker){
+    try{ exportXlsxWorker.terminate(); }catch(_){}
+  }
+  exportXlsxWorker = null;
+  exportXlsxWorkerFailed = false;
+}
+
+function getExportXlsxWorkerLibraryUrl(){
+  if(!IS_FILE_PROTOCOL) return XLSX_LOCAL_URL;
+  return '../vendor/libs/xlsx.full.min.js';
+}
+
+function getExportExcelJsWorkerLibraryUrl(){
+  if(!IS_FILE_PROTOCOL) return EXCELJS_LOCAL_URL;
+  return '../vendor/libs/exceljs.min.js';
+}
+
 function createXlsxBlobInWorker({ headers, rows, subtitle = '', editionLabel = '', sheetName = 'Audience', colWidths = [] }){
   const worker = getExportXlsxWorker();
   if(!worker) return Promise.resolve(null);
@@ -3055,10 +3081,96 @@ function createXlsxBlobInWorker({ headers, rows, subtitle = '', editionLabel = '
     worker.postMessage({
       type: 'xlsx-export',
       requestId,
-      xlsxUrl: XLSX_LOCAL_URL,
+      xlsxUrl: getExportXlsxWorkerLibraryUrl(),
       aoa,
       sheetName,
       colWidths
+    });
+  });
+}
+
+function createMultiSheetXlsxBlobInWorker({ sheets = [] } = {}){
+  const worker = getExportXlsxWorker();
+  if(!worker) return Promise.resolve(null);
+  const requestId = ++exportXlsxWorkerRequestSeq;
+  return new Promise((resolve)=>{
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'xlsx-multi-sheet-export-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      if(data.ok !== true || !data.buffer){
+        resolve(null);
+        return;
+      }
+      resolve(new Blob(
+        [data.buffer],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+      ));
+    };
+    const handleError = (err)=>{
+      console.warn('XLSX multi-sheet export worker error', err);
+      cleanup();
+      exportXlsxWorkerFailed = true;
+      if(exportXlsxWorker){
+        try{ exportXlsxWorker.terminate(); }catch(_){}
+      }
+      exportXlsxWorker = null;
+      resolve(null);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'xlsx-multi-sheet-export',
+      requestId,
+      xlsxUrl: getExportXlsxWorkerLibraryUrl(),
+      sheets: Array.isArray(sheets) ? sheets : []
+    });
+  });
+}
+
+function createStyledMultiSheetXlsxBlobInWorker({ sheets = [], headerImageDataUrl = '' } = {}){
+  const worker = getExportXlsxWorker();
+  if(!worker) return Promise.resolve(null);
+  const requestId = ++exportXlsxWorkerRequestSeq;
+  return new Promise((resolve)=>{
+    const cleanup = ()=>{
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+    };
+    const handleMessage = (event)=>{
+      const data = event?.data || {};
+      if(String(data.type || '') !== 'xlsx-styled-multi-sheet-export-result') return;
+      if(Number(data.requestId) !== Number(requestId)) return;
+      cleanup();
+      if(data.ok !== true || !data.buffer){
+        resolve(null);
+        return;
+      }
+      resolve(new Blob([data.buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    };
+    const handleError = (err)=>{
+      console.warn('XLSX styled multi-sheet export worker error', err);
+      cleanup();
+      exportXlsxWorkerFailed = true;
+      if(exportXlsxWorker){
+        try{ exportXlsxWorker.terminate(); }catch(_){}
+      }
+      exportXlsxWorker = null;
+      resolve(null);
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({
+      type: 'xlsx-styled-multi-sheet-export',
+      requestId,
+      excelJsUrl: getExportExcelJsWorkerLibraryUrl(),
+      sheets: Array.isArray(sheets) ? sheets : [],
+      headerImageDataUrl: String(headerImageDataUrl || '')
     });
   });
 }
@@ -7061,6 +7173,7 @@ function parseProcedureToken(token){
   if(compact === 'sfdc') return 'SFDC';
   if(compact === 'sbien') return 'S/bien';
   if(compact === 'inj' || compact === 'injonction') return 'Injonction';
+  if(compact === 'saisiearret' || compact === 'saisiearrt' || compact === 'saisiarret' || compact === 'saisiarrt' || compact === 'sesiearret' || compact === 'sesiearrt' || compact === 'sa') return 'SAISIE ARRÃŠT';
   return raw;
 }
 
@@ -12425,6 +12538,19 @@ function parseExcelData(rows, sheet = null){
     refRestitution: ['reference dossier restitution', 'réference dossier restitution', 'référence dossier restitution', 'ref dossier restitution'],
     refSfdc: ['reference dossier sfdc', 'réference dossier sfdc', 'référence dossier sfdc', 'ref dossier sfdc'],
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
+    refDossier: ['ref dossier', 'reference dossier', 'rÃ©ference dossier', 'rÃ©fÃ©rence dossier', 'réference dossier', 'référence dossier'],
+    lotDu: ['lot du', 'lot'],
+    debiteurEp: ['debiteur fr', 'dÃ©biteur fr', 'debiteur ep', 'dÃ©biteur ep'],
+    debiteurAp: ['debiteur ar', 'dÃ©biteur ar', 'debiteur ap', 'dÃ©biteur ap'],
+    cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc dÃ©biteur'],
+    rib: ['rib'],
+    banqueFr: ['banque fr', 'banque'],
+    banqueAr: ['banque ar'],
+    adresseBranche: ['adresse banque', 'adresse branche', 'adresse bancaire'],
+    avocat: ['avocat'],
+    sortPle: ['sort plie', 'sort pliÃ©', 'sort pli', 'plie', 'pliÃ©'],
+    notifBanque: ['notif banque', 'notification banque'],
+    notifDebiteur: ['notif debiteur', 'notif dÃ©biteur', 'notification debiteur', 'notification dÃ©biteur'],
     notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
     notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
     executionNo: [
@@ -12469,6 +12595,8 @@ function parseExcelData(rows, sheet = null){
   dossierHeaderKeys.sanlamDateAccident = ['date accident', 'date d accident', 'date du sinistre'];
   dossierHeaderKeys.sanlamCinConducteur = ['cin conducteur', 'cni conducteur', 'cin du conducteur', 'cni du conducteur'];
   dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
+
+  dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'dÃ©biteur fr', 'débiteur fr', 'debiteur ep', 'dÃ©biteur ep', 'débiteur ep'])];
 
   const audienceHeaderKeys = {
     adversaire: ['adversaire'],
@@ -12730,6 +12858,19 @@ function parseExcelData(rows, sheet = null){
       refRestitution: getColIndex(dossierColMap, dossierHeaderKeys.refRestitution),
       refSfdc: getColIndex(dossierColMap, dossierHeaderKeys.refSfdc),
       refInjonction: getColIndex(dossierColMap, dossierHeaderKeys.refInjonction),
+      refDossier: getColIndex(dossierColMap, dossierHeaderKeys.refDossier),
+      lotDu: getColIndex(dossierColMap, dossierHeaderKeys.lotDu),
+      debiteurEp: getColIndex(dossierColMap, dossierHeaderKeys.debiteurEp),
+      debiteurAp: getColIndex(dossierColMap, dossierHeaderKeys.debiteurAp),
+      cinRc: getColIndex(dossierColMap, dossierHeaderKeys.cinRc),
+      rib: getColIndex(dossierColMap, dossierHeaderKeys.rib),
+      banqueFr: getColIndex(dossierColMap, dossierHeaderKeys.banqueFr),
+      banqueAr: getColIndex(dossierColMap, dossierHeaderKeys.banqueAr),
+      adresseBranche: getColIndex(dossierColMap, dossierHeaderKeys.adresseBranche),
+      avocat: getColIndex(dossierColMap, dossierHeaderKeys.avocat),
+      sortPle: getColIndex(dossierColMap, dossierHeaderKeys.sortPle),
+      notifBanque: getColIndex(dossierColMap, dossierHeaderKeys.notifBanque),
+      notifDebiteur: getColIndex(dossierColMap, dossierHeaderKeys.notifDebiteur),
       notificationSort: getColIndex(dossierColMap, dossierHeaderKeys.notificationSort),
       notificationNo: getColIndex(dossierColMap, dossierHeaderKeys.notificationNo),
       executionNo: getColIndex(dossierColMap, dossierHeaderKeys.executionNo),
@@ -12779,6 +12920,19 @@ function parseExcelData(rows, sheet = null){
       const refRestitution = idx.refRestitution !== -1 ? String(row[idx.refRestitution] || '').trim() : '';
       const refSfdc = idx.refSfdc !== -1 ? String(row[idx.refSfdc] || '').trim() : '';
       const refInjonction = idx.refInjonction !== -1 ? String(row[idx.refInjonction] || '').trim() : '';
+      const refDossier = idx.refDossier !== -1 ? String(row[idx.refDossier] || '').trim() : '';
+      const lotDu = idx.lotDu !== -1 ? String(row[idx.lotDu] || '').trim() : '';
+      const debiteurEp = idx.debiteurEp !== -1 ? normalizeImportedDebiteurName(row[idx.debiteurEp]) : '';
+      const debiteurAp = idx.debiteurAp !== -1 ? String(row[idx.debiteurAp] || '').trim() : '';
+      const cinRc = idx.cinRc !== -1 ? String(row[idx.cinRc] || '').trim() : '';
+      const rib = idx.rib !== -1 ? String(row[idx.rib] || '').trim() : '';
+      const banqueFr = idx.banqueFr !== -1 ? String(row[idx.banqueFr] || '').trim() : '';
+      const banqueAr = idx.banqueAr !== -1 ? String(row[idx.banqueAr] || '').trim() : '';
+      const adresseBranche = idx.adresseBranche !== -1 ? String(row[idx.adresseBranche] || '').trim() : '';
+      const avocat = idx.avocat !== -1 ? String(row[idx.avocat] || '').trim() : '';
+      const sortPle = idx.sortPle !== -1 ? String(row[idx.sortPle] || '').trim() : '';
+      const notifBanque = idx.notifBanque !== -1 ? String(row[idx.notifBanque] || '').trim() : '';
+      const notifDebiteur = idx.notifDebiteur !== -1 ? String(row[idx.notifDebiteur] || '').trim() : '';
       const notificationSort = idx.notificationSort !== -1 ? String(row[idx.notificationSort] || '').trim() : '';
       const notificationNo = idx.notificationNo !== -1 ? String(row[idx.notificationNo] || '').trim() : '';
       const tribunal = idx.tribunal !== -1 ? String(row[idx.tribunal] || '').trim() : '';
@@ -12825,7 +12979,7 @@ function parseExcelData(rows, sheet = null){
         continue;
       }
       emptyDossierRowStreak = 0;
-      const hasExplicitReferences = !!(refAssignation || refRestitution || refSfdc || refInjonction);
+      const hasExplicitReferences = !!(refAssignation || refRestitution || refSfdc || refInjonction || refDossier);
       const hasOtherDossierSignals = !!(
         immatriculation
         || boiteNo
@@ -12845,6 +12999,31 @@ function parseExcelData(rows, sheet = null){
         || sanlamDateAccident
         || sanlamCinConducteur
         || sanlamSouscripteur
+        || lotDu
+        || debiteurAp
+        || cinRc
+        || rib
+        || banqueFr
+        || banqueAr
+        || adresseBranche
+        || avocat
+        || sortPle
+        || notifBanque
+        || notifDebiteur
+      );
+      const isSaisieArretImportRow = !!(
+        refDossier
+        || lotDu
+        || debiteurAp
+        || cinRc
+        || rib
+        || banqueFr
+        || banqueAr
+        || adresseBranche
+        || avocat
+        || sortPle
+        || notifBanque
+        || notifDebiteur
       );
       const isCarryDossierRow = !refClient
         && !debiteur
@@ -12873,7 +13052,7 @@ function parseExcelData(rows, sheet = null){
         carriedMontant,
         dateAffectationExtra,
         type,
-        procedureText,
+        procedureText: procedureText || (isSaisieArretImportRow ? 'SAISIE ARRÃŠT' : ''),
         refClient,
         debiteur,
         adversaire,
@@ -12901,6 +13080,19 @@ function parseExcelData(rows, sheet = null){
         refRestitution,
         refSfdc,
         refInjonction,
+        refDossier,
+        lotDu,
+        debiteurEp,
+        debiteurAp,
+        cinRc,
+        rib,
+        banqueFr,
+        banqueAr,
+        adresseBranche,
+        avocat,
+        sortPle,
+        notifBanque,
+        notifDebiteur,
         notificationSort,
         notificationNo,
         executionNo,
@@ -14444,7 +14636,7 @@ async function applyExcelImport(payload, options = {}){
   const importWarningRows = [];
   const importInfoRows = [];
   const importIssueEntries = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'Sanlam']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'SAISIE ARRÃŠT', 'Sanlam']);
   const defaultDossierProceduresWhenMissing = diligenceMode
     ? ['Injonction']
     : ['ASS', 'Restitution', 'SFDC'];
@@ -15095,16 +15287,32 @@ async function applyExcelImport(payload, options = {}){
     const restitutionReference = resolveProcedureReference('Restitution', row.refRestitution);
     const sfdcReference = resolveProcedureReference('SFDC', row.refSfdc);
     const injonctionReference = resolveProcedureReference('Injonction', row.refInjonction);
+    const saisieArretReference = resolveProcedureReference('SAISIE ARRÃŠT', row.refDossier);
 
     setProcRef('ASS', assReference);
     setProcRef('Restitution', restitutionReference);
     setProcRef('SFDC', sfdcReference);
     setProcRef('Injonction', injonctionReference);
+    setProcRef('SAISIE ARRÃŠT', saisieArretReference);
     const executionNoValue = String(row.executionNo || '').trim();
     const importedDateDepotValue = normalizeDateDDMMYYYY(row.dateDepot || '') || String(row.dateDepot || '').trim();
     const observationValue = String(row.observation || '').trim();
     let notificationSortValue = String(row.notificationSort || '').trim();
     let notificationNoValue = String(row.notificationNo || '').trim();
+    const saisieArretFields = {
+      lotDu: String(row.lotDu || '').trim(),
+      debiteurEp: String(row.debiteurEp || row.debiteur || '').trim(),
+      debiteurAp: String(row.debiteurAp || '').trim(),
+      cinRc: String(row.cinRc || row.cautionCin || row.cautionRc || '').trim(),
+      rib: String(row.rib || '').trim(),
+      banqueFr: String(row.banqueFr || '').trim(),
+      banqueAr: String(row.banqueAr || '').trim(),
+      adresseBranche: String(row.adresseBranche || '').trim(),
+      avocat: String(row.avocat || '').trim(),
+      sortPle: String(row.sortPle || '').trim(),
+      notifBanque: String(row.notifBanque || '').trim(),
+      notifDebiteur: String(row.notifDebiteur || '').trim()
+    };
 
     if(diligenceMode){
       const rawNotif = String(row.notificationNo || '').trim();
@@ -15153,6 +15361,23 @@ async function applyExcelImport(payload, options = {}){
     assignProcedureMeta('Restitution', restitutionReference);
     assignProcedureMeta('SFDC', sfdcReference);
     assignProcedureMeta('Injonction', injonctionReference);
+    assignProcedureMeta('SAISIE ARRÃŠT', saisieArretReference);
+    if(procedureSet.has('SAISIE ARRÃŠT')){
+      if(!targetDossier.procedureDetails['SAISIE ARRÃŠT']) targetDossier.procedureDetails['SAISIE ARRÃŠT'] = {};
+      const p = targetDossier.procedureDetails['SAISIE ARRÃŠT'];
+      if(saisieArretReference && !String(p.referenceClient || '').trim()) p.referenceClient = saisieArretReference;
+      Object.entries(saisieArretFields).forEach(([field, value])=>{
+        if(value) p[field] = value;
+      });
+      if(importedDateDepotValue){
+        p.dateDepot = importedDateDepotValue;
+        p.depotLe = importedDateDepotValue;
+      }
+      if(observationValue) p.observation = observationValue;
+      if(tribunalValue) p.tribunal = tribunalValue;
+      if(executionNoValue) p.executionNo = executionNoValue;
+      if(importedOrdonnanceStatus) p.attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
+    }
     const normalizedImportedProcs = [...procedureSet];
     // Keep Excel procedure order as the source of truth.
     // Any extra procedures discovered from references are appended after.
@@ -15651,7 +15876,13 @@ async function handleAudienceImportFile(file){
 }
 
 function handleDiligenceExcelImport(){
-  $('diligenceImportInput')?.click();
+  const input = $('diligenceImportInput');
+  if(!input){
+    alert('Import Diligence indisponible: champ fichier introuvable.');
+    return;
+  }
+  input.value = '';
+  input.click();
 }
 
 async function handleDiligenceImportFile(file){
@@ -19145,7 +19376,10 @@ function getDiligenceProcedureFilterValue(procedure){
 function getDiligenceProcedureVariantValue(procedure){
   const raw = String(procedure || '').trim();
   if(!raw) return '';
-  return parseProcedureToken(raw) || raw;
+  const parsed = parseProcedureToken(raw) || raw;
+  const base = getDiligenceProcedureFilterValue(parsed);
+  if(base === 'ASS') return base;
+  return parsed;
 }
 
 function getDiligenceRowProcedureFilterValue(row){
@@ -19155,6 +19389,11 @@ function getDiligenceRowProcedureFilterValue(row){
 
 function isDiligenceAssProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'ASS';
+}
+
+function isDiligenceAssLikeProcedure(procedure){
+  const proc = getDiligenceProcedureFilterValue(procedure);
+  return proc === 'ASS' || proc === 'Nantissement';
 }
 
 function isCasablancaTpiTribunal(tribunal){
@@ -19170,11 +19409,15 @@ function isCasablancaTpiTribunal(tribunal){
 
 function hasDiligenceCasablancaTpiAssRow(rows){
   if(!Array.isArray(rows)) return false;
-  return rows.some(row => isDiligenceAssProcedure(row?.procedure) && isCasablancaTpiTribunal(row?.details?.tribunal));
+  return rows.some(row => isDiligenceAssLikeProcedure(row?.procedure) && isCasablancaTpiTribunal(row?.details?.tribunal));
 }
 
 function isDiligenceCommandementProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'Commandement';
+}
+
+function isDiligenceSaisieArretProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'SAISIE ARRÃŠT';
 }
 
 function getDiligenceCommandementHeaderMode(rows){
@@ -19284,6 +19527,7 @@ function getDiligenceRows(){
           && baseProc !== 'S/bien'
           && baseProc !== 'Injonction'
           && baseProc !== 'Commandement'
+          && baseProc !== 'Nantissement'
         ) return;
         const details = d?.procedureDetails?.[proc] || {};
         const isCommandement = baseProc === 'Commandement';
@@ -19303,7 +19547,7 @@ function getDiligenceRows(){
           })
             ? ''
             : (getDiligenceOrdonnanceStatus(
-              details.attOrdOrOrdOk || '',
+              details.attOrdOrOrdOk || details._audienceSortOrd || '',
               details.notificationNo || ''
             ) || 'att'));
         rows.push({
@@ -19498,7 +19742,7 @@ function getDiligenceOrdonnanceLabel(value, notificationNo = ''){
 
 function getDiligenceOrdonnanceLabelFromDetails(details){
   const status = getDiligenceOrdonnanceStatus(
-    details?.attOrdOrOrdOk || '',
+    details?.attOrdOrOrdOk || details?._audienceSortOrd || '',
     details?.notificationNo || ''
   );
   if(status === 'ok') return 'ORD OK';
@@ -19542,7 +19786,7 @@ function getDiligenceNotificationSortValue(value, procedure = '', notificationNo
   const normalized = normalizeDiligenceNotificationSort(value);
   if(normalized === '-') return '-';
   if(normalized) return normalized;
-  if(isDiligenceAssProcedure(procedure)) return '-';
+  if(isDiligenceAssLikeProcedure(procedure)) return '-';
   return '';
 }
 
@@ -19555,6 +19799,9 @@ function getDiligenceReferenceDossierValue(row){
 
 function shouldShowBlankDiligenceOrdonnance(row){
   if(!isDiligenceExecutionProcedure(row?.procedure) || isDiligenceCommandementProcedure(row?.procedure)){
+    return false;
+  }
+  if(normalizeDiligenceOrdonnance(row?.details?.attOrdOrOrdOk || row?.details?._audienceSortOrd || '')){
     return false;
   }
   return !String(getDiligenceReferenceDossierValue(row) || '').trim();
@@ -19612,7 +19859,7 @@ function getDiligenceExecutionSortCellValue(row){
   if(isDiligenceFreeTextExecutionSortProcedure(row?.procedure)){
     return String(row?.details?.sort || '').trim();
   }
-  return !isDiligenceAssProcedure(row?.procedure)
+  return !isDiligenceAssLikeProcedure(row?.procedure)
     ? normalizeDiligenceSort(row?.details?.sort || '')
     : '';
 }
@@ -19623,17 +19870,17 @@ function getDiligenceTribunalCellValue(row){
 }
 
 function isDiligenceAssNbLayout(row){
-  if (!isDiligenceAssProcedure(row?.procedure)) return false;
+  if (!isDiligenceAssLikeProcedure(row?.procedure)) return false;
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'NB';
 }
 
 function isDiligenceAssNotifierLayout(row){
-  if (!isDiligenceAssProcedure(row?.procedure)) return false;
+  if (!isDiligenceAssLikeProcedure(row?.procedure)) return false;
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'notifier';
 }
 
 function getDiligenceAssHeaderMode(rows){
-  const list = Array.isArray(rows) ? rows.filter(row=>isDiligenceAssProcedure(row?.procedure)) : [];
+  const list = Array.isArray(rows) ? rows.filter(row=>isDiligenceAssLikeProcedure(row?.procedure)) : [];
   if(!list.length) return 'default';
   const expandedCount = list.reduce((count, row)=>count + (isDiligenceAssNbLayout(row) ? 1 : 0), 0);
   if(expandedCount === 0) return 'default';
@@ -20272,6 +20519,9 @@ function exportDiligenceXLS(options = {}){
   return runWithHeavyUiOperation(async ()=>{
     const dataset = await buildDiligenceSelectedExportDatasetAsync();
     if(!dataset.rows.length){
+      try{
+        if(options?.browserDownloadTarget && !options.browserDownloadTarget.closed) options.browserDownloadTarget.close();
+      }catch(_){}
       alert('Cochez au moins une ligne pour exporter.');
       return;
     }
@@ -20350,7 +20600,7 @@ function getDiligenceExportColumnDefinitions(){
       header: 'Sort',
       width: 24,
       assOnly: true,
-      getValue: (row)=>isDiligenceAssProcedure(row?.procedure) ? (row?.details?.sort || '') : ''
+      getValue: (row)=>isDiligenceAssLikeProcedure(row?.procedure) ? (row?.details?.sort || '') : ''
     },
     {
       key: 'ordonnance',
@@ -20429,7 +20679,7 @@ function getDiligenceExportColumnDefinitions(){
       header: 'PV Police',
       width: 14,
       assOnly: true,
-      getValue: (row)=>isDiligenceAssProcedure(row?.procedure)
+      getValue: (row)=>isDiligenceAssLikeProcedure(row?.procedure)
         ? getDiligencePvPliceValue(row?.details?.pvPlice || '')
         : ''
     },
@@ -20443,15 +20693,21 @@ function getDiligenceExportColumnDefinitions(){
 }
 
 function shouldShowDiligenceAssColumnsForRows(rows){
-  if(isDiligenceAssProcedure(filterDiligenceProcedure)) return true;
+  if(isDiligenceAssLikeProcedure(filterDiligenceProcedure)) return true;
   const sourceRows = Array.isArray(rows) ? rows : [];
-  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceAssProcedure(row?.procedure));
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceAssLikeProcedure(row?.procedure));
 }
 
 function shouldShowDiligenceCommandementColumnsForRows(rows){
   if(isDiligenceCommandementProcedure(filterDiligenceProcedure)) return true;
   const sourceRows = Array.isArray(rows) ? rows : [];
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceCommandementProcedure(row?.procedure));
+}
+
+function shouldShowDiligenceSaisieArretColumnsForRows(rows){
+  if(isDiligenceSaisieArretProcedure(filterDiligenceProcedure)) return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceSaisieArretProcedure(row?.procedure));
 }
 
 function buildDiligenceExportRowCells(row, columns){
@@ -20463,6 +20719,43 @@ function buildDiligenceExportRowCells(row, columns){
 
 function finalizeDiligenceExportDataset(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
+  const showSaisieArretColumns = shouldShowDiligenceSaisieArretColumnsForRows(sourceRows);
+  if(showSaisieArretColumns){
+    const columns = [
+      { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
+      { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
+      { header: 'Lot du', width: 18, getValue: (row)=>row?.details?.lotDu || '' },
+      { header: 'Gestionnaire', width: 22, getValue: (row)=>row?.dossier?.gestionnaire || '' },
+      { header: 'Debiteur FR', width: 28, getValue: (row)=>row?.details?.debiteurEp || row?.dossier?.debiteur || '' },
+      { header: 'Debiteur AR', width: 28, getValue: (row)=>row?.details?.debiteurAp || '' },
+      { header: 'CIN/RC', width: 18, getValue: (row)=>row?.details?.cinRc || row?.details?.cin || row?.dossier?.cin || row?.dossier?.cautionCin || '' },
+      { header: 'Adresse', width: 34, getValue: (row)=>row?.details?.adresse || row?.dossier?.adresse || '' },
+      { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
+      { header: 'Montant', width: 18, getValue: (row)=>row?.details?.montant || row?.dossier?.montant || '' },
+      { header: 'RIB', width: 26, getValue: (row)=>row?.details?.rib || '' },
+      { header: 'Banque FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
+      { header: 'Banque AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
+      { header: 'Adresse Banque', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
+      { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
+      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
+      { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
+      { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
+      { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
+      { header: 'Execution NÂ°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
+      { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
+      { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
+      { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
+      { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
+      { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+    ];
+    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    return {
+      rows: sourceRows,
+      headers: columns.map((column)=>column.header),
+      tableRows,
+      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+    };
+  }
   const showCommandementColumns = shouldShowDiligenceCommandementColumnsForRows(sourceRows);
   if(showCommandementColumns){
     const columns = [
@@ -21233,15 +21526,27 @@ function resyncProcedureSelectionFromUI(fallbackList){
   suppressProcedureChange = false;
 }
 
+function isAudienceSaisieArretProcedure(procName){
+  const raw = String(procName || '').trim();
+  if(!raw) return false;
+  const base = getProcedureBaseName(parseProcedureToken(getProcedureBaseName(raw)));
+  const value = String(base || raw).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return value === 'saisiearret' || value === 'saisiearrt';
+}
+
 function isAudienceProcedure(procName){
-  const value = String(procName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const raw = String(procName || '').trim();
+  if(!raw) return false;
+  if(isAudienceSaisieArretProcedure(raw)) return false;
+  const value = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   if(!value) return false;
-  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction';
+  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement';
 }
 
 function getAudienceProcedureFilterKey(procName){
   const raw = String(procName || '').trim();
   if(!raw) return '';
+  if(isAudienceSaisieArretProcedure(raw)) return '';
   const normalized = parseProcedureToken(raw);
   const base = getProcedureBaseName(normalized);
   return String(base || normalized || raw).trim();
@@ -22201,19 +22506,43 @@ function compareAudienceRowsForExport(a, b) {
   return compareAudienceRowsByReferenceProximity(a, b, { direction: 1 });
 }
 
+function getAudienceExportTribunalFilterKey(){
+  const tribunalInput = $('filterAudienceTribunal');
+  const inputValue = String(tribunalInput?.value || '').trim();
+  if(inputValue){
+    const selection = resolveAudienceTribunalInputSelection(inputValue, true);
+    if(selection?.key && selection.key !== 'all') return selection.key;
+  }
+  if(tribunalInput) return 'all';
+  const currentKey = resolveAudienceTribunalFilterKey(filterAudienceTribunal);
+  return currentKey || 'all';
+}
+
+function getAudienceExportRowTribunalFilterKey(row){
+  return String(
+    row?.__tribunalFilterKey
+    || resolveAudienceTribunalFilterKey(row?.draft?.tribunal ?? row?.p?.tribunal ?? '')
+    || ''
+  ).trim();
+}
+
 function getSelectedAudienceRowsForExport(){
   const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  const tribunalExportKey = getAudienceExportTribunalFilterKey();
   if(
     rows === audienceSelectedExportRowsCacheInput
     && audienceSelectedExportRowsCacheVersion === audiencePrintSelectionVersion
+    && audienceSelectedExportRowsCacheTribunalKey === tribunalExportKey
   ){
     return audienceSelectedExportRowsCacheOutput;
   }
   const out = rows
     .filter(row=>isAudienceSelectedForPrint(row.ci, row.di, row.procKey))
+    .filter(row=>tribunalExportKey === 'all' || getAudienceExportRowTribunalFilterKey(row) === tribunalExportKey)
     .sort(compareAudienceRowsForExport);
   audienceSelectedExportRowsCacheInput = rows;
   audienceSelectedExportRowsCacheVersion = audiencePrintSelectionVersion;
+  audienceSelectedExportRowsCacheTribunalKey = tribunalExportKey;
   audienceSelectedExportRowsCacheOutput = out;
   return out;
 }
@@ -22825,12 +23154,20 @@ function getAudienceErrorDossierCount(){
   return audienceErrorCountCacheValue;
 }
 
+function getAudienceRowsForTribunalOptions(rows){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const targetDate = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
+  if(!targetDate) return sourceRows;
+  return sourceRows.filter((row)=>getAudienceRowDateValue(row) === targetDate);
+}
+
 function syncAudienceFilterOptions(rows){
   const procedureSelect = $('filterAudienceProcedure');
   const tribunalInput = $('filterAudienceTribunal');
   const tribunalOptions = $('filterAudienceTribunalOptions');
   if(!procedureSelect || !tribunalInput || !tribunalOptions) return;
-  if(rows === audienceFilterOptionsRowsRef){
+  const tribunalDateKey = filterAudienceDate ? normalizeIsoDateToDDMMYYYY(filterAudienceDate) : '';
+  if(rows === audienceFilterOptionsRowsRef && tribunalDateKey === audienceFilterOptionsDateKey){
     procedureSelect.value = filterAudienceProcedure;
     tribunalInput.value = filterAudienceTribunal === 'all' ? '' : getAudienceTribunalFilterLabel(filterAudienceTribunal);
     return;
@@ -22843,12 +23180,11 @@ function syncAudienceFilterOptions(rows){
       const key = getAudienceProcedureFilterKey(row.procKey);
       if(key) procedureSet.add(key);
     });
-    const tribunalState = buildAudienceTribunalClusterState(rows);
-    meta = { procedureSet, tribunalState };
+    meta = { procedureSet };
     audienceFilterOptionsMetaCache.set(rows, meta);
   }
   const procedureSet = meta.procedureSet;
-  const tribunalState = meta.tribunalState;
+  const tribunalState = buildAudienceTribunalClusterState(getAudienceRowsForTribunalOptions(rows));
   audienceTribunalAliasMap = tribunalState.aliasMap;
   audienceTribunalLabelMap = new Map(tribunalState.options.map(({ key, label })=>[key, label]));
 
@@ -22871,6 +23207,7 @@ function syncAudienceFilterOptions(rows){
   procedureSelect.value = filterAudienceProcedure;
   tribunalInput.value = filterAudienceTribunal === 'all' ? '' : getAudienceTribunalFilterLabel(filterAudienceTribunal);
   audienceFilterOptionsRowsRef = rows;
+  audienceFilterOptionsDateKey = tribunalDateKey;
 }
 
 function hasAudienceProcedureData(procData, draftData, dossier){
@@ -23299,27 +23636,244 @@ async function exportAudienceRegularXLS(options = {}){
   });
 }
 
-async function exportAudienceXLS(options = {}){
-  if(!canExportData()) return alert('Accès refusé');
-  return runWithHeavyUiOperation(async ()=>{
-    let dataset = await buildAudienceSelectedExportDatasetAsync(null, options);
-    if(!dataset.rows.length){
-      alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
-      return;
-    }
-    await exportAudienceWorkbookXlsxStyled({
-      headers: dataset.headers,
-      rows: dataset.tableRows,
-      subtitle: dataset.subtitle,
-      sheetName: 'Audience',
-      colWidths: dataset.colWidths,
-      filename: "Export d'audience Excel.xlsx",
-      layoutPreset: 'audience-reference',
+function getAudienceExportTribunalSheetLabel(row){
+  const value = String(row?.draft?.tribunal || row?.p?.tribunal || '').trim();
+  return value || 'RASH';
+}
+
+function sanitizeAudienceExportSheetName(value, usedNames){
+  const base = (String(value || '').trim() || 'RASH')
+    .replace(/[\[\]\*\/\\\?:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 31) || 'RASH';
+  let name = base;
+  let suffix = 2;
+  while(usedNames.has(name.toLowerCase())){
+    const suffixText = ` ${suffix}`;
+    name = `${base.slice(0, Math.max(1, 31 - suffixText.length))}${suffixText}`;
+    suffix += 1;
+  }
+  usedNames.add(name.toLowerCase());
+  return name;
+}
+
+async function exportAudienceWorkbookByTribunal(dataset, options = {}){
+  const directExportHandlePromise = primeDirectExportDirectoryAccess();
+  if(false)
+    alert('Export XLSX indisponible: librairie Excel non chargÃ©e.');
+  const headers = sanitizeExcelExportRow(dataset.headers);
+  const subtitle = stripExcelBidiControlChars(dataset.subtitle || '');
+  const editionDateText = formatDateDDMMYYYY(new Date());
+  const editionLabelText = editionDateText ? `Edition le ${editionDateText}` : 'Edition le';
+  const colCount = headers.length;
+  const lastColLetter = String.fromCharCode(64 + Math.max(1, colCount));
+  const colWidths = Array.isArray(dataset.colWidths) && dataset.colWidths.length
+    ? dataset.colWidths.map((value)=>Math.max(8, Number(value?.wch || value || 20)))
+    : new Array(colCount).fill(20);
+  const groups = new Map();
+  (Array.isArray(dataset.rows) ? dataset.rows : []).forEach((row, index)=>{
+    const label = getAudienceExportTribunalSheetLabel(row);
+    if(!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(sanitizeExcelExportRow((Array.isArray(dataset.tableRows) ? dataset.tableRows[index] : []) || []));
+  });
+  if(false){
+  const usedFastSheetNames = new Set();
+  const fastSheets = [];
+  groups.forEach((sheetRows, label)=>{
+    fastSheets.push({
+      name: sanitizeAudienceExportSheetName(label, usedFastSheetNames),
+      colWidths: colWidths.map(width=>({ wch: width })),
+      headers,
+      rows: sheetRows,
+      subtitle,
+      editionLabel: editionLabelText,
+      aoa: [
+        ['CABINET ARAQUI HOUSSAINI'],
+        [editionLabelText],
+        [subtitle],
+        [],
+        headers,
+        ...sheetRows
+      ]
+    });
+  });
+  const styledWorkerBlob = await promiseWithTimeout(
+    createStyledMultiSheetXlsxBlobInWorker({
+      sheets: fastSheets,
+      headerImageDataUrl: await getAudienceExportHeaderImageDataUrl()
+    }),
+    15000,
+    'Export audience worker stylé'
+  ).catch((err)=>{
+    console.warn('Export audience worker stylé indisponible, fallback export simple', err);
+    resetExportXlsxWorker();
+    return null;
+  });
+  if(styledWorkerBlob){
+    await saveBlobDirectOrDownload(styledWorkerBlob, "Export d'audience Excel.xlsx", {
+      preferredHandle: await directExportHandlePromise,
       openAfterExport: options?.openAfterExport === true,
       browserDownloadTarget: options?.browserDownloadTarget || null,
       browserOpenInline: options?.browserOpenInline === true,
       preferredFileHandle: options?.preferredFileHandle || null
     });
+    return;
+  }
+  const workerBlob = await promiseWithTimeout(
+    createMultiSheetXlsxBlobInWorker({ sheets: fastSheets }),
+    15000,
+    'Export audience worker simple'
+  ).catch((err)=>{
+    console.warn('Export audience worker simple indisponible, fallback ExcelJS', err);
+    resetExportXlsxWorker();
+    return null;
+  });
+  if(workerBlob){
+    await saveBlobDirectOrDownload(workerBlob, "Export d'audience Excel.xlsx", {
+      preferredHandle: await directExportHandlePromise,
+      openAfterExport: options?.openAfterExport === true,
+      browserDownloadTarget: options?.browserDownloadTarget || null,
+      browserOpenInline: options?.browserOpenInline === true,
+      preferredFileHandle: options?.preferredFileHandle || null
+    });
+    return;
+  }
+  }
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
+  if(!excelReady) return;
+  if(typeof ExcelJS === 'undefined'){
+    alert('Export XLSX indisponible: librairie Excel non chargee.');
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const headerImageDataUrl = await getAudienceExportHeaderImageDataUrl();
+  const imageId = headerImageDataUrl
+    ? workbook.addImage({ base64: headerImageDataUrl, extension: 'jpeg' })
+    : null;
+  const usedNames = new Set();
+  groups.forEach((rows, label)=>{
+    const sheet = workbook.addWorksheet(sanitizeAudienceExportSheetName(label, usedNames));
+    sheet.views = [{ showGridLines: false }];
+    sheet.pageSetup = { orientation: 'landscape' };
+    sheet.pageMargins = { left: 0, right: 0, top: 0, bottom: 0, header: 0, footer: 0 };
+    sheet.columns = colWidths.map(width=>({ width }));
+    sheet.mergeCells(`A5:${lastColLetter}5`);
+    sheet.mergeCells(`A6:${lastColLetter}6`);
+    sheet.getCell('A5').value = '';
+    sheet.getCell('A6').value = {
+      richText: [
+        ...(subtitle ? [{
+          text: subtitle,
+          font: { name: 'Arial', size: 16, bold: true, color: { argb: 'FF1A4590' } }
+        }] : []),
+        ...(subtitle ? [{
+          text: '   ',
+          font: { name: 'Arial', size: 11, color: { argb: 'FF111111' } }
+        }] : []),
+        {
+          text: editionLabelText,
+          font: { name: 'Arial', size: 11, bold: true, color: { argb: 'FF111111' } }
+        }
+      ]
+    };
+    [1, 2, 3, 4].forEach(rowNumber=>{ sheet.getRow(rowNumber).height = 14.4; });
+    sheet.getRow(5).height = 35.25;
+    sheet.getRow(6).height = 24;
+    sheet.getRow(7).height = 9.6;
+    sheet.getRow(8).height = 38;
+    headers.forEach((header, index)=>{
+      const cell = sheet.getRow(8).getCell(index + 1);
+      cell.value = header;
+      cell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A4590' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF111111' } },
+        left: { style: 'thin', color: { argb: 'FF111111' } },
+        bottom: { style: 'thin', color: { argb: 'FF111111' } },
+        right: { style: 'thin', color: { argb: 'FF111111' } }
+      };
+    });
+    sheet.getCell('A6').alignment = { horizontal: 'center', vertical: 'middle' };
+    rows.forEach((row, index)=>{
+      const sheetRow = sheet.getRow(index + 9);
+      sheetRow.values = Array.isArray(row) ? row.slice(0, colCount) : [];
+      sheetRow.height = 35.25;
+      for(let c = 1; c <= colCount; c++){
+        const cell = sheetRow.getCell(c);
+        cell.font = { name: 'Calibri', size: 14, color: { argb: 'FF111111' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: c === 2 || c === 5 ? 'left' : 'center', vertical: 'middle', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+          left: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+          bottom: { style: 'thin', color: { argb: 'FF1A1A1A' } },
+          right: { style: 'thin', color: { argb: 'FF1A1A1A' } }
+        };
+      }
+    });
+    if(imageId){
+      sheet.addImage(imageId, {
+        tl: { col: 1.512, row: 0.154 },
+        br: { col: Math.min(6.183, colCount), row: 4.862 },
+        editAs: 'oneCell'
+      });
+    }
+  });
+  const buffer = await promiseWithTimeout(
+    workbook.xlsx.writeBuffer(),
+    120000,
+    'Export audience Excel'
+  );
+  const blob = new Blob(
+    [buffer],
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+  );
+  await saveBlobDirectOrDownload(blob, "Export d'audience Excel.xlsx", {
+    preferredHandle: await directExportHandlePromise,
+    openAfterExport: options?.openAfterExport === true,
+    browserDownloadTarget: options?.browserDownloadTarget || null,
+    browserOpenInline: options?.browserOpenInline === true,
+    preferredFileHandle: options?.preferredFileHandle || null
+  });
+}
+
+async function exportAudienceXLS(options = {}){
+  if(!canExportData()) return alert('Accès refusé');
+  return runWithHeavyUiOperation(async ()=>{
+    let dataset = await buildAudienceSelectedExportDatasetAsync(null, options);
+    const closeAudienceExportTarget = ()=>{
+      try{
+        if(options?.browserDownloadTarget && !options.browserDownloadTarget.closed) options.browserDownloadTarget.close();
+      }catch(_){}
+    };
+    if(!dataset.rows.length){
+      closeAudienceExportTarget();
+      try{
+        if(options?.browserDownloadTarget && !options.browserDownloadTarget.closed) options.browserDownloadTarget.close();
+      }catch(_){}
+      alert("Cochez les dossiers à exporter dans \"Export d'audience\".");
+      return;
+    }
+    try{
+      await exportAudienceWorkbookByTribunal(dataset, options);
+    }catch(err){
+      console.error('Export audience par tribunal impossible, fallback export classique', err);
+      await exportAudienceWorkbookXlsxStyled({
+        headers: dataset.headers,
+        rows: dataset.tableRows,
+        subtitle: dataset.subtitle,
+        sheetName: 'Audience',
+        colWidths: dataset.colWidths,
+        filename: "Export d'audience Excel.xlsx",
+        layoutPreset: 'audience-reference',
+        openAfterExport: options?.openAfterExport === true,
+        browserDownloadTarget: options?.browserDownloadTarget || null,
+        browserOpenInline: options?.browserOpenInline === true,
+        preferredFileHandle: options?.preferredFileHandle || null
+      });
+    }
   });
 }
 
@@ -23467,7 +24021,7 @@ function queueAudienceColorBatchUpdate(options = {}){
         queuePersistAppState();
       }
     }
-    const linkedSections = ['audience'];
+    const linkedSections = ['audience', 'diligence'];
     if(doDashboard) linkedSections.push('dashboard');
     if(doSuivi) linkedSections.push('suivi');
     queueLinkedSectionRender(linkedSections, {
