@@ -41,7 +41,7 @@ function buildDiligenceCountLabel(totalRows){
 
 function renderDiligenceRowsHtml(rows){
   try{
-    const showPlieColumn = hasDiligenceCasablancaTpiAssRow(diligenceVirtualRows);
+    const showPlieColumn = !!diligenceVirtualShowAssColumns;
     return rows.map(row=>renderDiligenceRowHtml(row, showPlieColumn)).join('');
   }catch(err){
     console.error('Erreur renderDiligenceRowsHtml:', err);
@@ -184,7 +184,7 @@ function buildDiligenceHeadHtml(){
     <th>Référence dossier</th>
     ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
     <th>Ordonnance</th>
-    ${showSharedNotificationColumns ? `<th>Notification N°</th>${hasDiligenceCasablancaTpiAssRow(diligenceVirtualRows) ? '<th>Plie</th>' : ''}<th>Sort notification</th><th>Observation</th>` : ''}
+    ${showSharedNotificationColumns ? `<th>Notification N°</th>${diligenceVirtualShowAssColumns ? '<th>Plie</th>' : ''}<th>Sort notification</th><th>Observation</th>` : ''}
     ${showAssFollowupColumns ? '<th>Lettre Rec</th><th>Curateur N°</th><th>ORD</th><th>Notif curateur</th><th>Sort notif</th><th>Avis curateur</th><th>PV Police</th>' : ''}
     ${showStandardContinuation ? '<th>Certificat non appel</th>' : (showSharedNotificationColumns && !diligenceVirtualShowAssColumns ? '<th>Certificat non appel</th>' : '')}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Execution N°</th>' : '') : '<th>Execution N°</th>'}
@@ -369,7 +369,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const notificationCells = showSharedNotificationColumns
     ? `
       <td>${renderDiligenceEditableCell(row, procEncoded, notificationNoField, notificationNoValue)}</td>
-      ${showPlieColumn ? `<td>${isCasaRow ? renderDiligenceEditableCell(row, procEncoded, 'plie', row.details?.plie || '') : ''}</td>` : ''}
+      ${showPlieColumn ? `<td>${isAssLikeProcedure ? renderDiligenceEditableCell(row, procEncoded, 'plie', row.details?.plie || '') : ''}</td>` : ''}
       <td>${renderDiligenceEditableCell(row, procEncoded, notificationSortField, notificationSortValue)}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
     `
@@ -536,7 +536,7 @@ function renderDiligence(options = {}){
           : (diligenceVirtualShowAssColumns ? getDiligenceAssHeaderMode(pageData.rows) : diligenceVirtualCompactProcedureMode);
         
         const hasNotifier = diligenceVirtualShowAssColumns && pageData.rows.some(row => isDiligenceAssNotifierLayout(row));
-        const hasPlie = diligenceVirtualShowAssColumns && hasDiligenceCasablancaTpiAssRow(pageData.rows);
+        const hasPlie = !!diligenceVirtualShowAssColumns;
         const layoutVersion = `${hasNotifier ? 'notif' : 'std'}-${hasPlie ? 'plie' : 'noplie'}`;
 
         setElementHtmlWithRenderKey(
