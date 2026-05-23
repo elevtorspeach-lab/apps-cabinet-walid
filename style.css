@@ -3324,6 +3324,12 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   border-color:#c4b5fd;
 }
 
+.proc-pill.proc-nantissement-med{
+  background:#dcfce7;
+  color:#166534;
+  border-color:#86efac;
+}
+
 .proc-pill.proc-sfdc{
   background:#ffedd5;
   color:#c2410c;

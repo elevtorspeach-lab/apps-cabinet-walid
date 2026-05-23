@@ -72,7 +72,14 @@ function shouldShowDiligenceSaisieArretColumns(rows){
   return !!list.length && list.every(row=>isDiligenceSaisieArretProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceNantissementMedColumns(rows){
+  if(isDiligenceNantissementMedProcedure(filterDiligenceProcedure)) return true;
+  const list = Array.isArray(rows) ? rows : [];
+  return !!list.length && list.every(row=>isDiligenceNantissementMedProcedure(row?.procedure));
+}
+
 function getDiligenceColCount(){
+  if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 9;
   if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 25;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
@@ -96,7 +103,9 @@ function getDiligenceCompactProcedureMode(rows = []){
   if(explicitFilter === 'SAISIE ARRÊT') return 'saisiearret';
   if(explicitFilter === 'S/bien') return 'sbien';
   if(explicitFilter === 'Injonction') return 'injonction';
+  if(explicitFilter === 'Nantissement MED') return 'nantissementmed';
   const list = Array.isArray(rows) ? rows : [];
+  if(list.length && list.every(row=>isDiligenceNantissementMedProcedure(row?.procedure))) return 'nantissementmed';
   const executionTypes = [...new Set(
     list
       .map(row=>getDiligenceProcedureFilterValue(row?.procedureFilterValue || row?.procedure || ''))
@@ -111,6 +120,19 @@ function getDiligenceCompactProcedureMode(rows = []){
 }
 
 function buildDiligenceHeadHtml(){
+  if(diligenceVirtualCompactProcedureMode === 'nantissementmed'){
+    return `
+      <th>Client</th>
+      <th>R&eacute;f&eacute;rence client</th>
+      <th>Date curateur</th>
+      <th>R&eacute;f&eacute;rence curateur</th>
+      <th>ORD</th>
+      <th>Sort ORD</th>
+      <th>Notif N&deg;</th>
+      <th>Sort notif</th>
+      <th>Tribunal</th>
+    `;
+  }
   if(diligenceVirtualCompactProcedureMode === 'saisiearret'){
     return `
       <th>Client</th>
@@ -198,6 +220,7 @@ function buildDiligenceHeadHtml(){
 }
 
 function renderDiligenceRowHtml(row, showPlieColumn){
+  const rowAttrs = `data-client-id="${row.clientId}" data-dossier-index="${row.dossierIndex}" data-proc-key="${escapeAttr(String(row.procedure || ''))}"`;
   const procEncoded = encodeURIComponent(String(row.procedure || ''));
   const isAssProcedure = isDiligenceAssProcedure(row?.procedure);
   const isAssLikeProcedure = isDiligenceAssLikeProcedure(row?.procedure);
@@ -254,6 +277,30 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const avisHeader = (diligenceVirtualShowAssColumns && !(isAssNbLayoutValue || isAssNotifierLayoutValue)) ? '' : 'Sort exécution';
   const shouldHideTail = isAssLikeProcedure && !(isAssNbLayoutValue || isAssNotifierLayoutValue);
   const hideWrap = (html)=> shouldHideTail ? `<div style="display:none">${html}</div>` : html;
+  if(diligenceVirtualCompactProcedureMode === 'nantissementmed' && isDiligenceNantissementMedProcedure(row?.procedure)){
+    return `
+      <tr ${rowAttrs}>
+        <td>
+          <label class="diligence-client-cell">
+            <input
+              type="checkbox"
+              class="diligence-print-check"
+              ${isChecked ? 'checked' : ''}
+              onchange="toggleDiligencePrintSelectionEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}', this.checked)">
+            <span>${escapeHtml(row.clientName || '-')}</span>
+          </label>
+        </td>
+        <td>${escapeHtml(refClientValue || '-')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'dateCurateur', row.details?.dateCurateur || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceCurateur', row.details?.referenceCurateur || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'ord', row.details?.ord || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'sortOrd', row.details?.sortOrd || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'notifCurateurNo', row.details?.notifCurateurNo || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'curateurSortNotif', row.details?.curateurSortNotif || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+      </tr>
+    `;
+  }
   if(diligenceVirtualCompactProcedureMode === 'saisiearret' && isSaisieArretProcedure){
     const cinRcValue = row.details?.cinRc || row.details?.cin || row.dossier?.cin || row.dossier?.cautionCin || '';
     const debiteurEpValue = row.details?.debiteurEp || row.dossier?.debiteur || '';
@@ -263,7 +310,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     const banqueFrValue = row.details?.banqueFr || row.details?.banque || '';
     const adresseBrancheValue = row.details?.adresseBranche || row.details?.adresseBanque || '';
     return `
-      <tr>
+      <tr ${rowAttrs}>
         <td>
           <label class="diligence-client-cell">
             <input
@@ -276,7 +323,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         </td>
         <td>${escapeHtml(refClientValue || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
-        <td>${escapeHtml(row.dossier?.gestionnaire || '-')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'gestionnaire', row.dossier?.gestionnaire || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurAp', debiteurApValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'cinRc', cinRcValue)}</td>
@@ -332,7 +379,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
       }
     }
     return `
-      <tr>
+      <tr ${rowAttrs}>
         <td>
           <label class="diligence-client-cell">
             <input
@@ -399,7 +446,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
   `;
   return `
-    <tr>
+    <tr ${rowAttrs}>
       <td>
         <label class="diligence-client-cell">
           <input

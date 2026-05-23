@@ -1443,9 +1443,47 @@ function enrichDossierPatchBody(currentState, rawBody) {
   body.previousExternalId = snapshot.previousExternalId;
   body.clientId = snapshot.clientId;
   if (action === 'update') {
-    body.dossier = sanitizePatchObject(body.dossier) || {};
+    const incomingDossier = body.dossier && typeof body.dossier === 'object'
+      ? sanitizePatchObject(body.dossier)
+      : null;
+    body.dossier = incomingDossier
+      || applyDossierFieldPatchValue(deepCloneJson(snapshot.previousDossier || {}), body)
+      || {};
     body.dossier.externalId = String(body.dossier.externalId || snapshot.previousExternalId).trim();
     body.dossier.clientId = snapshot.targetClientId;
+  }
+  return body;
+}
+
+function applyDossierFieldPatchValue(dossier, patch) {
+  if (!dossier || !patch || typeof patch !== 'object') return dossier;
+  if (Array.isArray(patch.history)) {
+    dossier.history = patch.history;
+  }
+  const field = String(patch.field || '').trim();
+  if (!field) return dossier;
+  const value = patch.value;
+  if (field.startsWith('procedureDetails.')) {
+    const leafField = field.split('.').slice(1).join('.');
+    const procedure = String(patch.procedure || patch.procKey || '').trim();
+    if (!leafField || !procedure) return dossier;
+    if (!dossier.procedureDetails || typeof dossier.procedureDetails !== 'object') {
+      dossier.procedureDetails = {};
+    }
+    if (!dossier.procedureDetails[procedure] || typeof dossier.procedureDetails[procedure] !== 'object') {
+      dossier.procedureDetails[procedure] = {};
+    }
+    dossier.procedureDetails[procedure][leafField] = value;
+    return dossier;
+  }
+  dossier[field] = value;
+  return dossier;
+}
+
+function buildPublicDossierPatch(patch) {
+  const body = patch && typeof patch === 'object' ? deepCloneJson(patch) : {};
+  if (String(body.field || '').trim()) {
+    delete body.dossier;
   }
   return body;
 }
@@ -3052,13 +3090,13 @@ app.post('/api/state/dossiers', async (req, res) => {
         body
       }, {
         patchKind: 'dossier',
-        patch: body
+        patch: buildPublicDossierPatch(body)
       });
       broadcastStateUpdated({
         ...saved,
         sourceId,
         patchKind: 'dossier',
-        patch: body
+        patch: buildPublicDossierPatch(body)
       });
       return { saved };
     });
@@ -3076,14 +3114,22 @@ app.post('/api/state/dossiers/batch', async (req, res) => {
       const currentState = await readState();
       const body = rawBody && typeof rawBody === 'object' ? rawBody : {};
       const sourceId = String(body?._sourceId || '').trim();
-      const patches = Array.isArray(body?.patches)
-        ? body.patches
-          .filter((patch) => patch && typeof patch === 'object')
-          .map((patch) => enrichDossierPatchBody(currentState, patch))
+      const rawPatches = Array.isArray(body?.patches)
+        ? body.patches.filter((patch) => patch && typeof patch === 'object')
         : [];
+      let workingState = currentState;
+      const patches = rawPatches.map((patch) => {
+        const enriched = enrichDossierPatchBody(workingState, patch);
+        workingState = {
+          ...workingState,
+          clients: applyDossierPatch(workingState, enriched)
+        };
+        return enriched;
+      });
       if (!patches.length) {
         throw new Error('Missing dossier patches.');
       }
+      const publicPatches = patches.map(buildPublicDossierPatch);
       const saved = await persistJournalMutations(
         patches.map((patch) => ({
           type: 'dossier',
@@ -3091,14 +3137,14 @@ app.post('/api/state/dossiers/batch', async (req, res) => {
         })),
         {
           patchKind: 'dossier',
-          patches
+          patches: publicPatches
         }
       );
       broadcastStateUpdated({
         ...saved,
         sourceId,
         patchKind: 'dossier-batch',
-        patch: { patches }
+        patch: { patches: publicPatches }
       });
       return { saved, count: patches.length };
     });

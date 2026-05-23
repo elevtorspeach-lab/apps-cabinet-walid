@@ -336,7 +336,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
   const jugementAddValue = getAudienceRowJugementAddStatus(row);
   return `
-    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
+    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}" data-client-id="${row.ci}" data-dossier-index="${row.di}" data-proc-key="${escapeAttr(String(procKey || ''))}">
       <td data-label="Sélection">
         <input type="checkbox" class="audience-print-check"
           data-ci="${row.ci}"
@@ -438,7 +438,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const dateDepotInvalid = parseStrictAudienceDateValue(dateDepotValue).invalid;
   const jugementAddValue = getAudienceRowJugementAddStatus(row);
   return `
-    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}">
+    <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}" data-client-id="${row.ci}" data-dossier-index="${row.di}" data-proc-key="${escapeAttr(String(procKey || ''))}">
       <td data-label="SÃ©lection">
         <input type="checkbox" class="audience-print-check"
           data-ci="${row.ci}"
@@ -546,7 +546,7 @@ function renderSuiviRowHtml(row){
   const referenceClient = String(row?.d?.referenceClient || '').trim() || '-';
   const statusSnapshot = getDossierDisplayStatusSnapshot(row.d);
   return `
-    <tr class="${isDuplicate ? 'color-red' : ''}">
+    <tr class="${isDuplicate ? 'color-red' : ''}" data-client-id="${row.c.id}" data-dossier-index="${row.index}">
       <td data-label="Sélection">
         <input
           type="checkbox"

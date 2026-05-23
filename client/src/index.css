@@ -1881,6 +1881,35 @@ tr:hover{background:#f1f5f9}
 .proc-card h4{margin:0;font-size:14px;color:#1e3a8a}
 .proc-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .proc-grid input{padding:8px 10px;border-radius:8px;border:2px solid #e5e7eb;font-size:12px}
+.proc-inline-check{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-height:34px;
+  padding:6px 10px;
+  border:1px solid #bbf7d0;
+  border-radius:8px;
+  background:#f0fdf4;
+  color:#14532d;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+}
+.proc-inline-check input{
+  width:auto;
+  margin:0;
+  accent-color:#16a34a;
+}
+.proc-nant-med-curateur-fields{
+  grid-column:span 4;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+}
+.proc-nantissement-med .proc-grid > select[data-field="notificationSort"]{
+  align-self:start;
+  min-height:34px;
+}
 .proc-grid .proc-fixed-input{
   background:#f8fafc;
   color:#0f172a;
@@ -3733,6 +3762,12 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   background:#ede9fe;
   color:#6d28d9;
   border-color:#c4b5fd;
+}
+
+.proc-pill.proc-nantissement-med{
+  background:#dcfce7;
+  color:#166534;
+  border-color:#86efac;
 }
 
 .proc-pill.proc-sfdc{

@@ -557,6 +557,11 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.notifCurateur': 'Notif curateur',
   'procedureDetails.sortNotif': 'Sort notif',
   'procedureDetails.avisCurateur': 'Avis curateur',
+  'procedureDetails.referenceCurateur': 'Référence curateur',
+  'procedureDetails.dateCurateur': 'Date curateur',
+  'procedureDetails.sortOrd': 'Sort ORD',
+  'procedureDetails.notifCurateurNo': 'Notif N°',
+  'procedureDetails.curateurSortNotif': 'Sort notif',
   'procedureDetails.pvPlice': 'PV Police',
   sanlamNRef: 'N / Réf (Sanlam)',
   sanlamPolice: 'Police n°',
@@ -2039,6 +2044,15 @@ function flushRemoteSyncRenderQueue(){
 
 function queueRemoteSyncRender(sectionKeys = [], options = {}){
   const keys = Array.isArray(sectionKeys) ? sectionKeys : [];
+  if(options.livePatch === true && options.incrementalPatch && typeof renderRemoteDossierPatchGranularly === 'function'){
+    const handled = renderRemoteDossierPatchGranularly(options.incrementalPatch, { sectionKeys: keys });
+    if(handled) return;
+  }
+  if(options.livePatch === true){
+    markDeferredRenderDirty(...keys);
+    markRemoteSyncSectionsRendered(keys);
+    return;
+  }
   keys.forEach((key)=>{
     const safeKey = String(key || '').trim();
     if(safeKey) remoteSyncRenderSections.add(safeKey);
@@ -2054,6 +2068,149 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
   });
   if(remoteSyncRenderTimer) clearTimeout(remoteSyncRenderTimer);
   remoteSyncRenderTimer = setTimeout(flushRemoteSyncRenderQueue, delayMs);
+}
+
+function getActiveElementSafe(){
+  try{
+    return typeof document !== 'undefined' ? document.activeElement : null;
+  }catch(_){
+    return null;
+  }
+}
+
+function isEditableElementActiveWithin(root){
+  const active = getActiveElementSafe();
+  if(!active || !root || !root.contains(active)) return false;
+  const tag = String(active.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || active.isContentEditable === true;
+}
+
+function getRemotePatchRenderedRows(bodyId){
+  const body = $(bodyId);
+  if(!body) return [];
+  return [...body.querySelectorAll('tr[data-client-id][data-dossier-index]')]
+    .filter(row=>!row.classList.contains('virtual-spacer'));
+}
+
+function makeRemotePatchRowKey(clientId, dossierIndex, procKey = ''){
+  return [
+    Number(clientId),
+    Number(dossierIndex),
+    String(procKey || '').trim().toLowerCase()
+  ].join('::');
+}
+
+function replaceOrRemoveRemotePatchRows(bodyId, rowsByKey, renderRow, affectedClientIds = []){
+  const body = $(bodyId);
+  if(!body || isEditableElementActiveWithin(body)) return false;
+  const affected = new Set((Array.isArray(affectedClientIds) ? affectedClientIds : [])
+    .map(value=>Number(value))
+    .filter(value=>Number.isFinite(value)));
+  let changed = false;
+  getRemotePatchRenderedRows(bodyId).forEach((tr)=>{
+    const clientId = Number(tr.dataset.clientId);
+    if(affected.size && !affected.has(clientId)) return;
+    const key = makeRemotePatchRowKey(
+      tr.dataset.clientId,
+      tr.dataset.dossierIndex,
+      tr.dataset.procKey || ''
+    );
+    const nextRow = rowsByKey.get(key);
+    if(!nextRow){
+      tr.remove();
+      changed = true;
+      return;
+    }
+    const nextHtml = renderRow(nextRow);
+    if(!nextHtml || tr.outerHTML === nextHtml) return;
+    tr.outerHTML = nextHtml;
+    changed = true;
+  });
+  return changed;
+}
+
+function buildRemotePatchAffectedClientIds(meta){
+  const out = new Set();
+  [meta?.sourceClientId, meta?.targetClientId].forEach((value)=>{
+    const id = Number(value);
+    if(Number.isFinite(id)) out.add(id);
+  });
+  return [...out];
+}
+
+function renderRemoteAudiencePatchRows(meta){
+  if(!isDeferredRenderSectionVisible('audience')) return false;
+  if(typeof renderAudienceRowHtml !== 'function') return false;
+  const body = $('audienceBody');
+  if(!body || isEditableElementActiveWithin(body)) return false;
+  const affectedClientIds = buildRemotePatchAffectedClientIds(meta);
+  if(!affectedClientIds.length) return false;
+  const closedStatusLookup = getAudienceClosedStatusLookupCached();
+  const duplicateKeySet = getAudienceDuplicateKeySet(getAudienceRowsDedupedCached());
+  const rowsByKey = new Map();
+  affectedClientIds.forEach((clientId)=>{
+    const resolved = getClientByIdWithIndex(clientId);
+    if(!resolved?.client || resolved.index < 0) return;
+    buildAudienceRowsForClient(resolved.client, resolved.index, closedStatusLookup).forEach((row)=>{
+      rowsByKey.set(makeRemotePatchRowKey(row?.ci, row?.di, row?.procKey), row);
+    });
+  });
+  return replaceOrRemoveRemotePatchRows('audienceBody', rowsByKey, row=>renderAudienceRowHtml(row, duplicateKeySet), affectedClientIds);
+}
+
+function renderRemoteSuiviPatchRows(meta){
+  if(!isDeferredRenderSectionVisible('suivi')) return false;
+  if(typeof renderSuiviRowHtml !== 'function') return false;
+  const body = $('suiviBody');
+  if(!body || isEditableElementActiveWithin(body)) return false;
+  const rowsByKey = new Map();
+  buildRemotePatchAffectedClientIds(meta).forEach((clientId)=>{
+    const resolved = getClientByIdWithIndex(clientId);
+    if(!resolved?.client) return;
+    buildSuiviRowsForClient(resolved.client).forEach((row)=>{
+      rowsByKey.set(makeRemotePatchRowKey(row?.c?.id, row?.index), row);
+    });
+  });
+  return replaceOrRemoveRemotePatchRows('suiviBody', rowsByKey, row=>renderSuiviRowHtml(row), buildRemotePatchAffectedClientIds(meta));
+}
+
+function renderRemoteDiligencePatchRows(meta){
+  if(!isDeferredRenderSectionVisible('diligence')) return false;
+  if(typeof renderDiligenceRowHtml !== 'function') return false;
+  const body = $('diligenceBody');
+  if(!body || isEditableElementActiveWithin(body)) return false;
+  const affectedClientIds = new Set(buildRemotePatchAffectedClientIds(meta).map(Number));
+  if(!affectedClientIds.size) return false;
+  const rowsByKey = new Map();
+  getDiligenceRows().forEach((row)=>{
+    if(!affectedClientIds.has(Number(row?.clientId))) return;
+    rowsByKey.set(makeRemotePatchRowKey(row?.clientId, row?.dossierIndex, row?.procedure), row);
+  });
+  return replaceOrRemoveRemotePatchRows('diligenceBody', rowsByKey, row=>renderDiligenceRowHtml(row), [...affectedClientIds]);
+}
+
+function renderRemoteDossierPatchGranularly(meta, options = {}){
+  if(!meta || typeof meta !== 'object') return false;
+  const sections = Array.isArray(options.sectionKeys) ? options.sectionKeys : [];
+  const blocker = getRemoteRefreshBlocker();
+  if(blocker){
+    markDeferredRenderDirty(...sections);
+    return true;
+  }
+  if(Array.isArray(meta.patches)){
+    meta.patches.forEach((patchMeta)=>{
+      renderRemoteDossierPatchGranularly(patchMeta, options);
+    });
+    markDeferredRenderDirty(...sections);
+    markRemoteSyncSectionsRendered(sections);
+    return true;
+  }
+  if(sections.includes('audience')) renderRemoteAudiencePatchRows(meta);
+  if(sections.includes('suivi')) renderRemoteSuiviPatchRows(meta);
+  if(sections.includes('diligence')) renderRemoteDiligencePatchRows(meta);
+  markDeferredRenderDirty(...sections);
+  markRemoteSyncSectionsRendered(sections);
+  return true;
 }
 
 function flushLinkedSectionRenderQueue(){
@@ -2478,6 +2635,7 @@ function buildDiligenceRelevantProcedureDetailsSnapshot(dossier){
       && baseProc !== 'S/bien'
       && baseProc !== 'Injonction'
       && baseProc !== 'Commandement'
+      && baseProc !== 'Nantissement MED'
     ){
       return;
     }
@@ -2551,7 +2709,7 @@ function buildRemoteDossierRefreshOptions(meta){
   return {
     livePatch: true,
     audience: patchMeta.audienceImpact === true,
-    incrementalPatch: patchMeta.patchCount ? null : patchMeta,
+    incrementalPatch: Array.isArray(patchMeta.patches) ? { action: 'batch', patches: patchMeta.patches } : patchMeta,
     preserveDashboardAudienceMetrics: isInPlaceUpdate,
     preserveKnownJudgesCache: isInPlaceUpdate,
     sections: [...sections],
@@ -2603,6 +2761,31 @@ function resolveRemoteDossierPatchReference(patch, dossier){
   return normalizeDossierPatchReference(dossier?.referenceClient);
 }
 
+function applyDossierFieldPatchValue(dossier, patch){
+  if(!dossier || !patch || typeof patch !== 'object') return dossier;
+  if(Array.isArray(patch.history)){
+    dossier.history = patch.history;
+  }
+  const field = String(patch.field || '').trim();
+  if(!field) return dossier;
+  const nextValue = patch.value;
+  if(field.startsWith('procedureDetails.')){
+    const leafField = field.split('.').slice(1).join('.');
+    const procName = String(patch.procedure || patch.procKey || '').trim();
+    if(!leafField || !procName) return dossier;
+    if(!dossier.procedureDetails || typeof dossier.procedureDetails !== 'object'){
+      dossier.procedureDetails = {};
+    }
+    if(!dossier.procedureDetails[procName] || typeof dossier.procedureDetails[procName] !== 'object'){
+      dossier.procedureDetails[procName] = {};
+    }
+    dossier.procedureDetails[procName][leafField] = nextValue;
+    return dossier;
+  }
+  dossier[field] = nextValue;
+  return dossier;
+}
+
 function findLocalDossierIndexForPatch(dossiers, requestedIndex, referenceClient){
   const list = Array.isArray(dossiers) ? dossiers : [];
   const normalizedReference = normalizeDossierPatchReference(referenceClient);
@@ -2638,6 +2821,9 @@ function applyRemoteDossierPatchLocally(patch){
       action,
       sourceClientId: clientId,
       targetClientId: clientId,
+      sourceDossierIndex: null,
+      targetDossierIndex: 0,
+      dossierIndex: 0,
       previousDossier: null,
       nextDossier: dossier,
       sourceVisible: canViewClient(targetClient),
@@ -2663,6 +2849,9 @@ function applyRemoteDossierPatchLocally(patch){
       action,
       sourceClientId: clientId,
       targetClientId: clientId,
+      sourceDossierIndex: resolvedIndex,
+      targetDossierIndex: null,
+      dossierIndex: resolvedIndex,
       previousDossier,
       nextDossier: null,
       sourceVisible: canViewClient(sourceClient),
@@ -2673,7 +2862,7 @@ function applyRemoteDossierPatchLocally(patch){
 
   if(action === 'update'){
     const sourceClientIdx = findClientIndex(clientId);
-    if(sourceClientIdx === -1 || !Number.isFinite(dossierIndex) || !dossier) return false;
+    if(sourceClientIdx === -1 || !Number.isFinite(dossierIndex)) return false;
     if(!Array.isArray(AppState.clients[sourceClientIdx].dossiers)) AppState.clients[sourceClientIdx].dossiers = [];
     const resolvedIndex = findLocalDossierIndexForPatch(
       AppState.clients[sourceClientIdx].dossiers,
@@ -2682,6 +2871,7 @@ function applyRemoteDossierPatchLocally(patch){
     );
     if(resolvedIndex < 0 || resolvedIndex >= AppState.clients[sourceClientIdx].dossiers.length) return false;
     const previousDossier = AppState.clients[sourceClientIdx].dossiers[resolvedIndex];
+    const nextDossier = dossier || applyDossierFieldPatchValue(JSON.parse(JSON.stringify(previousDossier || {})), patch);
     const nextTargetClientId = Number.isFinite(targetClientId) ? targetClientId : clientId;
     const targetClientIdx = findClientIndex(nextTargetClientId);
     if(targetClientIdx === -1) return false;
@@ -2689,29 +2879,36 @@ function applyRemoteDossierPatchLocally(patch){
     const sourceClient = AppState.clients[sourceClientIdx];
     const targetClient = AppState.clients[targetClientIdx];
     if(targetClientIdx === sourceClientIdx){
-      AppState.clients[sourceClientIdx].dossiers[resolvedIndex] = dossier;
+      AppState.clients[sourceClientIdx].dossiers[resolvedIndex] = nextDossier;
       return {
         action,
         sourceClientId: clientId,
         targetClientId: nextTargetClientId,
+        sourceDossierIndex: resolvedIndex,
+        targetDossierIndex: resolvedIndex,
+        dossierIndex: resolvedIndex,
         previousDossier,
-        nextDossier: dossier,
+        nextDossier,
         sourceVisible: canViewClient(sourceClient),
         targetVisible: canViewClient(targetClient),
-        audienceImpact: dossierHasAudienceImpact(previousDossier) || dossierHasAudienceImpact(dossier)
+        audienceImpact: dossierHasAudienceImpact(previousDossier) || dossierHasAudienceImpact(nextDossier)
       };
     }
     AppState.clients[sourceClientIdx].dossiers.splice(resolvedIndex, 1);
-    AppState.clients[targetClientIdx].dossiers.push(dossier);
+    AppState.clients[targetClientIdx].dossiers.push(nextDossier);
+    const targetDossierIndex = AppState.clients[targetClientIdx].dossiers.length - 1;
     return {
       action,
       sourceClientId: clientId,
       targetClientId: nextTargetClientId,
+      sourceDossierIndex: resolvedIndex,
+      targetDossierIndex,
+      dossierIndex: targetDossierIndex,
       previousDossier,
-      nextDossier: dossier,
+      nextDossier,
       sourceVisible: canViewClient(sourceClient),
       targetVisible: canViewClient(targetClient),
-      audienceImpact: dossierHasAudienceImpact(previousDossier) || dossierHasAudienceImpact(dossier)
+      audienceImpact: dossierHasAudienceImpact(previousDossier) || dossierHasAudienceImpact(nextDossier)
     };
   }
 
@@ -2722,14 +2919,17 @@ function applyRemoteDossierPatchBatchLocally(patches){
   const list = Array.isArray(patches) ? patches : [];
   if(!list.length) return false;
   let audienceImpact = false;
+  const appliedPatches = [];
   for(const patch of list){
     const applied = applyRemoteDossierPatchLocally(patch);
     if(!applied) return false;
     if(applied.audienceImpact === true) audienceImpact = true;
+    appliedPatches.push(applied);
   }
   return {
     action: 'batch',
     patchCount: list.length,
+    patches: appliedPatches,
     audienceImpact
   };
 }
@@ -2861,10 +3061,14 @@ function finalizeRemoteStateUpdateLocally(options = {}){
   }else{
     markDeferredRenderDirty(...refreshSections, ...secondaryRefreshSections);
   }
-  queueRemoteSyncRender(refreshSections, { livePatch: options.livePatch === true });
+  queueRemoteSyncRender(refreshSections, {
+    livePatch: options.livePatch === true,
+    incrementalPatch
+  });
   if(secondaryRefreshSections.length){
     queueRemoteSyncRender(secondaryRefreshSections, {
       livePatch: options.livePatch === true,
+      incrementalPatch,
       delayMs: getAdaptiveUiBatchDelay(250, {
         largeDatasetExtraMs: 450,
         busyExtraMs: 650,
@@ -4090,6 +4294,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
     { header: 'ref client', width: 30 },
     { header: 'Procédure', width: 22 },
     { header: 'debiteur ', width: 34 },
+    { header: 'CIN', width: 18 },
     { header: 'Statut dossier', width: 20 },
     { header: 'Adresse', width: 42 },
     { header: 'Ville', width: 22 },
@@ -4119,6 +4324,7 @@ function buildSuiviSelectedExportDatasetBase(rowsOverride = null){
       || normalizedHeader === 'procédure'
       || normalizedHeader === 'debiteur'
       || normalizedHeader === 'debiteur '
+      || normalizedHeader === 'cin'
       || normalizedHeader === 'statut dossier'
       || normalizedHeader === 'adresse'
       || normalizedHeader === 'caution'
@@ -4267,6 +4473,7 @@ function buildSuiviExportTableRows(rows, options = {}){
         row.d?.referenceClient || '',
         procedureName || '',
         row.d?.debiteur || '',
+        row.d?.cin || '',
         getSuiviExportStatusValue(row.d),
         row.d?.adresse || '',
         row.d?.ville || ''
@@ -7725,6 +7932,7 @@ function parseProcedureToken(token){
   if(compact === 'ass') return 'ASS';
   if(compact === 'rest' || compact === 'restitution' || compact === 'restit' || compact === 'rv' || compact === 'res') return 'Restitution';
   if(compact === 'commandement' || compact === 'cmd' || compact === 'com') return 'Commandement';
+  if(compact === 'nantissementmed' || compact === 'nantmed' || compact === 'nantimed') return 'Nantissement MED';
   if(compact === 'nant' || compact === 'nantissement' || compact === 'nanti') return 'Nantissement';
   if(compact === 'redressement' || compact === 'redress' || compact === 'redr') return 'Redressement';
   if(compact === 'verificationdecreance' || compact === 'verificationcreance' || compact === 'verifcreance' || compact === 'verifdecreance' || compact === 'verif' || compact === 'creance') return 'Vérification de créance';
@@ -12798,6 +13006,7 @@ function resetPendingRemoteLiveUpdateOptions(){
     audience: false,
     sections: new Set(),
     secondarySections: new Set(),
+    incrementalPatches: [],
     refreshClientDropdown: false
   };
 }
@@ -12805,8 +13014,20 @@ function resetPendingRemoteLiveUpdateOptions(){
 function queueRemoteLivePatchFinalize(options = {}){
   const incomingSections = Array.isArray(options.sections) ? options.sections : [];
   const incomingSecondarySections = Array.isArray(options.secondarySections) ? options.secondarySections : [];
+  const incomingIncrementalPatch = options.incrementalPatch && typeof options.incrementalPatch === 'object'
+    ? options.incrementalPatch
+    : null;
   if(options.audience === true) pendingRemoteLiveUpdateOptions.audience = true;
   if(options.refreshClientDropdown === true) pendingRemoteLiveUpdateOptions.refreshClientDropdown = true;
+  if(incomingIncrementalPatch){
+    if(Array.isArray(incomingIncrementalPatch.patches)){
+      incomingIncrementalPatch.patches.forEach((patch)=>{
+        if(patch && typeof patch === 'object') pendingRemoteLiveUpdateOptions.incrementalPatches.push(patch);
+      });
+    }else{
+      pendingRemoteLiveUpdateOptions.incrementalPatches.push(incomingIncrementalPatch);
+    }
+  }
   incomingSections.forEach((section)=>{
     const safeSection = String(section || '').trim();
     if(safeSection) pendingRemoteLiveUpdateOptions.sections.add(safeSection);
@@ -12830,6 +13051,13 @@ function queueRemoteLivePatchFinalize(options = {}){
       audience: pendingRemoteLiveUpdateOptions.audience === true,
       sections: [...pendingRemoteLiveUpdateOptions.sections],
       secondarySections: [...pendingRemoteLiveUpdateOptions.secondarySections],
+      incrementalPatch: pendingRemoteLiveUpdateOptions.incrementalPatches.length === 1
+        ? pendingRemoteLiveUpdateOptions.incrementalPatches[0]
+        : (
+            pendingRemoteLiveUpdateOptions.incrementalPatches.length > 1
+              ? { action: 'batch', patches: pendingRemoteLiveUpdateOptions.incrementalPatches.slice() }
+              : null
+          ),
       refreshClientDropdown: pendingRemoteLiveUpdateOptions.refreshClientDropdown === true
     };
     resetPendingRemoteLiveUpdateOptions();
@@ -13155,7 +13383,7 @@ function startRemoteSyncStream(){
             : null;
         if(appliedDossierPatch){
           const livePatchOptions = buildRemoteDossierRefreshOptions(appliedDossierPatch);
-          if(isVeryLargeLiveSyncMode()){
+          if(isVeryLargeLiveSyncMode() && !livePatchOptions.incrementalPatch){
             queueRemoteLivePatchFinalize(livePatchOptions);
           }else{
             finalizeRemoteStateUpdateLocally(livePatchOptions);
@@ -17574,7 +17802,7 @@ async function applyExcelImport(payload, options = {}){
   const importWarningRows = [];
   const importInfoRows = [];
   const importIssueEntries = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Sanlam']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Nantissement MED', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Sanlam']);
   const defaultDossierProceduresWhenMissing = diligenceMode
     ? ['Injonction']
     : ['ASS', 'Restitution', 'SFDC'];
@@ -19531,6 +19759,7 @@ function setupEvents(){
   }
 
   ensureProcedureVisualStyles();
+  ensureStandardProcedureCheckbox('Nantissement MED', 'Nantissement MED', 'Nantissement');
   ensureStandardProcedureCheckbox('SAISIE ARRÊT', 'SAISIE ARRÊT', 'SFDC');
   document.querySelectorAll('.proc-check').forEach(cb=>{
     cb.addEventListener('change', e=>{
@@ -21229,6 +21458,7 @@ function renderProcedureBadges(procedureText){
     if(name === 'Restitution') cls = 'proc-restitution';
     if(name === 'Commandement') cls = 'proc-commandement';
     if(name === 'Nantissement') cls = 'proc-nantissement';
+    if(name === 'Nantissement MED') cls = 'proc-nantissement-med';
     if(name === 'Redressement') cls = 'proc-redressement';
     if(name === 'Vérification de créance') cls = 'proc-verification-creance';
     if(name === 'Liquidation judiciaire') cls = 'proc-declaration-creance';
@@ -21248,7 +21478,7 @@ function ensureStandardProcedureCheckbox(value, labelText, afterValue = ''){
   const normalizedTarget = String(value || '').trim().toLowerCase();
   const existingLabel = [...checkboxGroup.querySelectorAll('label')].find(node=>{
     const raw = String(node.dataset.proc || node.textContent || '').trim().toLowerCase();
-    return raw === normalizedTarget || raw.includes('saisie arr');
+    return raw === normalizedTarget || (normalizedTarget.includes('saisie arr') && raw.includes('saisie arr'));
   });
   if(existingLabel){
     const isChecked = !!existingLabel.querySelector('.proc-check:checked');
@@ -21327,6 +21557,63 @@ function ensureProcedureVisualStyles(){
       color:inherit !important;
       font-size:12px !important;
       line-height:1.2 !important;
+    }
+    #creationSection .checkbox-group label[data-proc="Nantissement MED"]{
+      background:#ecfdf5 !important;
+      border:1px solid #86efac !important;
+      color:#14532d !important;
+      font-weight:800 !important;
+    }
+    #creationSection .checkbox-group label[data-proc="Nantissement MED"].active{
+      background:#16a34a !important;
+      border-color:#16a34a !important;
+      color:#ffffff !important;
+      box-shadow:0 10px 22px rgba(22,163,74,.22) !important;
+    }
+    #creationSection .checkbox-group label[data-proc="Nantissement MED"] .proc-check-label-text{
+      display:inline-block !important;
+      white-space:nowrap !important;
+      margin-left:6px !important;
+      visibility:visible !important;
+      opacity:1 !important;
+      color:inherit !important;
+      font-size:12px !important;
+      line-height:1.2 !important;
+    }
+    #creationSection .proc-nantissement-med{
+      border-left:4px solid #16a34a !important;
+    }
+    #creationSection .proc-nantissement-med::after{
+      background:#16a34a !important;
+    }
+    #creationSection .proc-inline-check{
+      display:flex !important;
+      align-items:center !important;
+      gap:6px !important;
+      min-height:34px !important;
+      padding:6px 10px !important;
+      border:1px solid #bbf7d0 !important;
+      border-radius:8px !important;
+      background:#f0fdf4 !important;
+      color:#14532d !important;
+      font-size:12px !important;
+      font-weight:700 !important;
+      cursor:pointer !important;
+    }
+    #creationSection .proc-inline-check input{
+      width:auto !important;
+      margin:0 !important;
+      accent-color:#16a34a !important;
+    }
+    #creationSection .proc-nant-med-curateur-fields{
+      grid-column:span 4 !important;
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+      gap:8px !important;
+    }
+    #creationSection .proc-nantissement-med .proc-grid > select[data-field="notificationSort"]{
+      align-self:start !important;
+      min-height:34px !important;
     }
     #creationSection .proc-saisie-arret{
       border-left:4px solid #e11d48 !important;
@@ -21453,6 +21740,11 @@ function getDiligenceSearchValues(row){
     details.notifCurateur,
     details.sortNotif,
     details.avisCurateur,
+    details.dateCurateur,
+    details.referenceCurateur,
+    details.sortOrd,
+    details.notifCurateurNo,
+    details.curateurSortNotif,
     details.pvPlice,
     details.dateNotification,
     details.certificatNonAppelStatus,
@@ -21873,7 +22165,7 @@ function editDossier(clientId, index){
   document.querySelectorAll('.proc-check').forEach(cb=>cb.checked=false);
   document.querySelectorAll('.checkbox-group label').forEach(l=>l.classList.remove('active'));
 
-  const standard = new Set(['ASS','Restitution','Commandement','Nantissement','Redressement','Vérification de créance','Liquidation judiciaire','SFDC','SAISIE ARR\u00caT','S/bien','Injonction']);
+  const standard = new Set(['ASS','Restitution','Commandement','Nantissement','Nantissement MED','Redressement','Vérification de créance','Liquidation judiciaire','SFDC','SAISIE ARR\u00caT','S/bien','Injonction']);
   const procs = normalizeProcedures(d);
   procedureMontantGroups = normalizeProcedureMontantGroups(d.montantByProcedure, procs, d.montant || '');
   if(procedureMontantGroups.length <= 1 && !hasMultipleAffectationDatesForSelection(procs)){
@@ -21893,7 +22185,7 @@ function editDossier(clientId, index){
   d.procedureList = procs.slice();
   d.procedure = procs.join(', ');
   const standardLower = new Set(['ass','restitution','commandement','nantissement','redressement','vérification de créance','liquidation judiciaire','sfdc','saisie arrêt','saisie arret','s/bien','injonction','sanlam']);
-  customProcedures = procs.filter(p=>!standardLower.has(String(p).trim().toLowerCase()));
+  customProcedures = procs.filter(p=>!isStandardProcedureName(p));
   $('procedureCustom').value = '';
   renderCustomProcedures();
 
@@ -22275,7 +22567,11 @@ function persistDossierReferenceNow(clientId, dossierRef, options = {}){
     targetClientId: Number(clientId),
     previousReferenceClient: String(options.previousReferenceClient || '').trim(),
     referenceClient: String(dossierRef?.referenceClient || '').trim(),
-    dossier: dossierRef
+    dossier: dossierRef,
+    field: String(options.field || '').trim(),
+    procedure: String(options.procedure || '').trim(),
+    value: options.value,
+    ...(Array.isArray(options.history) ? { history: options.history } : {})
   }, options);
 }
 
@@ -22339,6 +22635,7 @@ function getDossierProcedureExcelAccentColor(procedureName){
   if(procClass === 'proc-ass') return 'FF1A4590';
   if(procClass === 'proc-restitution') return 'FFD97706';
   if(procClass === 'proc-nantissement') return 'FF6D28D9';
+  if(procClass === 'proc-nantissement-med') return 'FF16A34A';
   if(procClass === 'proc-redressement') return 'FF0F9D58';
   if(procClass === 'proc-verification-creance') return 'FF0F766E';
   if(procClass === 'proc-declaration-creance') return 'FFDB2777';
@@ -22856,6 +23153,10 @@ function isDiligenceAssLikeProcedure(procedure){
   return proc === 'ASS' || proc === 'Nantissement';
 }
 
+function isDiligenceNantissementMedProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'Nantissement MED';
+}
+
 function isCasablancaTpiTribunal(tribunal){
   const raw = String(tribunal || '').trim().toLowerCase();
   if(!raw) return false;
@@ -22878,6 +23179,11 @@ function isDiligenceCommandementProcedure(procedure){
 
 function isDiligenceSaisieArretProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'SAISIE ARRÊT';
+}
+
+function isDiligenceNantissementMedNbLayout(row){
+  if(!isDiligenceNantissementMedProcedure(row?.procedure)) return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'NB';
 }
 
 function getDiligenceCommandementHeaderMode(rows){
@@ -22988,9 +23294,13 @@ function getDiligenceRows(){
           && baseProc !== 'S/bien'
           && baseProc !== 'Injonction'
           && baseProc !== 'Commandement'
+          && baseProc !== 'Nantissement MED'
           && baseProc !== 'Nantissement'
         ) return;
         const details = d?.procedureDetails?.[proc] || {};
+        if(baseProc === 'Nantissement MED' && !isDiligenceNantissementMedNbLayout({ procedure: proc, details })){
+          return;
+        }
         const isCommandement = baseProc === 'Commandement';
         const tribunal = isCommandement ? '' : String(details.tribunal || '').trim();
         const rawSort = String(details.sort || '').trim();
@@ -23679,7 +23989,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       </select>
     `;
   }
-  if(field === 'ord'){
+  if(field === 'ord' && !isDiligenceNantissementMedProcedure(row?.procedure)){
     if(!row?.canEdit){
       return escapeHtml(normalized || '-');
     }
@@ -24217,6 +24527,12 @@ function shouldShowDiligenceSaisieArretColumnsForRows(rows){
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceSaisieArretProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceNantissementMedColumnsForRows(rows){
+  if(isDiligenceNantissementMedProcedure(filterDiligenceProcedure)) return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceNantissementMedProcedure(row?.procedure));
+}
+
 function buildDiligenceExportRowCells(row, columns){
   return columns.map((column)=>{
     const value = typeof column.getValue === 'function' ? column.getValue(row) : '';
@@ -24254,6 +24570,27 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
       { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+    ];
+    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    return {
+      rows: sourceRows,
+      headers: columns.map((column)=>column.header),
+      tableRows,
+      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+    };
+  }
+  const showNantissementMedColumns = shouldShowDiligenceNantissementMedColumnsForRows(sourceRows);
+  if(showNantissementMedColumns){
+    const columns = [
+      { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
+      { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
+      { header: 'Date curateur', width: 18, getValue: (row)=>row?.details?.dateCurateur || '' },
+      { header: 'Reference curateur', width: 28, getValue: (row)=>row?.details?.referenceCurateur || '' },
+      { header: 'ORD', width: 18, getValue: (row)=>row?.details?.ord || '' },
+      { header: 'Sort ORD', width: 18, getValue: (row)=>row?.details?.sortOrd || '' },
+      { header: 'Notif N', width: 18, getValue: (row)=>row?.details?.notifCurateurNo || '' },
+      { header: 'Sort notif', width: 22, getValue: (row)=>row?.details?.curateurSortNotif || '' },
+      { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
     return {
@@ -25295,8 +25632,23 @@ function collectDossierModificationHistoryEntries(){
     (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach((dossier, dossierIndex)=>{
       normalizeDossierHistoryEntries(dossier?.history).forEach((historyEntry, historyIndex)=>{
         const fieldLabel = getHistoryFieldLabel(historyEntry.field);
+        const procedureName = String(historyEntry.procedure || '').trim();
+        const procedureDetails = procedureName
+          && dossier?.procedureDetails
+          && typeof dossier.procedureDetails === 'object'
+          && dossier.procedureDetails[procedureName]
+          && typeof dossier.procedureDetails[procedureName] === 'object'
+            ? dossier.procedureDetails[procedureName]
+            : {};
+        const referenceDossier = String(
+          procedureDetails.referenceClient
+          || dossier?.referenceClient
+          || dossier?.nRef
+          || ''
+        ).trim();
         const details = [];
-        if(String(historyEntry.procedure || '').trim()) details.push(`Procedure: ${historyEntry.procedure}`);
+        if(procedureName) details.push(`Procedure: ${procedureName}`);
+        if(referenceDossier) details.push(`Reference dossier: ${referenceDossier}`);
         details.push(`Avant: ${formatHistoryDisplayValue(historyEntry.before)}`);
         details.push(`Apres: ${formatHistoryDisplayValue(historyEntry.after)}`);
         entries.push({
@@ -25733,6 +26085,18 @@ function getSuiviRequiredProcedureFields(procName, details){
       'attDelegationOuDelegat',
       'huissier',
       'sort',
+      'tribunal'
+    ];
+  }
+  if(baseProc === 'Nantissement MED'){
+    return [
+      'notificationSort',
+      'dateCurateur',
+      'referenceCurateur',
+      'ord',
+      'sortOrd',
+      'notifCurateurNo',
+      'curateurSortNotif',
       'tribunal'
     ];
   }
@@ -29371,7 +29735,9 @@ function collectProcedureDraftFromCards({ root = document, trimValues = false } 
     draft[name] = {};
     card.querySelectorAll('input, select').forEach(fieldEl=>{
       const fieldName = fieldEl.dataset.field;
-      let fieldValue = trimValues ? fieldEl.value.trim() : fieldEl.value;
+      let fieldValue = fieldEl.type === 'checkbox'
+        ? (fieldEl.checked ? '1' : '')
+        : (trimValues ? fieldEl.value.trim() : fieldEl.value);
       if(
         trimValues
         && !editingDossier
@@ -29407,7 +29773,12 @@ function applyProcedureFieldValues(container, values){
   if(!container || !values || typeof values !== 'object') return;
   container.querySelectorAll('input, select').forEach(fieldEl=>{
     const key = fieldEl.dataset.field;
-    if(key && values[key] !== undefined) fieldEl.value = values[key];
+    if(!key || values[key] === undefined) return;
+    if(fieldEl.type === 'checkbox'){
+      fieldEl.checked = ['1', 'true', 'yes', 'oui', 'on'].includes(String(values[key] || '').trim().toLowerCase());
+      return;
+    }
+    fieldEl.value = values[key];
   });
 }
 
@@ -29423,6 +29794,9 @@ function applyProcedureDraftToCards(details, root = document){
     if(!name) return;
     const fields = source[name] || normalizedMap[name.toLowerCase()] || {};
     applyProcedureFieldValues(card, fields);
+    if(getProcedureBaseName(name) === 'Nantissement MED'){
+      updateNantissementMedCurateurVisibility(card);
+    }
   });
 }
 
@@ -29620,6 +29994,30 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       ${tribunalFieldHtml}
     `;
   }
+  if(baseProc === 'Nantissement MED'){
+    return `
+      <select data-field="notificationSort">
+        <option value="">Sort notif</option>
+        <option value="att">att</option>
+        <option value="notifier">notifier</option>
+        <option value="NB">NB</option>
+      </select>
+      <div class="proc-nant-med-curateur-fields" data-nant-med-curateur-fields>
+        <input type="text" data-field="dateCurateur" placeholder="Date curateur">
+        <input type="text" data-field="referenceCurateur" placeholder="Reference curateur">
+        <input type="text" data-field="ord" placeholder="ORD">
+        <select data-field="sortOrd">
+          <option value="">Sort ORD</option>
+          <option value="att">att</option>
+          <option value="ATT ORD">ATT ORD</option>
+          <option value="ORD OK">ORD OK</option>
+        </select>
+        <input type="text" data-field="notifCurateurNo" placeholder="Notif NÂ°">
+        <input type="text" data-field="curateurSortNotif" placeholder="Sort notif">
+        <input type="text" data-field="tribunal" list="${PROCEDURE_TRIBUNAL_DATALIST_ID}" placeholder="Tribunal" autocomplete="off">
+      </div>
+    `;
+  }
   if(baseProc === 'Injonction'){
     return `
       <input type="text" data-field="dateDepot" placeholder="Date d’affectation">
@@ -29732,6 +30130,7 @@ function getProcedureColorClass(procName){
   if(b === 'restitution') return 'proc-restitution';
   if(b === 'commandement') return 'proc-commandement';
   if(b === 'nantissement') return 'proc-nantissement';
+  if(b === 'nantissement med') return 'proc-nantissement-med';
   if(b === 'redressement') return 'proc-redressement';
   if(b === 'vérification de créance') return 'proc-verification-creance';
   if(b === 'liquidation judiciaire') return 'proc-declaration-creance';
@@ -29781,8 +30180,13 @@ function isProcedureCardFieldEmpty(fieldEl){
   if(!fieldEl) return true;
   if(fieldEl.disabled || fieldEl.type === 'hidden') return true;
   if(fieldEl.readOnly || fieldEl.classList.contains('proc-fixed-input')) return true;
+  if(fieldEl.type === 'checkbox') return !fieldEl.checked;
   const hiddenParent = fieldEl.closest('.notif-date-wrap');
   if(hiddenParent && hiddenParent.style.display === 'none'){
+    return true;
+  }
+  const hiddenCurateurParent = fieldEl.closest('[data-nant-med-curateur-fields]');
+  if(hiddenCurateurParent && hiddenCurateurParent.style.display === 'none'){
     return true;
   }
   return !String(fieldEl.value || '').trim();
@@ -29841,6 +30245,16 @@ function updateInjonctionNotificationDateVisibility(card){
   const value = String(notifSelect.value || '').trim().toLowerCase();
   const show = value === 'notifier' || value === 'nb';
   dateWrap.style.display = show ? '' : 'none';
+}
+
+function updateNantissementMedCurateurVisibility(card){
+  if(!card) return;
+  const notifSelect = card.querySelector('select[data-field="notificationSort"]');
+  const fieldsWrap = card.querySelector('[data-nant-med-curateur-fields]');
+  if(!fieldsWrap) return;
+  const sortValue = String(notifSelect?.value || '').trim().toLowerCase();
+  const show = sortValue === 'nb';
+  fieldsWrap.style.display = show ? 'grid' : 'none';
 }
 
 function collectKnownProcedureFieldLabels(field, draft = null){
@@ -29952,6 +30366,7 @@ function renderProcedureDetails(forceList, forceDraft){
     'restitution': 'Restitution',
     'commandement': 'Commandement',
     'nantissement': 'Nantissement',
+    'nantissement med': 'Nantissement MED',
     'redressement': 'Redressement',
     'vérification de créance': 'Vérification de créance',
     'liquidation judiciaire': 'Liquidation judiciaire',
@@ -30053,6 +30468,14 @@ function renderProcedureDetails(forceList, forceDraft){
       }
       updateInjonctionNotificationDateVisibility(div);
     }
+    if(baseProc === 'Nantissement MED'){
+      const notifSelect = div.querySelector('select[data-field="notificationSort"]');
+      if(notifSelect){
+        notifSelect.addEventListener('change', ()=>updateNantissementMedCurateurVisibility(div));
+        notifSelect.addEventListener('input', ()=>updateNantissementMedCurateurVisibility(div));
+      }
+      updateNantissementMedCurateurVisibility(div);
+    }
     if(baseProc === 'Commandement'){
       const notifSelect = div.querySelector('select[data-field="notifDebiteur"]');
       if(notifSelect){
@@ -30116,12 +30539,32 @@ function removeCustomProcedure(value){
   renderProcedureDetails();
 }
 
+function isStandardProcedureName(value){
+  const normalized = normalizeProcedureName(getProcedureBaseName(String(value || '').trim()));
+  if(!normalized) return false;
+  return new Set([
+    'ass',
+    'restitution',
+    'commandement',
+    'nantissement',
+    'nantissement med',
+    'redressement',
+    'verification de creance',
+    'liquidation judiciaire',
+    'sfdc',
+    'saisie arret',
+    's/bien',
+    'injonction',
+    'sanlam'
+  ]).has(normalized);
+}
+
 function renderCustomProcedures(){
   const container = $('customProcedures');
   if(!container) return;
   container.innerHTML = '';
   customProcedures
-    .filter(v=>String(v || '').trim().toLowerCase() !== 'sanlam')
+    .filter(v=>!isStandardProcedureName(v))
     .forEach(v=>{
     const chip = document.createElement('span');
     chip.className = 'custom-proc custom-red';

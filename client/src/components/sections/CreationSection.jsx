@@ -204,6 +204,7 @@ function CreationSection() {
               <label data-proc="ASS"><input type="checkbox" defaultValue="ASS" className="proc-check" /> ASS</label>
               <label data-proc="Restitution"><input type="checkbox" defaultValue="Restitution" className="proc-check" /> Restitution</label>
               <label data-proc="Nantissement"><input type="checkbox" defaultValue="Nantissement" className="proc-check" /> Nantissement</label>
+              <label data-proc="Nantissement MED"><input type="checkbox" defaultValue="Nantissement MED" className="proc-check" /> Nantissement MED</label>
               <label data-proc="SFDC"><input type="checkbox" defaultValue="SFDC" className="proc-check" /> SFDC</label>
               <label data-proc="SAISIE ARRÊT"><input type="checkbox" defaultValue="SAISIE ARRÊT" className="proc-check" /> SAISIE ARRÊT</label>
               <label data-proc="Injonction"><input type="checkbox" defaultValue="Injonction" className="proc-check" /> Injonction</label>
