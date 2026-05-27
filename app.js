@@ -492,6 +492,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.dateDepot': 'Date dépôt',
   'procedureDetails.depotLe': 'Date dépôt',
   'procedureDetails.executionNo': 'N° exécution',
+  'procedureDetails.dateExecution': 'Date execution',
   'procedureDetails.attOrdOrOrdOk': 'Ordonnance',
   'procedureDetails.attDelegationOuDelegat': 'Délégation',
   'procedureDetails.nomHuissier': 'Nom huissier',
@@ -8576,16 +8577,25 @@ function normalizeRecycleArchiveEntries(rawEntries){
 }
 
 function getImportHistoryEntriesByType(type){
-  const targetType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const targetType = requestedType === 'audience' ? 'audience' : 'global';
+  const targetCategory = requestedType === 'diligence'
+    ? 'diligence'
+    : (targetType === 'audience' ? 'audience' : 'global');
   return normalizeImportHistoryEntries(AppState.importHistory)
-    .filter(entry=>entry.type === targetType)
+    .filter(entry=>entry.type === targetType && (String(entry.category || entry.type || '').trim() || targetType) === targetCategory)
     .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
-function createImportHistoryEntry(type, fileName){
+function createImportHistoryEntry(type, fileName, options = {}){
+  const normalizedType = type === 'audience' ? 'audience' : 'global';
+  const category = normalizedType === 'audience'
+    ? 'audience'
+    : (String(options?.category || '').trim() === 'diligence' ? 'diligence' : 'global');
   return {
-    id: createImportTrackingId(type === 'audience' ? 'aud' : 'glob'),
-    type: type === 'audience' ? 'audience' : 'global',
+    id: createImportTrackingId(normalizedType === 'audience' ? 'aud' : (category === 'diligence' ? 'dil' : 'glob')),
+    type: normalizedType,
+    category,
     fileName: String(fileName || '').trim() || 'Import Excel',
     fileDataUrl: '',
     createdAt: new Date().toISOString(),
@@ -8775,8 +8785,11 @@ function syncUsersWithVisibleClients(){
 
 function deleteGlobalImportBatch(batchId){
   if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import global');
-  const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
-  if(!batch) return alert('Import global introuvable.');
+  const targetBatchId = String(batchId || '').trim();
+  const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === targetBatchId)
+    || getImportHistoryEntriesByType('diligence').find(entry=>String(entry?.id || '').trim() === targetBatchId);
+  if(!batch) return alert('Import introuvable.');
+  const importLabel = batch.category === 'diligence' ? 'diligence' : 'global';
   if(!window.confirm(`Supprimer l'import global "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
   forceDeletionSafetyBackup('delete-global-import');
 
@@ -8944,7 +8957,7 @@ function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
     : 'deleteGlobalImportBatch';
   const compactDeleteLabel = normalizedType === 'audience'
     ? 'Supprimer'
-    : 'Supprimer dossier global';
+    : (normalizedType === 'diligence' ? 'Supprimer' : 'Supprimer dossier global');
   const markup = `
     <div class="import-history-list">
       ${entries.map(entry=>`
@@ -8998,7 +9011,8 @@ function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
 function ensureImportHistoryHoverMenu(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const entries = getImportHistoryEntriesByType(normalizedType);
   if(!entries.length) return;
   const canDelete = canDeleteData();
@@ -9031,7 +9045,8 @@ function ensureImportHistoryOutsideClickHandler(){
 function toggleImportHistoryMenu(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const hoverBox = container.querySelector('.import-history-hoverbox');
   if(!hoverBox) return;
   const shouldOpen = !hoverBox.classList.contains('is-open');
@@ -9058,7 +9073,8 @@ function handleImportHistoryToggleKey(event, containerId, type){
 function renderImportHistoryPanel(containerId, type){
   const container = $(containerId);
   if(!container) return;
-  const normalizedType = String(type || '').trim() === 'audience' ? 'audience' : 'global';
+  const requestedType = String(type || '').trim();
+  const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const entries = getImportHistoryEntriesByType(normalizedType);
   if(!entries.length){
     container.innerHTML = '';
@@ -9071,14 +9087,14 @@ function renderImportHistoryPanel(containerId, type){
   const canDelete = canDeleteData();
   const title = normalizedType === 'audience'
     ? 'Fichiers Audience importes'
-    : 'Fichiers dossier global importes';
+    : (normalizedType === 'diligence' ? 'Fichiers Diligence importes' : 'Fichiers dossier global importes');
   const subtitle = normalizedType === 'audience'
     ? 'Les imports ci-dessous peuvent etre supprimes individuellement.'
-    : 'Chaque fichier importe peut etre retire separement.';
+    : (normalizedType === 'diligence' ? 'Chaque fichier diligence importe peut etre retire separement.' : 'Chaque fichier importe peut etre retire separement.');
   const deleteFn = normalizedType === 'audience'
     ? 'deleteAudienceImportBatch'
     : 'deleteGlobalImportBatch';
-  const compactMode = true;
+  const compactMode = normalizedType !== 'diligence';
   const compactSummaryLabel = normalizedType === 'audience'
     ? 'Cliquez pour voir la liste complete'
     : 'Cliquez pour voir tous les fichiers importes';
@@ -9139,7 +9155,7 @@ function renderImportHistoryPanel(containerId, type){
               <div class="import-history-hover-menu"></div>
             </div>
           `
-          : ''
+          : buildImportHistoryMenuMarkup(entries, normalizedType, canDelete)
       }
     </div>
   `;
@@ -14277,11 +14293,12 @@ function showExcelImportResult(summary, issuesText, options = {}){
 function syncAudienceColorFilterSelectAppearance(){
   const select = $('filterAudienceColor');
   if(!select) return;
-  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed'];
+  const allowed = ['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'jugement-ok', 'jugement-att', 'purple-dark', 'purple-light', 'closed'];
   allowed.forEach(value=>select.classList.remove(`audience-color-select-${value}`));
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
   select.value = normalizedValue;
+  select.classList.add(`audience-color-select-${normalizedValue}`);
 }
 
 function normalizeAudienceFilterColorValue(value){
@@ -14289,7 +14306,7 @@ function normalizeAudienceFilterColorValue(value){
   if(normalized === 'purple-dark' || normalized === 'purple-light'){
     return 'closed';
   }
-  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'closed']);
+  const allowed = new Set(['all', 'blue', 'green', 'yellow', 'document-ok', 'pink', 'jugement-ok', 'jugement-att', 'closed']);
   return allowed.has(normalized) ? normalized : 'all';
 }
 
@@ -14580,7 +14597,9 @@ async function applyExcelImport(payload, options = {}){
   const allowedDossierProcedureSet = opts.allowedDossierProcedureSet instanceof Set
     ? opts.allowedDossierProcedureSet
     : null;
-  const globalImportEntry = importDossiers ? createImportHistoryEntry('global', importFileName) : null;
+  const globalImportEntry = importDossiers ? createImportHistoryEntry('global', importFileName, {
+    category: diligenceMode ? 'diligence' : 'global'
+  }) : null;
   const audienceImportEntry = importAudiences ? createImportHistoryEntry('audience', importFileName) : null;
   if(globalImportEntry) globalImportEntry.fileDataUrl = importFileDataUrl;
   if(audienceImportEntry) audienceImportEntry.fileDataUrl = importFileDataUrl;
@@ -18217,6 +18236,7 @@ function getDiligenceSearchValues(row){
     details.dateNotification,
     details.certificatNonAppelStatus,
     details.executionNo,
+    details.dateExecution,
     details.huissier,
     details.ord,
     details.notifConservateur,
@@ -20028,10 +20048,11 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   const onSizeChange = isAutoSize ? 'autoSizeDiligenceControl(this);' : '';
   const isOrdonnanceField = field === 'attOrdOrOrdOk';
   const isDelegationField = field === 'attDelegationOuDelegat';
+  const isSbienOrdonnanceField = isOrdonnanceField && getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien';
   if(isOrdonnanceField || isDelegationField){
     const status = isOrdonnanceField
       ? (
-        shouldShowBlankDiligenceOrdonnance(row)
+        !isSbienOrdonnanceField && shouldShowBlankDiligenceOrdonnance(row)
           ? ''
           : (getDiligenceOrdonnanceStatus(normalized, row?.details?.notificationNo || '') || 'att')
       )
@@ -20047,7 +20068,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="" ${status === '' ? 'selected' : ''}>-</option>
+        ${isSbienOrdonnanceField ? '' : `<option value="" ${status === '' ? 'selected' : ''}>-</option>`}
         <option value="att" ${status === 'att' ? 'selected' : ''}>ATT ORD</option>
         <option value="ok" ${status === 'ok' ? 'selected' : ''}>ORD OK</option>
       </select>
@@ -20200,6 +20221,20 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         <option value="" ${val === '' ? 'selected' : ''}>-</option>
         <option value="${isPub ? 'att pub' : 'att plie'}" ${val === (isPub ? 'att pub' : 'att plie') ? 'selected' : ''}>${isPub ? 'att pub' : 'att plie'}</option>
         <option value="${isPub ? 'pub ok' : 'plie ok'}" ${val === (isPub ? 'pub ok' : 'plie ok') ? 'selected' : ''}>${isPub ? 'pub ok' : 'plie ok'}</option>
+      </select>
+    `;
+  }
+  if(field === 'sortOrd'){
+    const status = normalizeDiligenceOrdonnance(normalized) === 'ok' ? 'ord ok' : 'att ord';
+    if(!row?.canEdit){
+      return escapeHtml(status || '-');
+    }
+    return `
+      <select
+        class="diligence-inline-select"
+        onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="att ord" ${status === 'att ord' ? 'selected' : ''}>att ord</option>
+        <option value="ord ok" ${status === 'ord ok' ? 'selected' : ''}>ord ok</option>
       </select>
     `;
   }
@@ -20675,6 +20710,12 @@ function getDiligenceExportColumnDefinitions(){
       getValue: (row)=>getDiligenceExecutionSortCellValue(row)
     },
     {
+      key: 'dateExecution',
+      header: 'Date execution',
+      width: 20,
+      getValue: (row)=>row?.details?.dateExecution || ''
+    },
+    {
       key: 'pvPlice',
       header: 'PV Police',
       width: 14,
@@ -20708,6 +20749,12 @@ function shouldShowDiligenceSaisieArretColumnsForRows(rows){
   if(isDiligenceSaisieArretProcedure(filterDiligenceProcedure)) return true;
   const sourceRows = Array.isArray(rows) ? rows : [];
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceSaisieArretProcedure(row?.procedure));
+}
+
+function shouldShowDiligenceSbienExportColumnsForRows(rows){
+  if(getDiligenceProcedureFilterValue(filterDiligenceProcedure) === 'S/bien') return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien');
 }
 
 function buildDiligenceExportRowCells(row, columns){
@@ -20783,7 +20830,18 @@ function finalizeDiligenceExportDataset(rows){
   }
   const showAssColumns = shouldShowDiligenceAssColumnsForRows(sourceRows);
   const assHeaderMode = showAssColumns ? getDiligenceAssHeaderMode(sourceRows) : 'default';
-  const columns = getDiligenceExportColumnDefinitions().filter((column)=>!column.assOnly || showAssColumns);
+  const showSbienColumns = shouldShowDiligenceSbienExportColumnsForRows(sourceRows);
+  const columns = getDiligenceExportColumnDefinitions()
+    .filter((column)=>(!column.assOnly || showAssColumns) && !(showSbienColumns && column.key === 'juge'))
+    .map((column)=>{
+      if(showSbienColumns && column.key === 'sortExecution'){
+        return { ...column, header: 'Sort execution', keepEmpty: true };
+      }
+      if(showSbienColumns && column.key === 'dateExecution'){
+        return { ...column, keepEmpty: true };
+      }
+      return column;
+    });
   const activeColumnIndexes = new Set();
   const rowCells = sourceRows.map((row)=>{
     const cells = buildDiligenceExportRowCells(row, columns);
@@ -24713,7 +24771,17 @@ function applyProcedureFieldValues(container, values){
   if(!container || !values || typeof values !== 'object') return;
   container.querySelectorAll('input, select').forEach(fieldEl=>{
     const key = fieldEl.dataset.field;
-    if(key && values[key] !== undefined) fieldEl.value = values[key];
+    if(key && values[key] !== undefined){
+      if(fieldEl.tagName === 'SELECT' && (key === 'sortOrd' || key === 'attOrdOrOrdOk')){
+        fieldEl.value = normalizeDiligenceOrdonnance(values[key]) === 'ok' ? 'ord ok' : 'att ord';
+        return;
+      }
+      if(fieldEl.tagName === 'SELECT' && key === 'attDelegationOuDelegat'){
+        fieldEl.value = normalizeDiligenceAttOk(values[key]) === 'ok' ? 'ok' : 'att';
+        return;
+      }
+      fieldEl.value = values[key];
+    }
   });
 }
 
@@ -24902,12 +24970,22 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   }
   if(b === 'sfdc' || b === 's/bien'){
     return `
-      <input type="text" data-field="dateDepot" placeholder="Date dépôt">
+      <input type="text" data-field="dateDepot" placeholder="Date affectation">
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
       <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
-      <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
+      ${b === 's/bien'
+        ? `<select data-field="attOrdOrOrdOk">
+            <option value="att ord" selected>att ord</option>
+            <option value="ord ok">ord ok</option>
+          </select>`
+        : `<input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">`}
       <input type="text" data-field="executionNo" placeholder="Execution N°">
-      <input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">
+      ${b === 's/bien'
+        ? `<select data-field="attDelegationOuDelegat">
+            <option value="att" selected>att</option>
+            <option value="ok">ok</option>
+          </select>`
+        : `<input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">`}
       <input type="text" data-field="huissier" placeholder="Huissier">
       <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
       ${tribunalFieldHtml}

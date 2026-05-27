@@ -77,6 +77,22 @@ function getAudienceRowOrdonnanceColor(row){
   return '';
 }
 
+function getAudienceRowDelegationStatus(row){
+  const delegationValue = String(row?.p?.attDelegationOuDelegat ?? row?.p?.delegation ?? '').trim();
+  if(typeof normalizeDiligenceAttOk === 'function'){
+    return normalizeDiligenceAttOk(delegationValue);
+  }
+  const raw = delegationValue.toLowerCase();
+  if(!raw) return '';
+  if(raw.includes('ok')) return 'ok';
+  if(raw.includes('att')) return 'att';
+  return '';
+}
+
+function getAudienceRowDelegationColor(row){
+  return getAudienceRowDelegationStatus(row) === 'att' ? 'pink' : '';
+}
+
 function getAudienceRowJugementAddStatus(row){
   const explicitValue = String(row?.draft?.jugementAdd || row?.p?.jugementAdd || '').trim().toLowerCase();
   if(explicitValue === 'ok' || explicitValue === 'att') return explicitValue;
@@ -112,11 +128,13 @@ function getAudienceRowRefClientMismatchFallbackColor(row, options = {}){
 function getAudienceRowEffectiveColor(row){
   const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
   const ordonnanceColor = getAudienceRowOrdonnanceColor(row);
+  const delegationColor = getAudienceRowDelegationColor(row);
   const explicitColor = String(row?.p?.color || '').trim();
   const ordonnanceColorSuppressed = isAudienceRowOrdonnanceColorSuppressed(row);
   if(!ordonnanceColorSuppressed && ordonnanceColor) return ordonnanceColor;
   if(statusDerivedColor) return statusDerivedColor;
   if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
+  if(delegationColor) return delegationColor;
   return getAudienceRowRefClientMismatchFallbackColor(row, {
     includeOrdonnanceColor: !ordonnanceColorSuppressed
   });
@@ -141,6 +159,10 @@ function audienceRowMatchesColorFilter(row, color){
   if(targetColor === 'purple-dark' || targetColor === 'purple-light'){
     const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
     return statusDerivedColor === targetColor;
+  }
+  if(targetColor === 'pink'){
+    return getAudienceRowDelegationColor(row) === 'pink'
+      || getAudienceRowEffectiveColor(row) === targetColor;
   }
   return getAudienceRowEffectiveColor(row) === targetColor;
 }

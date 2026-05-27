@@ -530,7 +530,9 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.dateDepot': 'Date dépôt',
   'procedureDetails.depotLe': 'Date dépôt',
   'procedureDetails.executionNo': 'N° exécution',
+  'procedureDetails.dateExecution': 'Date execution',
   'procedureDetails.attOrdOrOrdOk': 'Ordonnance',
+  'procedureDetails.color': 'Couleur audience',
   'procedureDetails.jugementAdd': 'Jugement ADD',
   'procedureDetails.attDelegationOuDelegat': 'Délégation',
   'procedureDetails.nomHuissier': 'Nom huissier',
@@ -558,7 +560,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.sortNotif': 'Sort notif',
   'procedureDetails.avisCurateur': 'Avis curateur',
   'procedureDetails.referenceCurateur': 'Référence curateur',
-  'procedureDetails.dateCurateur': 'Date curateur',
+  'procedureDetails.dateCurateur': 'Date dépôt',
   'procedureDetails.sortOrd': 'Sort ORD',
   'procedureDetails.notifCurateurNo': 'Notif N°',
   'procedureDetails.curateurSortNotif': 'Sort notif',
@@ -1261,6 +1263,36 @@ function queueDossierHistoryEntry(dossier, entry, options = {}){
   dossierHistoryPendingTimers.set(key, setTimeout(()=>{
     flushDossierHistoryPendingEntryByKey(key, { persist: true });
   }, DOSSIER_HISTORY_DEBOUNCE_MS));
+}
+
+function getAudienceColorHistoryLabel(color){
+  const value = String(color || '').trim();
+  const labels = {
+    blue: 'Att sort',
+    green: 'ATT ORD',
+    yellow: 'ORD OK',
+    'document-ok': 'Document OK',
+    pink: 'ATT DELEGATION',
+    'purple-dark': 'Soldé / Arrêt définitif',
+    'purple-light': 'Arrêt définitif',
+    closed: 'Soldé / Arrêt définitif',
+    red: 'Erreurs',
+    white: 'Blanc'
+  };
+  return labels[value] || value || 'Blanc';
+}
+
+function queueAudienceColorHistoryEntry(dossier, procKey, beforeColor, afterColor){
+  const before = getAudienceColorHistoryLabel(beforeColor);
+  const after = getAudienceColorHistoryLabel(afterColor);
+  if(before === after) return;
+  queueDossierHistoryEntry(dossier, {
+    source: 'audience-color',
+    field: 'procedureDetails.color',
+    procedure: procKey,
+    before,
+    after
+  }, { immediate: true });
 }
 
 function flushAllDossierHistoryPendingEntries(){
@@ -9543,6 +9575,25 @@ function normalizeRecycleArchiveEntries(rawEntries){
     .slice(-RECYCLE_ARCHIVE_MAX_ENTRIES);
 }
 
+function importHistoryEntryLooksLikeDiligence(entry){
+  if(String(entry?.category || '').trim() === 'diligence') return true;
+  if(String(entry?.type || '').trim() !== 'global') return false;
+  const batchId = String(entry?.id || '').trim();
+  if(!batchId) return false;
+  const dossierUids = new Set((Array.isArray(entry?.createdDossierUids) ? entry.createdDossierUids : [])
+    .map(value=>String(value || '').trim())
+    .filter(Boolean));
+  const diligenceProcedures = new Set(['SFDC', 'SAISIE ARRÊT', 'S/bien', 'Injonction', 'Nantissement MED']);
+  return (Array.isArray(AppState.clients) ? AppState.clients : []).some(client=>
+    (Array.isArray(client?.dossiers) ? client.dossiers : []).some(dossier=>{
+      const matchesBatch = String(dossier?.importGlobalBatchId || '').trim() === batchId
+        || (dossierUids.size > 0 && dossierUids.has(String(dossier?.importUid || '').trim()));
+      if(!matchesBatch) return false;
+      return normalizeProcedures(dossier).some(proc=>diligenceProcedures.has(getDiligenceProcedureFilterValue(proc)));
+    })
+  );
+}
+
 function getImportHistoryEntriesByType(type){
   const requestedType = String(type || '').trim();
   const targetType = requestedType === 'audience' ? 'audience' : 'global';
@@ -9774,7 +9825,7 @@ async function deleteGlobalImportBatch(batchId){
     || getImportHistoryEntriesByType('diligence').find(entry=>String(entry?.id || '').trim() === targetBatchId);
   if(!batch) return alert('Import introuvable.');
   const importLabel = batch.category === 'diligence' ? 'diligence' : 'global';
-  if(!window.confirm(`Supprimer l'import global "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
+  if(!window.confirm(`Supprimer l'import ${importLabel} "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
 
   const createdClientIds = new Set((batch.createdClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
   let removedDossiers = 0;
@@ -9802,7 +9853,7 @@ async function deleteGlobalImportBatch(batchId){
     alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
   });
   refreshPrimaryViews({ includeSalle: true });
-  alert(`Import global supprimé.\nDossiers retirés: ${removedDossiers}`);
+  alert(`Import ${importLabel} supprimé.\nDossiers retirés: ${removedDossiers}`);
 }
 
 async function deleteAudienceImportBatch(batchId){
@@ -9946,7 +9997,7 @@ function buildImportHistoryMenuMarkup(entries, normalizedType, canDelete){
     : 'deleteGlobalImportBatch';
   const compactDeleteLabel = normalizedType === 'audience'
     ? 'Supprimer'
-    : (normalizedType === 'diligence' ? 'Supprimer diligence' : 'Supprimer dossier global');
+    : (normalizedType === 'diligence' ? 'Supprimer' : 'Supprimer dossier global');
   const markup = `
     <div class="import-history-list">
       ${entries.map(entry=>`
@@ -10080,7 +10131,7 @@ function renderImportHistoryPanel(containerId, type){
   const subtitle = normalizedType === 'audience'
     ? 'Les imports ci-dessous peuvent etre supprimes individuellement.'
     : (normalizedType === 'diligence' ? 'Chaque fichier diligence importe peut etre retire separement.' : 'Chaque fichier importe peut etre retire separement.');
-  const compactMode = true;
+  const compactMode = normalizedType !== 'diligence';
   const compactSummaryLabel = normalizedType === 'audience'
     ? 'Cliquez pour voir la liste complete'
     : 'Cliquez pour voir tous les fichiers importes';
@@ -10141,7 +10192,7 @@ function renderImportHistoryPanel(containerId, type){
               <div class="import-history-hover-menu"></div>
             </div>
           `
-          : ''
+          : buildImportHistoryMenuMarkup(entries, normalizedType, canDelete)
       }
     </div>
   `;
@@ -13460,8 +13511,8 @@ function parseExcelData(rows, sheet = null){
     debiteurAp: ['debiteur ar', 'dÃ©biteur ar', 'debiteur ap', 'dÃ©biteur ap'],
     cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc dÃ©biteur'],
     rib: ['rib'],
-    banqueFr: ['banque fr', 'banque'],
-    banqueAr: ['banque ar'],
+    banqueFr: ['banque fr', 'banque/ste fr', 'banque ste fr', 'banque / ste fr', 'banque'],
+    banqueAr: ['banque ar', 'banque/ste ar', 'banque ste ar', 'banque / ste ar'],
     adresseBranche: ['adresse banque', 'adresse branche', 'adresse bancaire'],
     avocat: ['avocat'],
     sortPle: ['sort plie', 'sort pliÃ©', 'sort pli', 'plie', 'pliÃ©'],
@@ -13836,6 +13887,7 @@ function parseExcelData(rows, sheet = null){
       const nRef = idx.nRef !== -1 ? String(row[idx.nRef] || '').trim() : '';
       const sanlamNRef = idx.sanlamNRef !== -1 ? String(row[idx.sanlamNRef] || '').trim() : '';
       const procedureText = idx.procedure !== -1 ? String(row[idx.procedure] || '').trim() : '';
+      const observation = idx.observation !== -1 ? String(row[idx.observation] || '').trim() : '';
       const gestionnaire = idx.gestionnaire !== -1 ? String(row[idx.gestionnaire] || '').trim() : '';
       const type = idx.type !== -1 ? String(row[idx.type] || '').trim() : '';
       const refAssignation = idx.refAssignation !== -1 ? String(row[idx.refAssignation] || '').trim() : '';
@@ -13919,6 +13971,7 @@ function parseExcelData(rows, sheet = null){
         || efNumber
         || conservation
         || metrage
+        || observation
         || sanlamPolice
         || sanlamSinistre
         || sanlamDateAccident
@@ -13932,6 +13985,7 @@ function parseExcelData(rows, sheet = null){
         || banqueAr
         || adresseBranche
         || avocat
+        || observation
         || sortPle
         || notifBanque
         || notifDebiteur
@@ -13989,6 +14043,7 @@ function parseExcelData(rows, sheet = null){
         marque,
         adresse,
         ville,
+        observation,
         cautionAdresse,
         cautionVille,
         cautionCin,
@@ -17442,6 +17497,7 @@ function syncAudienceColorFilterSelectAppearance(){
   const normalizedValue = normalizeAudienceFilterColorValue(filterAudienceColor);
   if(filterAudienceColor !== normalizedValue) filterAudienceColor = normalizedValue;
   select.value = normalizedValue;
+  select.classList.add(`audience-color-select-${normalizedValue}`);
 }
 
 function normalizeAudienceFilterColorValue(value){
@@ -17545,6 +17601,7 @@ function buildAudienceColorUndoEntry(ci, di, procKey){
     fields: {
       color: captureAudienceColorFieldSnapshot(p, 'color'),
       attOrdOrOrdOk: captureAudienceColorFieldSnapshot(p, 'attOrdOrOrdOk'),
+      attDelegationOuDelegat: captureAudienceColorFieldSnapshot(p, 'attDelegationOuDelegat'),
       _audienceSortOrd: captureAudienceColorFieldSnapshot(p, '_audienceSortOrd'),
       _disableAudienceRowColor: captureAudienceColorFieldSnapshot(p, '_disableAudienceRowColor'),
       _suppressAudienceOrdonnanceColor: captureAudienceColorFieldSnapshot(p, '_suppressAudienceOrdonnanceColor'),
@@ -17590,6 +17647,7 @@ function undoLastAudienceColorChange(){
     detachAudienceImportBatchOwnership(p);
     restoreAudienceColorFieldSnapshot(p, 'color', entry.fields?.color);
     restoreAudienceColorFieldSnapshot(p, 'attOrdOrOrdOk', entry.fields?.attOrdOrOrdOk);
+    restoreAudienceColorFieldSnapshot(p, 'attDelegationOuDelegat', entry.fields?.attDelegationOuDelegat);
     restoreAudienceColorFieldSnapshot(p, '_audienceSortOrd', entry.fields?._audienceSortOrd);
     restoreAudienceColorFieldSnapshot(p, '_disableAudienceRowColor', entry.fields?._disableAudienceRowColor);
     restoreAudienceColorFieldSnapshot(p, '_suppressAudienceOrdonnanceColor', entry.fields?._suppressAudienceOrdonnanceColor);
@@ -20654,6 +20712,18 @@ async function addClient(name){
   }
   const newClient = { id: Date.now(), name, createdAt: new Date().toISOString(), dossiers: [] };
   AppState.clients.unshift(newClient);
+  appendTeamHistoryEntry({
+    id: `client_${newClient.id}_${Date.now()}`,
+    at: new Date().toISOString(),
+    action: 'client-create',
+    target: newClient.name,
+    actor: String(currentUser?.username || '-'),
+    actorRole: String(currentUser?.role || ''),
+    summary: `Client ajoute: ${newClient.name}`,
+    details: [
+      `Client: ${newClient.name}`
+    ]
+  });
   paginationState.clients = 1;
   handleDossierDataChange({ audience: false });
   persistClientPatchNow({
@@ -20661,6 +20731,9 @@ async function addClient(name){
     client: newClient
   }, { source: 'clients' }).catch((err)=>{
     console.warn('Impossible de sauvegarder le client', err);
+  });
+  persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' }).catch((err)=>{
+    console.warn('Impossible de sauvegarder historique client', err);
   });
   $('clientName').value='';
   refreshPrimaryViews({ force: true, refreshClientDropdown: true });
@@ -21118,6 +21191,12 @@ async function addDossier(){
       };
     }else{
       dossier.history = [];
+      queueDossierHistoryEntry(dossier, {
+        source: 'creation',
+        field: 'dossier',
+        before: '',
+        after: 'Dossier cree'
+      }, { immediate: true });
       client.dossiers.unshift(dossier);
       dossierPatch = {
         action: 'create',
@@ -21724,12 +21803,34 @@ function getDiligenceSearchValues(row){
     row.dossier?.debiteur,
     row.dossier?.boiteNo,
     row.dossier?.referenceClient,
+    row.dossier?.gestionnaire,
+    row.dossier?.adresse,
+    row.dossier?.montant,
+    row.dossier?.cin,
+    row.dossier?.cautionCin,
     row.dossier?.ville,
     details.referenceClient,
     details.dateDepot,
     details.depotLe,
+    details.lotDu,
+    details.gestionnaire,
+    details.debiteurEp,
+    details.debiteurAp,
+    details.cinRc,
+    details.cin,
+    details.adresse,
+    details.ville,
+    details.montant,
+    details.rib,
+    details.banque,
+    details.banqueFr,
+    details.banqueAr,
+    details.adresseBranche,
+    details.adresseBanque,
+    details.avocat,
     details.juge,
     details.sort,
+    details.sortPle,
     details.notificationNo,
     details.notificationStatus,
     details.notificationSort,
@@ -21749,10 +21850,13 @@ function getDiligenceSearchValues(row){
     details.dateNotification,
     details.certificatNonAppelStatus,
     details.executionNo,
+    details.dateExecution,
     details.huissier,
     details.ord,
     details.notifConservateur,
+    details.notifBanque,
     details.notifDebiteur,
+    details.boiteNo,
     details.refExpertise,
     details.expert,
     details.dateVente
@@ -23135,6 +23239,7 @@ function getDiligenceProcedureVariantValue(procedure){
   const parsed = parseProcedureToken(raw) || raw;
   const base = getDiligenceProcedureFilterValue(parsed);
   if(base === 'ASS') return base;
+  if(base === 'S/bien') return base;
   if(base === 'SAISIE ARRÊT') return base;
   return parsed;
 }
@@ -23184,6 +23289,26 @@ function isDiligenceSaisieArretProcedure(procedure){
 function isDiligenceNantissementMedNbLayout(row){
   if(!isDiligenceNantissementMedProcedure(row?.procedure)) return false;
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'NB';
+}
+
+function getDiligenceRowDelegationFilterValue(procedure, details){
+  if(isDiligenceNantissementMedProcedure(procedure)){
+    return normalizeDiligenceAttOk(details?.curateurSortNotif || '') || 'att';
+  }
+  return normalizeDiligenceAttOk(details?.attDelegationOuDelegat || '') || 'att';
+}
+
+function getDiligenceRowOrdonnanceFilterValue(procedure, details){
+  if(isDiligenceNantissementMedProcedure(procedure)){
+    return normalizeDiligenceOrdonnance(details?.sortOrd || '') || 'att';
+  }
+  if(shouldShowBlankDiligenceOrdonnance({ procedure, details })){
+    return '';
+  }
+  return getDiligenceOrdonnanceStatus(
+    details?.attOrdOrOrdOk || details?._audienceSortOrd || '',
+    details?.notificationNo || ''
+  ) || 'att';
 }
 
 function getDiligenceCommandementHeaderMode(rows){
@@ -23303,24 +23428,16 @@ function getDiligenceRows(){
         }
         const isCommandement = baseProc === 'Commandement';
         const tribunal = isCommandement ? '' : String(details.tribunal || '').trim();
-        const rawSort = String(details.sort || '').trim();
+        const rawSort = isDiligenceNantissementMedProcedure(baseProc)
+          ? (normalizeDiligenceOrdonnance(details.sortOrd || '') === 'ok' ? 'ORD OK' : 'ATT ORD')
+          : String(details.sort || '').trim();
         const sort = isDiligenceExecutionProcedure(baseProc) && !isDiligenceFreeTextExecutionSortProcedure(baseProc)
           ? normalizeDiligenceSort(rawSort)
           : rawSort;
-        const delegation = isCommandement
-          ? ''
-          : (normalizeDiligenceAttOk(details.attDelegationOuDelegat || '') || 'att');
+        const delegation = isCommandement ? '' : getDiligenceRowDelegationFilterValue(proc, details);
         const ordonnance = isCommandement
           ? String(details.ord || '').trim()
-          : (shouldShowBlankDiligenceOrdonnance({
-            procedure: proc,
-            details
-          })
-            ? ''
-            : (getDiligenceOrdonnanceStatus(
-              details.attOrdOrOrdOk || details._audienceSortOrd || '',
-              details.notificationNo || ''
-            ) || 'att'));
+          : getDiligenceRowOrdonnanceFilterValue(proc, details);
         rows.push({
           clientId: c.id,
           dossierIndex: di,
@@ -23693,8 +23810,28 @@ function getDiligenceAvisCurateurValue(value){
   return normalized || 'Avis en TR';
 }
 
+function getDiligenceNantissementMedAvisCurateurValue(value){
+  const raw = String(value ?? '').trim();
+  const lower = raw.toLowerCase();
+  if(!raw) return 'CURATEUR NOTIFIER';
+  if(lower === 'nb') return 'NB';
+  if(lower.includes('nb')) return 'NB';
+  if(lower.includes('curateur') || lower.includes('notifier')) return 'CURATEUR NOTIFIER';
+  return raw;
+}
+
 function getDiligencePvPliceValue(value){
   return normalizeDiligenceAttOk(value) || 'att';
+}
+
+function getDiligenceNantissementMedPvPoliceValue(value){
+  const raw = String(value ?? '').trim();
+  const lower = raw.toLowerCase();
+  if(!raw) return 'ATT PV';
+  if(lower.includes('ok')) return 'PV OK';
+  if(lower.includes('pv')) return lower.includes('att') ? 'ATT PV' : raw;
+  if(lower.includes('att')) return 'ATT PV';
+  return raw;
 }
 
 function normalizeDiligenceSearchQuery(value){
@@ -23799,10 +23936,11 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   const onSizeChange = isAutoSize ? 'autoSizeDiligenceControl(this);' : '';
   const isOrdonnanceField = field === 'attOrdOrOrdOk';
   const isDelegationField = field === 'attDelegationOuDelegat';
+  const isSbienOrdonnanceField = isOrdonnanceField && getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien';
   if(isOrdonnanceField || isDelegationField){
     const status = isOrdonnanceField
       ? (
-        shouldShowBlankDiligenceOrdonnance(row)
+        !isSbienOrdonnanceField && shouldShowBlankDiligenceOrdonnance(row)
           ? ''
           : (getDiligenceOrdonnanceStatus(normalized, row?.details?.notificationNo || '') || 'att')
       )
@@ -23818,7 +23956,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="" ${status === '' ? 'selected' : ''}>-</option>
+        ${isSbienOrdonnanceField ? '' : `<option value="" ${status === '' ? 'selected' : ''}>-</option>`}
         <option value="att" ${status === 'att' ? 'selected' : ''}>ATT ORD</option>
         <option value="ok" ${status === 'ok' ? 'selected' : ''}>ORD OK</option>
       </select>
@@ -23921,9 +24059,22 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     `;
   }
   if(field === 'avisCurateur'){
-    const status = getDiligenceAvisCurateurValue(normalized);
+    const isNantissementMed = isDiligenceNantissementMedProcedure(row?.procedure);
+    const status = isNantissementMed
+      ? getDiligenceNantissementMedAvisCurateurValue(normalized)
+      : getDiligenceAvisCurateurValue(normalized);
     if(!row?.canEdit){
       return escapeHtml(status || '-');
+    }
+    if(isNantissementMed){
+      return `
+      <select
+        class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="CURATEUR NOTIFIER" ${status === 'CURATEUR NOTIFIER' ? 'selected' : ''}>CURATEUR NOTIFIER</option>
+        <option value="NB" ${status === 'NB' ? 'selected' : ''}>NB</option>
+      </select>
+    `;
     }
     return `
       <select
@@ -23936,9 +24087,22 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     `;
   }
   if(field === 'pvPlice'){
-    const status = getDiligencePvPliceValue(normalized);
+    const isNantissementMed = isDiligenceNantissementMedProcedure(row?.procedure);
+    const status = isNantissementMed
+      ? getDiligenceNantissementMedPvPoliceValue(normalized)
+      : getDiligencePvPliceValue(normalized);
     if(!row?.canEdit){
       return escapeHtml(status || '-');
+    }
+    if(isNantissementMed){
+      return `
+      <select
+        class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="ATT PV" ${status === 'ATT PV' ? 'selected' : ''}>ATT PV</option>
+        <option value="PV OK" ${status === 'PV OK' ? 'selected' : ''}>PV OK</option>
+      </select>
+    `;
     }
     return `
       <select
@@ -23986,6 +24150,20 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         <option value="" ${val === '' ? 'selected' : ''}>-</option>
         <option value="${isPub ? 'att pub' : 'att plie'}" ${val === (isPub ? 'att pub' : 'att plie') ? 'selected' : ''}>${isPub ? 'att pub' : 'att plie'}</option>
         <option value="${isPub ? 'pub ok' : 'plie ok'}" ${val === (isPub ? 'pub ok' : 'plie ok') ? 'selected' : ''}>${isPub ? 'pub ok' : 'plie ok'}</option>
+      </select>
+    `;
+  }
+  if(field === 'sortOrd'){
+    const status = normalizeDiligenceOrdonnance(normalized) === 'ok' ? 'ord ok' : 'att ord';
+    if(!row?.canEdit){
+      return escapeHtml(status || '-');
+    }
+    return `
+      <select
+        class="diligence-inline-select"
+        onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="att ord" ${status === 'att ord' ? 'selected' : ''}>att ord</option>
+        <option value="ord ok" ${status === 'ord ok' ? 'selected' : ''}>ord ok</option>
       </select>
     `;
   }
@@ -24069,7 +24247,8 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   if(!dossier.procedureDetails) dossier.procedureDetails = {};
   if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
   const details = dossier.procedureDetails[proc];
-  const previousValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
+  const isDossierField = field === 'ville' || field === 'boiteNo' || field === 'gestionnaire';
+  const previousValue = isDossierField ? dossier[field] : details[field];
   const previousOrdonnanceValue = details.attOrdOrOrdOk;
   let nextValue = value;
   if(field === 'attOrdOrOrdOk' || field === 'attDelegationOuDelegat'){
@@ -24087,7 +24266,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   }else if(field === 'pvPlice'){
     nextValue = getDiligencePvPliceValue(value);
   }
-  if(field === 'ville' || field === 'boiteNo'){
+  if(isDossierField){
     dossier[field] = nextValue;
   }else{
     details[field] = nextValue;
@@ -24102,11 +24281,11 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   ){
     details.attOrdOrOrdOk = 'ok';
   }
-  const finalValue = (field === 'ville' || field === 'boiteNo') ? dossier[field] : details[field];
+  const finalValue = isDossierField ? dossier[field] : details[field];
   queueDossierHistoryEntry(dossier, {
     source: 'diligence',
-    field: (field === 'ville' || field === 'boiteNo') ? field : `procedureDetails.${field}`,
-    procedure: (field === 'ville' || field === 'boiteNo') ? '' : proc,
+    field: isDossierField ? field : `procedureDetails.${field}`,
+    procedure: isDossierField ? '' : proc,
     before: previousValue,
     after: finalValue
   });
@@ -24492,6 +24671,12 @@ function getDiligenceExportColumnDefinitions(){
       getValue: (row)=>getDiligenceExecutionSortCellValue(row)
     },
     {
+      key: 'dateExecution',
+      header: 'Date execution',
+      width: 20,
+      getValue: (row)=>row?.details?.dateExecution || ''
+    },
+    {
       key: 'pvPlice',
       header: 'PV Police',
       width: 14,
@@ -24533,6 +24718,12 @@ function shouldShowDiligenceNantissementMedColumnsForRows(rows){
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceNantissementMedProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceSbienExportColumnsForRows(rows){
+  if(getDiligenceProcedureFilterValue(filterDiligenceProcedure) === 'S/bien') return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien');
+}
+
 function buildDiligenceExportRowCells(row, columns){
   return columns.map((column)=>{
     const value = typeof column.getValue === 'function' ? column.getValue(row) : '';
@@ -24556,8 +24747,8 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
       { header: 'Montant', width: 18, getValue: (row)=>row?.details?.montant || row?.dossier?.montant || '' },
       { header: 'RIB', width: 26, getValue: (row)=>row?.details?.rib || '' },
-      { header: 'Banque FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
-      { header: 'Banque AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
+      { header: 'Banque / STE FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
+      { header: 'Banque / STE AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
       { header: 'Adresse Banque', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
       { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
       { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
@@ -24584,12 +24775,14 @@ function finalizeDiligenceExportDataset(rows){
     const columns = [
       { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
       { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
-      { header: 'Date curateur', width: 18, getValue: (row)=>row?.details?.dateCurateur || '' },
+      { header: 'Date dépôt', width: 18, getValue: (row)=>row?.details?.dateCurateur || '' },
       { header: 'Reference curateur', width: 28, getValue: (row)=>row?.details?.referenceCurateur || '' },
       { header: 'ORD', width: 18, getValue: (row)=>row?.details?.ord || '' },
       { header: 'Sort ORD', width: 18, getValue: (row)=>row?.details?.sortOrd || '' },
       { header: 'Notif N', width: 18, getValue: (row)=>row?.details?.notifCurateurNo || '' },
       { header: 'Sort notif', width: 22, getValue: (row)=>row?.details?.curateurSortNotif || '' },
+      { header: 'Avis curateur', width: 24, getValue: (row)=>getDiligenceNantissementMedAvisCurateurValue(row?.details?.avisCurateur || '') },
+      { header: 'PV POLICE', width: 16, getValue: (row)=>getDiligenceNantissementMedPvPoliceValue(row?.details?.pvPlice || '') },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
@@ -24627,7 +24820,18 @@ function finalizeDiligenceExportDataset(rows){
   }
   const showAssColumns = shouldShowDiligenceAssColumnsForRows(sourceRows);
   const assHeaderMode = showAssColumns ? getDiligenceAssHeaderMode(sourceRows) : 'default';
-  const columns = getDiligenceExportColumnDefinitions().filter((column)=>!column.assOnly || showAssColumns);
+  const showSbienColumns = shouldShowDiligenceSbienExportColumnsForRows(sourceRows);
+  const columns = getDiligenceExportColumnDefinitions()
+    .filter((column)=>(!column.assOnly || showAssColumns) && !(showSbienColumns && column.key === 'juge'))
+    .map((column)=>{
+      if(showSbienColumns && column.key === 'sortExecution'){
+        return { ...column, header: 'Sort execution', keepEmpty: true };
+      }
+      if(showSbienColumns && column.key === 'dateExecution'){
+        return { ...column, keepEmpty: true };
+      }
+      return column;
+    });
   const activeColumnIndexes = new Set();
   const rowCells = sourceRows.map((row)=>{
     const cells = buildDiligenceExportRowCells(row, columns);
@@ -26578,6 +26782,34 @@ function getSelectedAudienceAppliedColorValue(){
   return targetColor === 'closed' ? 'purple-dark' : targetColor;
 }
 
+function setAudienceDelegationPinkState(dossier, p, procKey, enabled){
+  if(!dossier || !p) return false;
+  const before = p.attDelegationOuDelegat;
+  const hadExplicitPink = String(p.color || '').trim() === 'pink';
+  if(enabled){
+    p.attDelegationOuDelegat = 'att';
+    p._suppressAudienceOrdonnanceColor = '1';
+    if(hadExplicitPink) p.color = '';
+  }else{
+    if(normalizeDiligenceAttOk(p.attDelegationOuDelegat || '') === 'att'){
+      delete p.attDelegationOuDelegat;
+    }
+    if(String(p._suppressAudienceOrdonnanceColor || '').trim() === '1'){
+      delete p._suppressAudienceOrdonnanceColor;
+    }
+    if(hadExplicitPink) p.color = '';
+  }
+  const after = p.attDelegationOuDelegat;
+  queueDossierHistoryEntry(dossier, {
+    source: 'audience',
+    field: 'procedureDetails.attDelegationOuDelegat',
+    procedure: procKey,
+    before,
+    after
+  }, { immediate: true });
+  return normalizeHistoryValue(before) !== normalizeHistoryValue(after) || hadExplicitPink;
+}
+
 function clearSelectedAudienceColorFromRow(ci, di, procKey, appliedColor){
   const client = AppState.clients?.[ci];
   if(!canEditData() || !canEditClient(client)) return false;
@@ -26620,6 +26852,8 @@ function clearSelectedAudienceColorFromRow(ci, di, procKey, appliedColor){
       dossier.statut = 'En cours';
       changed = true;
     }
+  }else if(appliedColor === 'pink'){
+    changed = setAudienceDelegationPinkState(dossier, p, procKey, false) || changed;
   }else{
     if(String(p?.color || '').trim() === appliedColor){
       p.color = '';
@@ -26658,6 +26892,18 @@ function applySelectedAudienceColorToRow(ci, di, procKey){
   detachAudienceImportBatchOwnership(p);
   delete p._disableAudienceRowColor;
   delete p._suppressAudienceOrdonnanceColor;
+  if(appliedColor === 'pink'){
+    if(!setAudienceDelegationPinkState(dossier, p, procKey, true) && String(p?.color || '').trim() !== 'pink') return false;
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({
+      persist: true,
+      persistClientId: client.id,
+      persistDossier: dossier,
+      dashboard: true,
+      suivi: true
+    });
+    return true;
+  }
   if(String(p?.color || '').trim() === appliedColor) return false;
   p.color = appliedColor;
   if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
@@ -26846,6 +27092,7 @@ function applyColorToSelectedAudienceRows(color){
     const p = getAudienceProcedure(row.ci, row.di, row.procKey);
     detachAudienceImportBatchOwnership(p);
     const currentEffectiveColor = String(getAudienceRowEffectiveColor(row) || '').trim();
+    const previousColorForHistory = currentEffectiveColor;
     let rowChanged = false;
     if(targetColor === 'white'){
       rowChanged = applyAudienceWhiteColorState(p, dossier, currentEffectiveColor);
@@ -26863,6 +27110,12 @@ function applyColorToSelectedAudienceRows(color){
       if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
       rowChanged = true;
     }
+    const nextColorForHistory = String(getAudienceRowEffectiveColor({
+      ...row,
+      p,
+      d: dossier
+    }) || '').trim();
+    queueAudienceColorHistoryEntry(dossier, row.procKey, previousColorForHistory, nextColorForHistory);
     rememberAudienceTransientPriorityColor(row.ci, row.di, row.procKey, currentEffectiveColor);
     pinAudienceRowTemporarily(row.ci, row.di, row.procKey);
     changed = changed || rowChanged;
@@ -28695,9 +28948,22 @@ function setAudienceColor(ci, di, procKey, checked){
   const p = getAudienceProcedure(ci, di, procKey);
   const undoEntry = buildAudienceColorUndoEntry(ci, di, procKey);
   const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed']);
+  const currentEffectiveColor = getAudienceRowEffectiveColor({
+    c: client,
+    d: dossier,
+    procKey,
+    p,
+    draft: {},
+    ci,
+    di
+  });
   if(!checked){
     detachAudienceImportBatchOwnership(p);
+    if(currentEffectiveColor === 'pink'){
+      setAudienceDelegationPinkState(dossier, p, procKey, false);
+    }
     applyAudienceWhiteColorState(p, dossier, '');
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, '');
     rememberAudienceColorUndoState([undoEntry], {
       filterAudienceColor,
       selectedAudienceColor,
@@ -28723,6 +28989,7 @@ function setAudienceColor(ci, di, procKey, checked){
       ci,
       di
     }));
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, '');
     rememberAudienceColorUndoState([undoEntry], {
       filterAudienceColor,
       selectedAudienceColor,
@@ -28738,6 +29005,21 @@ function setAudienceColor(ci, di, procKey, checked){
     if(!applyAudienceOrdonnanceColorState(p, appliedColor)){
       return;
     }
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, appliedColor);
+    rememberAudienceColorUndoState([undoEntry], {
+      filterAudienceColor,
+      selectedAudienceColor,
+      filterAudienceCheckedFirst
+    });
+    markAudienceColorCachesDirty();
+    queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
+    return;
+  }
+  if(appliedColor === 'pink'){
+    if(!setAudienceDelegationPinkState(dossier, p, procKey, true) && String(p?.color || '').trim() !== 'pink'){
+      return;
+    }
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, 'pink');
     rememberAudienceColorUndoState([undoEntry], {
       filterAudienceColor,
       selectedAudienceColor,
@@ -28750,6 +29032,7 @@ function setAudienceColor(ci, di, procKey, checked){
   p.color = appliedColor;
   if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
   if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
+  queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, appliedColor);
   rememberAudienceColorUndoState([undoEntry], {
     filterAudienceColor,
     selectedAudienceColor,
@@ -29778,6 +30061,14 @@ function applyProcedureFieldValues(container, values){
       fieldEl.checked = ['1', 'true', 'yes', 'oui', 'on'].includes(String(values[key] || '').trim().toLowerCase());
       return;
     }
+    if(fieldEl.tagName === 'SELECT' && (key === 'sortOrd' || key === 'attOrdOrOrdOk')){
+      fieldEl.value = normalizeDiligenceOrdonnance(values[key]) === 'ok' ? 'ord ok' : 'att ord';
+      return;
+    }
+    if(fieldEl.tagName === 'SELECT' && key === 'attDelegationOuDelegat'){
+      fieldEl.value = normalizeDiligenceAttOk(values[key]) === 'ok' ? 'ok' : 'att';
+      return;
+    }
     fieldEl.value = values[key];
   });
 }
@@ -29983,12 +30274,22 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   }
   if(b === 'sfdc' || b === 's/bien'){
     return `
-      <input type="text" data-field="dateDepot" placeholder="Date dépôt">
+      <input type="text" data-field="dateDepot" placeholder="Date affectation">
       <input type="text" data-field="depotLe" placeholder="Dépôt le">
       <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
-      <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
+      ${b === 's/bien'
+        ? `<select data-field="attOrdOrOrdOk">
+            <option value="att ord" selected>att ord</option>
+            <option value="ord ok">ord ok</option>
+          </select>`
+        : `<input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">`}
       <input type="text" data-field="executionNo" placeholder="Execution N°">
-      <input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">
+      ${b === 's/bien'
+        ? `<select data-field="attDelegationOuDelegat">
+            <option value="att" selected>att</option>
+            <option value="ok">ok</option>
+          </select>`
+        : `<input type="text" data-field="attDelegationOuDelegat" placeholder="att delegation ou delegat">`}
       <input type="text" data-field="huissier" placeholder="Huissier">
       <input type="text" data-field="sort" list="${PROCEDURE_FIELD_DATALIST_IDS.sort}" placeholder="Sort" autocomplete="off">
       ${tribunalFieldHtml}
@@ -30003,14 +30304,12 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
         <option value="NB">NB</option>
       </select>
       <div class="proc-nant-med-curateur-fields" data-nant-med-curateur-fields>
-        <input type="text" data-field="dateCurateur" placeholder="Date curateur">
+        <input type="text" data-field="dateCurateur" placeholder="Date dépôt">
         <input type="text" data-field="referenceCurateur" placeholder="Reference curateur">
         <input type="text" data-field="ord" placeholder="ORD">
         <select data-field="sortOrd">
-          <option value="">Sort ORD</option>
-          <option value="att">att</option>
-          <option value="ATT ORD">ATT ORD</option>
-          <option value="ORD OK">ORD OK</option>
+          <option value="att ord" selected>att ord</option>
+          <option value="ord ok">ord ok</option>
         </select>
         <input type="text" data-field="notifCurateurNo" placeholder="Notif NÂ°">
         <input type="text" data-field="curateurSortNotif" placeholder="Sort notif">

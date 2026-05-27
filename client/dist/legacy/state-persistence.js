@@ -26,9 +26,87 @@ function buildPersistedStateSignature({
   );
 }
 
+function compactPersistedProcedureText(value){
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isPersistedSaisieArretProcedure(value){
+  const compact = compactPersistedProcedureText(value);
+  return compact === 'saisiearret'
+    || compact === 'saisiearrt'
+    || compact === 'saisiarret'
+    || compact === 'saisiarrt'
+    || compact.includes('saisiearret')
+    || compact.includes('saisiearrt');
+}
+
+function splitPersistedProcedureText(value){
+  return String(value || '')
+    .split(/[,+;]/)
+    .map(item=>item.trim())
+    .filter(Boolean);
+}
+
+function isPersistedImportedDossier(dossier){
+  if(!dossier || typeof dossier !== 'object') return false;
+  const importIds = [
+    dossier.importGlobalBatchId,
+    dossier.importAudienceBatchId,
+    dossier.importDiligenceBatchId
+  ].map(value=>String(value || '').trim()).filter(Boolean);
+  return importIds.length > 0
+    || String(dossier.importUid || '').trim().startsWith('imp-')
+    || !!String(dossier.importSource || '').trim();
+}
+
+function stripPersistedImportedSaisieArretDossier(dossier){
+  if(!isPersistedImportedDossier(dossier)) return dossier;
+  const next = dossier && typeof dossier === 'object' ? { ...dossier } : dossier;
+  if(!next || typeof next !== 'object') return next;
+  const detailMap = next.procedureDetails && typeof next.procedureDetails === 'object'
+    ? { ...next.procedureDetails }
+    : {};
+  Object.keys(detailMap).forEach(key=>{
+    if(isPersistedSaisieArretProcedure(key)) delete detailMap[key];
+  });
+  const keepProcedures = [
+    ...splitPersistedProcedureText(next.procedure),
+    ...(Array.isArray(next.procedureList) ? next.procedureList : []),
+    ...Object.keys(detailMap)
+  ].filter(name=>!isPersistedSaisieArretProcedure(name));
+  const seen = new Set();
+  const cleanedProcedures = keepProcedures.filter(name=>{
+    const key = compactPersistedProcedureText(name);
+    if(!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if(!cleanedProcedures.length) return null;
+  next.procedure = cleanedProcedures.join(', ');
+  if(Array.isArray(next.procedureList)) next.procedureList = cleanedProcedures;
+  next.procedureDetails = detailMap;
+  return next;
+}
+
+function stripPersistedImportedSaisieArretClients(clients){
+  return (Array.isArray(clients) ? clients : []).map(client=>{
+    if(!client || typeof client !== 'object') return client;
+    return {
+      ...client,
+      dossiers: (Array.isArray(client.dossiers) ? client.dossiers : [])
+        .map(stripPersistedImportedSaisieArretDossier)
+        .filter(Boolean)
+    };
+  });
+}
+
 function normalizePersistedStateSource(rawState){
   const loadedClients = Array.isArray(rawState?.clients)
-    ? rawState.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
+    ? stripPersistedImportedSaisieArretClients(rawState.clients).map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
     : [];
   const loadedUsers = Array.isArray(rawState?.users)
     ? rawState.users.map(normalizeUser).filter(Boolean)

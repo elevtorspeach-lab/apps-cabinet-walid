@@ -79,14 +79,15 @@ function shouldShowDiligenceNantissementMedColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 9;
+  if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 11;
   if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 25;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     if(cmdMode !== 'default') return 24;
     return 17;
   }
-  if(diligenceVirtualCompactProcedureMode === 'sfdc' || diligenceVirtualCompactProcedureMode === 'sbien') return 13;
+  if(diligenceVirtualCompactProcedureMode === 'sbien') return 14;
+  if(diligenceVirtualCompactProcedureMode === 'sfdc') return 13;
   if(diligenceVirtualShowAssColumns){
     const assMode = getDiligenceAssHeaderMode(diligenceVirtualRows);
     if(assMode !== 'default') return 25;
@@ -130,6 +131,8 @@ function buildDiligenceHeadHtml(){
       <th>Sort ORD</th>
       <th>Notif N&deg;</th>
       <th>Sort notif</th>
+      <th>Avis curateur</th>
+      <th>PV POLICE</th>
       <th>Tribunal</th>
     `;
   }
@@ -146,8 +149,8 @@ function buildDiligenceHeadHtml(){
       <th>Ville</th>
       <th>Montant</th>
       <th>RIB</th>
-      <th>Banque FR</th>
-      <th>Banque AR</th>
+      <th>Banque / STE FR</th>
+      <th>Banque / STE AR</th>
       <th>Adresse Banque</th>
       <th>Avocat</th>
       <th>Observation</th>
@@ -214,6 +217,7 @@ function buildDiligenceHeadHtml(){
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Délégation</th>' : '') : '<th>Délégation</th>'}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Huissier</th>' : '') : '<th>Huissier</th>'}
     ${avisHeader ? `<th>${avisHeader}</th>` : ''}
+    ${compactMode === 'sbien' ? '<th>Date execution</th>' : ''}
     <th>Tribunal</th>
     <th>Boîte N°</th>
   `;
@@ -297,6 +301,8 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sortOrd', row.details?.sortOrd || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifCurateurNo', row.details?.notifCurateurNo || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'curateurSortNotif', row.details?.curateurSortNotif || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', row.details?.pvPlice || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
       </tr>
     `;
@@ -440,6 +446,10 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>`}
     ${avisHeader
       ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'sort', executionSortValue))}</td>`
+      : ''
+    }
+    ${diligenceVirtualCompactProcedureMode === 'sbien'
+      ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'dateExecution', row.details?.dateExecution || ''))}</td>`
       : ''
     }
     <td>${isCommandementProcedure ? '' : renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>

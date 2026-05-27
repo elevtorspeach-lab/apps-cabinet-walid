@@ -601,6 +601,86 @@ async function ensureDataFile() {
   await db.initializeDatabase();
 }
 
+function compactProcedureText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isSaisieArretProcedureName(value) {
+  const compact = compactProcedureText(value);
+  return compact === 'saisiearret'
+    || compact === 'saisiearrt'
+    || compact === 'saisiarret'
+    || compact === 'saisiarrt'
+    || compact.includes('saisiearret')
+    || compact.includes('saisiearrt');
+}
+
+function splitProcedureText(value) {
+  return String(value || '')
+    .split(/[,+;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isImportedDossierRecord(dossier) {
+  if (!dossier || typeof dossier !== 'object') return false;
+  const importIds = [
+    dossier.importGlobalBatchId,
+    dossier.importAudienceBatchId,
+    dossier.importDiligenceBatchId
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+  return importIds.length > 0
+    || String(dossier.importUid || '').trim().startsWith('imp-')
+    || !!String(dossier.importSource || '').trim();
+}
+
+function stripImportedSaisieArretFromDossier(dossier) {
+  if (!isImportedDossierRecord(dossier)) return dossier;
+  const next = dossier && typeof dossier === 'object' ? { ...dossier } : dossier;
+  if (!next || typeof next !== 'object') return next;
+  const detailMap = next.procedureDetails && typeof next.procedureDetails === 'object'
+    ? { ...next.procedureDetails }
+    : {};
+  Object.keys(detailMap).forEach((key) => {
+    if (isSaisieArretProcedureName(key)) {
+      delete detailMap[key];
+    }
+  });
+  next.procedureDetails = detailMap;
+  const keepProcedures = [
+    ...splitProcedureText(next.procedure),
+    ...(Array.isArray(next.procedureList) ? next.procedureList : []),
+    ...Object.keys(detailMap)
+  ].filter((name) => !isSaisieArretProcedureName(name));
+  const seen = new Set();
+  const cleanedProcedures = keepProcedures.filter((name) => {
+    const key = compactProcedureText(name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!cleanedProcedures.length) return null;
+  next.procedure = cleanedProcedures.join(', ');
+  if (Array.isArray(next.procedureList)) next.procedureList = cleanedProcedures;
+  return next;
+}
+
+function stripImportedSaisieArretFromClients(clients) {
+  return (Array.isArray(clients) ? clients : []).map((client) => {
+    if (!client || typeof client !== 'object') return client;
+    return {
+      ...client,
+      dossiers: (Array.isArray(client.dossiers) ? client.dossiers : [])
+        .map(stripImportedSaisieArretFromDossier)
+        .filter(Boolean)
+    };
+  });
+}
+
 function normalizeStoredState(rawState, previousState = null) {
   const previousVersion = Number(previousState?.version);
   const nextVersion = Number.isFinite(previousVersion) && previousVersion >= 0
@@ -615,9 +695,11 @@ function normalizeStoredState(rawState, previousState = null) {
     ...DEFAULT_STATE,
     ...previous,
     ...sourceState,
-    clients: hasOwn('clients')
-      ? (Array.isArray(sourceState.clients) ? sourceState.clients : [])
-      : (Array.isArray(previous.clients) ? previous.clients : []),
+    clients: stripImportedSaisieArretFromClients(
+      hasOwn('clients')
+        ? (Array.isArray(sourceState.clients) ? sourceState.clients : [])
+        : (Array.isArray(previous.clients) ? previous.clients : [])
+    ),
     salleAssignments: hasOwn('salleAssignments')
       ? (Array.isArray(sourceState.salleAssignments) ? sourceState.salleAssignments : [])
       : (Array.isArray(previous.salleAssignments) ? previous.salleAssignments : []),
@@ -1437,6 +1519,7 @@ function enrichDossierPatchBody(currentState, rawBody) {
     body.dossier = sanitizePatchObject(body.dossier) || {};
     body.dossier.externalId = buildGeneratedDossierExternalId(snapshot.clientId, body.dossier);
     body.dossier.clientId = snapshot.clientId;
+    body.dossier = stripImportedSaisieArretFromDossier(body.dossier);
     return body;
   }
 
@@ -1451,6 +1534,7 @@ function enrichDossierPatchBody(currentState, rawBody) {
       || {};
     body.dossier.externalId = String(body.dossier.externalId || snapshot.previousExternalId).trim();
     body.dossier.clientId = snapshot.targetClientId;
+    body.dossier = stripImportedSaisieArretFromDossier(body.dossier);
   }
   return body;
 }
