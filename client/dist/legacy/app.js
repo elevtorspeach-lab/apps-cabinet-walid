@@ -21841,12 +21841,14 @@ function getDiligenceSearchValues(row){
     details.notifCurateur,
     details.sortNotif,
     details.avisCurateur,
+    isDiligenceNantissementMedProcedure(row.procedure) ? getDiligenceNantissementMedAvisCurateurValue(details.avisCurateur) : '',
     details.dateCurateur,
     details.referenceCurateur,
     details.sortOrd,
     details.notifCurateurNo,
     details.curateurSortNotif,
     details.pvPlice,
+    isDiligenceNantissementMedProcedure(row.procedure) ? getDiligenceNantissementMedPvPoliceValue(details.pvPlice) : '',
     details.dateNotification,
     details.certificatNonAppelStatus,
     details.executionNo,
@@ -23291,6 +23293,19 @@ function isDiligenceNantissementMedNbLayout(row){
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'NB';
 }
 
+function isDiligenceNantissementMedNotifierLayout(row){
+  if(!isDiligenceNantissementMedProcedure(row?.procedure)) return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'notifier';
+}
+
+function getDiligenceNantissementMedHeaderMode(rows){
+  const list = Array.isArray(rows) ? rows.filter(row=>isDiligenceNantissementMedProcedure(row?.procedure)) : [];
+  if(!list.length) return 'nb';
+  const notifierCount = list.reduce((count, row)=>count + (isDiligenceNantissementMedNotifierLayout(row) ? 1 : 0), 0);
+  if(notifierCount === list.length) return 'notifier';
+  return 'nb';
+}
+
 function getDiligenceRowDelegationFilterValue(procedure, details){
   if(isDiligenceNantissementMedProcedure(procedure)){
     return normalizeDiligenceAttOk(details?.curateurSortNotif || '') || 'att';
@@ -23423,7 +23438,9 @@ function getDiligenceRows(){
           && baseProc !== 'Nantissement'
         ) return;
         const details = d?.procedureDetails?.[proc] || {};
-        if(baseProc === 'Nantissement MED' && !isDiligenceNantissementMedNbLayout({ procedure: proc, details })){
+        if(baseProc === 'Nantissement MED'
+          && !isDiligenceNantissementMedNbLayout({ procedure: proc, details })
+          && !isDiligenceNantissementMedNotifierLayout({ procedure: proc, details })){
           return;
         }
         const isCommandement = baseProc === 'Commandement';
@@ -23658,14 +23675,25 @@ function getDiligenceNotificationSortType(value){
   const raw = String(value ?? '').trim().toLowerCase();
   if(!raw) return '';
   if(/^nb(\s|$)/.test(raw)) return 'NB';
+  if(isDiligenceCurateurNotifieSort(raw)) return 'curateur notifie';
   if(/^notif(ier)?(\s|$)/.test(raw)) return 'notifier';
   return '';
+}
+
+function isDiligenceCurateurNotifieSort(value){
+  const raw = String(value ?? '').trim().toLowerCase();
+  if(!raw) return false;
+  const normalized = typeof raw.normalize === 'function'
+    ? raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    : raw;
+  return normalized.includes('curateur') && normalized.includes('notif');
 }
 
 function normalizeDiligenceNotificationSort(value){
   const raw = String(value ?? '').trim().toLowerCase();
   if(!raw) return '';
   if(raw === 'nb' || raw.startsWith('nb ')) return 'NB';
+  if(isDiligenceCurateurNotifieSort(raw)) return 'curateur notifie';
   if(raw.includes('notif')) return 'notifier';
   return String(value ?? '').trim();
 }
@@ -23765,6 +23793,16 @@ function isDiligenceAssNbLayout(row){
 function isDiligenceAssNotifierLayout(row){
   if (!isDiligenceAssLikeProcedure(row?.procedure)) return false;
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'notifier';
+}
+
+function isDiligenceNantissementCurateurNotifieLayout(row){
+  if(getDiligenceProcedureFilterValue(row?.procedure) !== 'Nantissement') return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'curateur notifie';
+}
+
+function isDiligenceAssCurateurNotifieLayout(row){
+  if(getDiligenceProcedureFilterValue(row?.procedure) !== 'ASS') return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'curateur notifie';
 }
 
 function getDiligenceAssHeaderMode(rows){
@@ -24060,6 +24098,21 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   }
   if(field === 'avisCurateur'){
     const isNantissementMed = isDiligenceNantissementMedProcedure(row?.procedure);
+    const isNantissementMedNotifier = isDiligenceNantissementMedNotifierLayout(row);
+    if(isNantissementMedNotifier){
+      if(!row?.canEdit){
+        return escapeHtml(normalized || '-');
+      }
+      return `
+      <input
+        type="text"
+        class="diligence-inline-input${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        value="${escapeAttr(normalized)}"
+        oninput="${onSizeChange}"
+        onkeydown="if(event.key === 'Enter'){ updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value); }"
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+    `;
+    }
     const status = isNantissementMed
       ? getDiligenceNantissementMedAvisCurateurValue(normalized)
       : getDiligenceAvisCurateurValue(normalized);
@@ -24088,6 +24141,21 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   }
   if(field === 'pvPlice'){
     const isNantissementMed = isDiligenceNantissementMedProcedure(row?.procedure);
+    const isNantissementMedNotifier = isDiligenceNantissementMedNotifierLayout(row);
+    if(isNantissementMedNotifier){
+      if(!row?.canEdit){
+        return escapeHtml(normalized || '-');
+      }
+      return `
+      <input
+        type="text"
+        class="diligence-inline-input${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        value="${escapeAttr(normalized)}"
+        oninput="${onSizeChange}"
+        onkeydown="if(event.key === 'Enter'){ updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value); }"
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+    `;
+    }
     const status = isNantissementMed
       ? getDiligenceNantissementMedPvPoliceValue(normalized)
       : getDiligencePvPliceValue(normalized);
@@ -24262,9 +24330,13 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   }else if(field === 'lettreRec'){
     nextValue = normalizeDiligenceLettreRec(value);
   }else if(field === 'avisCurateur'){
-    nextValue = normalizeDiligenceAvisCurateur(value);
+    nextValue = isDiligenceNantissementMedNotifierLayout({ procedure: proc, details })
+      ? String(value ?? '').trim()
+      : normalizeDiligenceAvisCurateur(value);
   }else if(field === 'pvPlice'){
-    nextValue = getDiligencePvPliceValue(value);
+    nextValue = isDiligenceNantissementMedNotifierLayout({ procedure: proc, details })
+      ? String(value ?? '').trim()
+      : getDiligencePvPliceValue(value);
   }
   if(isDossierField){
     dossier[field] = nextValue;
@@ -24783,6 +24855,7 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Sort notif', width: 22, getValue: (row)=>row?.details?.curateurSortNotif || '' },
       { header: 'Avis curateur', width: 24, getValue: (row)=>getDiligenceNantissementMedAvisCurateurValue(row?.details?.avisCurateur || '') },
       { header: 'PV POLICE', width: 16, getValue: (row)=>getDiligenceNantissementMedPvPoliceValue(row?.details?.pvPlice || '') },
+      { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));

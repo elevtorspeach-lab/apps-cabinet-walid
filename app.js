@@ -19790,14 +19790,25 @@ function getDiligenceNotificationSortType(value){
   const raw = String(value ?? '').trim().toLowerCase();
   if(!raw) return '';
   if(/^nb(\s|$)/.test(raw)) return 'NB';
+  if(isDiligenceCurateurNotifieSort(raw)) return 'curateur notifie';
   if(/^notif(ier)?(\s|$)/.test(raw)) return 'notifier';
   return '';
+}
+
+function isDiligenceCurateurNotifieSort(value){
+  const raw = String(value ?? '').trim().toLowerCase();
+  if(!raw) return false;
+  const normalized = typeof raw.normalize === 'function'
+    ? raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    : raw;
+  return normalized.includes('curateur') && normalized.includes('notif');
 }
 
 function normalizeDiligenceNotificationSort(value){
   const raw = String(value ?? '').trim().toLowerCase();
   if(!raw) return '';
   if(raw === 'nb' || raw.startsWith('nb ')) return 'NB';
+  if(isDiligenceCurateurNotifieSort(raw)) return 'curateur notifie';
   if(raw.includes('notif')) return 'notifier';
   return String(value ?? '').trim();
 }
@@ -19897,6 +19908,16 @@ function isDiligenceAssNbLayout(row){
 function isDiligenceAssNotifierLayout(row){
   if (!isDiligenceAssLikeProcedure(row?.procedure)) return false;
   return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'notifier';
+}
+
+function isDiligenceNantissementCurateurNotifieLayout(row){
+  if(getDiligenceProcedureFilterValue(row?.procedure) !== 'Nantissement') return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'curateur notifie';
+}
+
+function isDiligenceAssCurateurNotifieLayout(row){
+  if(getDiligenceProcedureFilterValue(row?.procedure) !== 'ASS') return false;
+  return getDiligenceNotificationSortValue(row?.details?.notificationSort, row?.procedure) === 'curateur notifie';
 }
 
 function getDiligenceAssHeaderMode(rows){
