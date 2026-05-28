@@ -131,9 +131,9 @@ function getAudienceRowEffectiveColor(row){
   const delegationColor = getAudienceRowDelegationColor(row);
   const explicitColor = String(row?.p?.color || '').trim();
   const ordonnanceColorSuppressed = isAudienceRowOrdonnanceColorSuppressed(row);
+  if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
   if(!ordonnanceColorSuppressed && ordonnanceColor) return ordonnanceColor;
   if(statusDerivedColor) return statusDerivedColor;
-  if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
   if(delegationColor) return delegationColor;
   return getAudienceRowRefClientMismatchFallbackColor(row, {
     includeOrdonnanceColor: !ordonnanceColorSuppressed
@@ -151,18 +151,14 @@ function audienceRowMatchesColorFilter(row, color){
     return !!getAudienceStatusDerivedColor(row?.__resolvedStatus || row?.d?.statut || '');
   }
   if(targetColor === 'green' || targetColor === 'yellow'){
-    if(isAudienceRowOrdonnanceColorSuppressed(row)){
-      return getAudienceRowEffectiveColor(row) === targetColor;
-    }
-    return getAudienceRowOrdonnanceColor(row) === targetColor;
+    return getAudienceRowEffectiveColor(row) === targetColor;
   }
   if(targetColor === 'purple-dark' || targetColor === 'purple-light'){
     const statusDerivedColor = getAudienceRowStatusDerivedColor(row);
     return statusDerivedColor === targetColor;
   }
   if(targetColor === 'pink'){
-    return getAudienceRowDelegationColor(row) === 'pink'
-      || getAudienceRowEffectiveColor(row) === targetColor;
+    return getAudienceRowEffectiveColor(row) === targetColor;
   }
   return getAudienceRowEffectiveColor(row) === targetColor;
 }

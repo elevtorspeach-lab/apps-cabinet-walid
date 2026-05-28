@@ -8571,8 +8571,10 @@ function getAudienceOrdonnanceColorValue(color){
 
 function applyAudienceOrdonnanceColorState(procData, color){
   const p = procData && typeof procData === 'object' ? procData : null;
+  const targetColor = String(color || '').trim();
   const ordonnanceValue = getAudienceOrdonnanceColorValue(color);
   if(!p || !ordonnanceValue) return false;
+  const displayColor = targetColor;
   let changed = false;
   if(String(p.attOrdOrOrdOk || '').trim() !== ordonnanceValue){
     p.attOrdOrOrdOk = ordonnanceValue;
@@ -8582,8 +8584,8 @@ function applyAudienceOrdonnanceColorState(procData, color){
     p._audienceSortOrd = ordonnanceValue;
     changed = true;
   }
-  if(['green', 'yellow'].includes(String(p?.color || '').trim())){
-    delete p.color;
+  if(String(p?.color || '').trim() !== displayColor){
+    p.color = displayColor;
     changed = true;
   }
   if(String(p?._disableAudienceRowColor || '').trim()){
@@ -20356,8 +20358,8 @@ function setupEvents(){
           filterAudienceCheckedFirst
         });
       }
-      const keepAudienceColorFilter = appliedToCheckedRows && (color === 'green' || color === 'yellow');
-      if(appliedToCheckedRows && !keepAudienceColorFilter){
+      const keepAudienceColorFilter = false;
+      if(appliedToCheckedRows){
         setSelectedAudienceColor('all', false);
       }
       if(appliedToCheckedRows){
