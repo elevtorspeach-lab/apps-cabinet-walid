@@ -28212,8 +28212,23 @@ function dossierHasAssProcedure(dossier){
   return procedures.some(proc=>getAudienceProcedureFilterKey(proc) === 'ASS');
 }
 
+function getDossierAssReferenceKeys(dossier){
+  const keys = new Set();
+  const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+    ? dossier.procedureDetails
+    : {};
+  Object.entries(details).forEach(([proc, procData])=>{
+    if(getAudienceProcedureFilterKey(proc) !== 'ASS') return;
+    const key = normalizeAudienceDossierLookupKey(procData?.referenceClient || '');
+    if(key) keys.add(key);
+  });
+  return keys;
+}
+
 function getAudienceRelatedGlobalReferenceClients(row){
   if(!row || !isAudienceAssRow(row)) return [];
+  const targetRefDossier = normalizeAudienceDossierLookupKey(getAudienceAssProcedureReferenceValue(row));
+  if(!targetRefDossier) return [];
   const debiteurKey = normalizeLooseText(row?.d?.debiteur || '').toLowerCase();
   if(!debiteurKey) return [];
   const client = row?.c;
@@ -28222,6 +28237,7 @@ function getAudienceRelatedGlobalReferenceClients(row){
   const seen = new Set();
   dossiers.forEach(dossier=>{
     if(!dossierHasAssProcedure(dossier)) return;
+    if(!getDossierAssReferenceKeys(dossier).has(targetRefDossier)) return;
     const rowDebiteurKey = normalizeLooseText(dossier?.debiteur || '').toLowerCase();
     if(rowDebiteurKey !== debiteurKey) return;
     const ref = String(dossier?.referenceClient || '').trim();
