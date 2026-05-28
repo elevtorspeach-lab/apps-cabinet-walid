@@ -77,6 +77,9 @@ function DiligenceSection() {
             <button id="previewDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-regular fa-eye"></i> Voir le fichier
             </button>
+            <button id="exportDiligenceBackupExcelBtn" className="btn-primary" type="button">
+              <i className="fa-solid fa-file-export"></i> Sauvegarde Excel
+            </button>
           </div>
           <div id="diligenceCount" className="diligence-count"></div>
           <div id="diligenceTableContainer" className="table-container">
