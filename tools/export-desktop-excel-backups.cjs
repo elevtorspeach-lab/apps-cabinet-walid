@@ -29,6 +29,28 @@ function loadXlsx() {
   return sandbox.XLSX;
 }
 
+function loadExcelJs() {
+  const sourcePath = path.join(repoRoot, 'client', 'public', 'vendor', 'libs', 'exceljs.min.js');
+  const sandbox = {
+    Buffer,
+    console,
+    process,
+    require,
+    setImmediate,
+    clearImmediate,
+    setTimeout,
+    clearTimeout,
+    module: { exports: {} },
+    exports: {}
+  };
+  vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), sandbox, { filename: sourcePath });
+  const ExcelJS = sandbox.module.exports;
+  if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') {
+    throw new Error('ExcelJS library unavailable.');
+  }
+  return ExcelJS;
+}
+
 function loadServerEnv() {
   const envPath = path.join(repoRoot, 'server', '.env');
   try {
@@ -189,7 +211,7 @@ function getDiligenceRowCells(row) {
   ];
 }
 
-function buildClientsWorkbook(XLSX, state) {
+function buildClientsRows(state) {
   const dossierHeaders = [
     'client', 'affectation', 'type', 'procedure', 'ref client', 'debiteur', 'montant',
     'immatriculation', 'marque', 'adresse', 'ville', 'ref dossier assignation',
@@ -254,6 +276,11 @@ function buildClientsWorkbook(XLSX, state) {
       rows.push(fillToCols([''], totalCols));
     }
   });
+  return rows;
+}
+
+function buildClientsWorkbook(XLSX, state) {
+  const rows = buildClientsRows(state);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet['!cols'] = [18, 15, 12, 26, 16, 20, 14, 16, 14, 30, 14, 20, 20, 20].map((wch) => ({ wch }));
   const workbook = XLSX.utils.book_new();
@@ -261,7 +288,7 @@ function buildClientsWorkbook(XLSX, state) {
   return workbook;
 }
 
-function buildDiligenceWorkbook(XLSX, state) {
+function buildDiligenceRows(state) {
   const headers = [
     'Procedure', 'Reference client', 'Nom', 'Date depot', 'Reference dossier', 'Juge', 'Sort',
     'Ordonnance', 'Notification No', 'Sort notification', 'Certificat non appel / Lettre Rec',
@@ -294,11 +321,162 @@ function buildDiligenceWorkbook(XLSX, state) {
     diligenceRows.forEach((row) => rows.push(row));
     if (clientIndex < clients.length - 1) rows.push([]);
   });
+  return rows;
+}
+
+function buildDiligenceWorkbook(XLSX, state) {
+  const rows = buildDiligenceRows(state);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet['!cols'] = [20, 24, 30, 18, 24, 22, 18, 18, 20, 22, 26, 22, 20, 24, 24, 24, 18, 32].map((wch) => ({ wch }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, 'Sauvegarde');
   return workbook;
+}
+
+function isNonEmptyCell(cell) {
+  return String(cell?.value ?? '').trim() !== '';
+}
+
+function getLastUsedColumn(worksheet) {
+  let max = 1;
+  worksheet.eachRow((row) => {
+    row.eachCell((cell, colNumber) => {
+      if (isNonEmptyCell(cell)) max = Math.max(max, colNumber);
+    });
+  });
+  return max;
+}
+
+function applyCellBorder(cell, color = 'FFD9E2F3') {
+  cell.border = {
+    top: { style: 'thin', color: { argb: color } },
+    left: { style: 'thin', color: { argb: color } },
+    bottom: { style: 'thin', color: { argb: color } },
+    right: { style: 'thin', color: { argb: color } }
+  };
+}
+
+function styleHeaderRow(row, lastCol) {
+  row.height = 22;
+  for (let col = 1; col <= lastCol; col += 1) {
+    const cell = row.getCell(col);
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    applyCellBorder(cell, 'FF9EADCC');
+  }
+}
+
+function styleSectionRow(row, lastCol) {
+  row.height = 22;
+  for (let col = 1; col <= lastCol; col += 1) {
+    const cell = row.getCell(col);
+    cell.font = { bold: true, color: { argb: 'FF17365D' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAF7' } };
+    cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'center', wrapText: true };
+    applyCellBorder(cell, 'FFB7CEE8');
+  }
+}
+
+function styleTitleRow(worksheet, row, lastCol) {
+  row.height = 28;
+  const start = row.getCell(1).address;
+  const end = row.getCell(lastCol).address;
+  try {
+    worksheet.mergeCells(`${start}:${end}`);
+  } catch (_) {}
+  const cell = row.getCell(1);
+  cell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF123B8C' } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+}
+
+function styleDataRow(row, lastCol) {
+  row.height = 20;
+  for (let col = 1; col <= lastCol; col += 1) {
+    const cell = row.getCell(col);
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    applyCellBorder(cell);
+  }
+}
+
+function isClientsHeader(values) {
+  const first = String(values[0] || '').toLowerCase();
+  return first === 'client' || first === 'ref client';
+}
+
+function isDiligenceHeader(values) {
+  return String(values[0] || '').toLowerCase() === 'procedure'
+    && String(values[1] || '').toLowerCase().includes('reference');
+}
+
+async function writeStyledWorkbookFile(rows, filePath, kind) {
+  const ExcelJS = loadExcelJs();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Cabinet Walid Araqi';
+  workbook.lastModifiedBy = 'Cabinet Walid Araqi';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const worksheet = workbook.addWorksheet('Sauvegarde');
+  rows.forEach((row, rowIndex) => {
+    const values = Array.isArray(row) ? row : [];
+    values.forEach((value, colIndex) => {
+      worksheet.getCell(rowIndex + 1, colIndex + 1).value = value;
+    });
+  });
+
+  const lastCol = getLastUsedColumn(worksheet);
+  worksheet.properties.defaultRowHeight = 20;
+  worksheet.views = [{ state: 'frozen', ySplit: kind === 'diligence' ? 3 : 1 }];
+  worksheet.pageSetup = {
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0
+  };
+
+  const widths = kind === 'diligence'
+    ? [20, 24, 30, 16, 24, 22, 16, 18, 20, 22, 28, 22, 20, 24, 24, 24, 18, 32]
+    : [22, 16, 14, 28, 18, 24, 14, 18, 16, 34, 16, 22, 22, 22];
+  widths.forEach((width, index) => {
+    worksheet.getColumn(index + 1).width = width;
+  });
+
+  let firstHeaderRow = null;
+  worksheet.eachRow((row, rowNumber) => {
+    const values = [];
+    for (let col = 1; col <= lastCol; col += 1) {
+      values.push(String(row.getCell(col).value ?? '').trim());
+    }
+    const firstValue = values[0] || '';
+    if (firstValue.startsWith('SAUVEGARDE')) {
+      styleTitleRow(worksheet, row, lastCol);
+      return;
+    }
+    if (firstValue.startsWith('CLIENT :')) {
+      styleSectionRow(row, lastCol);
+      return;
+    }
+    if ((kind === 'clients' && isClientsHeader(values)) || (kind === 'diligence' && isDiligenceHeader(values))) {
+      if (!firstHeaderRow) firstHeaderRow = rowNumber;
+      styleHeaderRow(row, lastCol);
+      return;
+    }
+    if (values.some(Boolean)) {
+      styleDataRow(row, lastCol);
+    }
+  });
+
+  if (kind === 'diligence' && firstHeaderRow) {
+    worksheet.autoFilter = {
+      from: { row: firstHeaderRow, column: 1 },
+      to: { row: firstHeaderRow, column: lastCol }
+    };
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  await fsp.writeFile(filePath, Buffer.from(buffer));
 }
 
 async function replaceOutputFiles(XLSX, state) {
@@ -309,14 +487,10 @@ async function replaceOutputFiles(XLSX, state) {
     fsp.rm(clientsPath, { force: true }),
     fsp.rm(diligencePath, { force: true })
   ]);
-  await fsp.writeFile(
-    clientsPath,
-    XLSX.write(buildClientsWorkbook(XLSX, state), { bookType: 'xlsx', type: 'buffer' })
-  );
-  await fsp.writeFile(
-    diligencePath,
-    XLSX.write(buildDiligenceWorkbook(XLSX, state), { bookType: 'xlsx', type: 'buffer' })
-  );
+  await Promise.all([
+    writeStyledWorkbookFile(buildClientsRows(state), clientsPath, 'clients'),
+    writeStyledWorkbookFile(buildDiligenceRows(state), diligencePath, 'diligence')
+  ]);
   return { clientsPath, diligencePath };
 }
 

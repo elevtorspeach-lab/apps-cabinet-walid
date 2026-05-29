@@ -8,7 +8,7 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
-const LEGACY_ASSET_VERSION = '20260525-att-delegation-history-1'
+const LEGACY_ASSET_VERSION = '20260529-sync-ping-throttle-1'
 const LEGACY_SCRIPTS = [
   `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,
   `/legacy/audience-ui-helpers.js?v=${LEGACY_ASSET_VERSION}`,

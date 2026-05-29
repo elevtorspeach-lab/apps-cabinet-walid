@@ -850,7 +850,7 @@ async function showView(session, view) {
     if (typeof showView === 'function') {
       showView(targetView, { force: true });
     }
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     try {
       return typeof currentView === 'string' ? currentView : targetView;
     } catch {
@@ -1086,7 +1086,7 @@ async function doBrowse(session) {
     if (node) {
       node.scrollTop = ((seed % 4) + 1) * 320;
     }
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     return {
       selector: selector || '',
       scrollTop: node ? node.scrollTop : 0
