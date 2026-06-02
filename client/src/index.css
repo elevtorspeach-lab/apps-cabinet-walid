@@ -1987,6 +1987,7 @@ tr:hover{background:#f1f5f9}
 .checkbox-group label[data-proc="S/bien"].active{background:#e11d48;border-color:#e11d48}
 .checkbox-group label[data-proc="Injonction"].active{background:#0ea5a4;border-color:#0ea5a4}
 .checkbox-group label[data-proc="Sanlam"].active{background:#1e293b;border-color:#1e293b}
+.checkbox-group label[data-proc="SCI TF"].active{background:#0369a1;border-color:#0369a1}
 .checkbox-group label[data-proc="Autre"].active{background:#ef4444;border-color:#ef4444}
 
 .proc-card::after{content:'';position:absolute;bottom:0;left:0;width:100%;height:5px;background:#cbd5e1}
@@ -2001,6 +2002,7 @@ tr:hover{background:#f1f5f9}
 .proc-sbien::after{background:#e11d48}
 .proc-injonction::after{background:#0ea5a4}
 .proc-sanlam::after{background:#0f172a}
+.proc-sci-tf::after{background:#0369a1}
 .proc-sanlam-2::after{background:#16a34a}
 .proc-sanlam-3::after{background:#7c3aed}
 .proc-sanlam-4::after{background:#d97706}
@@ -2017,6 +2019,7 @@ tr:hover{background:#f1f5f9}
 .proc-sbien{border-left:4px solid #e11d48}
 .proc-injonction{border-left:4px solid #0ea5a4}
 .proc-sanlam{border-left:4px solid #0f172a}
+.proc-sci-tf{border-left:4px solid #0369a1}
 .proc-sanlam-2{border-left:4px solid #16a34a;background:#f0fdf4}
 .proc-sanlam-3{border-left:4px solid #7c3aed;background:#faf5ff}
 .proc-sanlam-4{border-left:4px solid #d97706;background:#fffbeb}
@@ -2091,6 +2094,7 @@ tr:hover{background:#f1f5f9}
 .procedure-montant-pill.proc-sbien{background:#ffe4e6;color:#be123c;border-color:#fda4af}
 .procedure-montant-pill.proc-injonction{background:#ccfbf1;color:#0f766e;border-color:#5eead4}
 .procedure-montant-pill.proc-sanlam{background:#e2e8f0;color:#0f172a;border-color:#94a3b8}
+.procedure-montant-pill.proc-sci-tf{background:#e0f2fe;color:#0369a1;border-color:#7dd3fc}
 .procedure-montant-pill.proc-sanlam-2{background:#dcfce7;color:#166534;border-color:#86efac}
 .procedure-montant-pill.proc-sanlam-3{background:#f3e8ff;color:#7e22ce;border-color:#d8b4fe}
 .procedure-montant-pill.proc-sanlam-4{background:#fef3c7;color:#92400e;border-color:#fcd34d}

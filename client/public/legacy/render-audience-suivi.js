@@ -94,17 +94,19 @@ function renderAudienceRowsHtml(rows, duplicateKeySet){
 
 function renderAudienceStatusEditor(row, keyEncoded, canEdit){
   const statusSnapshot = getDossierDisplayStatusSnapshot(row?.d || {});
+  const rawStatus = String(row?.d?.statut || '').trim();
   const draftStatus = row?.draft && Object.prototype.hasOwnProperty.call(row.draft, 'dossierStatus')
     ? String(row.draft.dossierStatus || '').trim()
     : '';
-  const statusValue = draftStatus || String(statusSnapshot?.statut || 'En cours').trim() || 'En cours';
-  const statusDetail = draftStatus ? '' : String(statusSnapshot?.detail || '').trim();
+  const statusValue = draftStatus || rawStatus || String(statusSnapshot?.statut || 'En cours').trim() || 'En cours';
+  const statusDetail = (draftStatus || rawStatus) ? '' : String(statusSnapshot?.detail || '').trim();
   const options = typeof getDossierStatusOptions === 'function'
     ? getDossierStatusOptions(statusValue)
     : ['En cours', 'Soldé', 'Arrêt définitif', 'Clôture', 'Suspension', statusValue].filter(Boolean);
   const statusOptionsListId = `audienceStatusOptions-${String(keyEncoded || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const inputHtml = `
     <input class="audience-status-select" value="${escapeAttr(statusValue)}" list="${statusOptionsListId}" ${canEdit ? '' : 'disabled'}
+      oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dossierStatus',this.value)"
       onchange="setAudienceDossierStatusFromEncoded('${keyEncoded}', this.value)"
       onblur="setAudienceDossierStatusFromEncoded('${keyEncoded}', this.value)"
       onkeydown="if(event.key === 'Enter'){ event.preventDefault(); this.blur(); }">

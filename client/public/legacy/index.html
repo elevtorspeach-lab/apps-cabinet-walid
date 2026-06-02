@@ -317,14 +317,14 @@
               <i class="fa-solid fa-filter"></i>
               <input type="text" id="diligenceSearchInput" placeholder="Filtrer (client / débiteur / réf dossier / notification / exécution / huissier / tribunal)..." />
             </div>
-            <div class="audience-color-filter">
+            <div class="audience-color-filter" id="diligenceSortFilterContainer">
               <label for="diligenceSortFilter">Sort</label>
               <select id="diligenceSortFilter">
                 <option value="all">Tous</option>
               </select>
             </div>
-            <div class="audience-color-filter">
-              <label for="diligenceDelegationFilter">Délégation</label>
+            <div class="audience-color-filter" id="diligenceDelegationFilterContainer">
+              <label for="diligenceDelegationFilter" id="diligenceDelegationFilterLabel">Délégation</label>
               <select id="diligenceDelegationFilter">
                 <option value="all">Toutes</option>
               </select>
@@ -919,6 +919,7 @@
               <label data-proc="Redressement"><input type="checkbox" value="Redressement" class="proc-check"> Redressement</label>
               <label data-proc="Liquidation judiciaire"><input type="checkbox" value="Liquidation judiciaire" class="proc-check"> Liquidation judiciaire</label>
               <label data-proc="Sanlam"><input type="checkbox" value="Sanlam" class="proc-check"> Sanlam</label>
+              <label data-proc="SCI TF"><input type="checkbox" value="SCI TF" class="proc-check"> SCI TF</label>
             </div>
             <div class="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure">
@@ -1254,11 +1255,11 @@
   </div>
 </div>
 
-<script src="state-persistence.js"></script>
-<script src="audience-ui-helpers.js"></script>
-<script src="render-audience-suivi.js?v=20260521-realtime-patch-rows-1"></script>
-<script src="render-diligence.js?v=20260521-realtime-patch-rows-1"></script>
-<script src="render-dashboard.js"></script>
-<script src="app.js?v=20260521-realtime-patch-rows-1"></script>
+<script src="state-persistence.js?v=20260601-diligence-import-db99cdb-12"></script>
+<script src="audience-ui-helpers.js?v=20260601-diligence-import-db99cdb-12"></script>
+<script src="render-audience-suivi.js?v=20260601-diligence-import-db99cdb-12"></script>
+<script src="render-diligence.js?v=20260601-diligence-import-db99cdb-12"></script>
+<script src="render-dashboard.js?v=20260601-diligence-import-db99cdb-12"></script>
+<script src="app.js?v=20260601-diligence-import-db99cdb-12"></script>
 </body>
 </html>

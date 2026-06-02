@@ -14,14 +14,22 @@ function DiligenceSection() {
               <i className="fa-solid fa-filter"></i>
               <input type="text" id="diligenceSearchInput" placeholder="Filtrer (client / débiteur / réf dossier / notification / exécution / huissier / tribunal)..." />
             </div>
-            <div className="audience-color-filter">
+            <div className="audience-color-filter" id="diligenceLotDuFilterContainer" style={{ display: 'none' }}>
+              <label htmlFor="diligenceLotDuFilter">Lot du</label>
+              <input type="text" id="diligenceLotDuFilter" list="diligenceLotDuOptions" placeholder="" autoComplete="off" />
+            </div>
+            <div className="audience-color-filter" id="diligenceObservationFilterContainer" style={{ display: 'none' }}>
+              <label htmlFor="diligenceObservationFilter">Observation</label>
+              <input type="text" id="diligenceObservationFilter" list="diligenceObservationOptions" placeholder="" autoComplete="off" />
+            </div>
+            <div className="audience-color-filter" id="diligenceSortFilterContainer">
               <label htmlFor="diligenceSortFilter">Sort</label>
               <select id="diligenceSortFilter">
                 <option value="all">Tous</option>
               </select>
             </div>
-            <div className="audience-color-filter">
-              <label htmlFor="diligenceDelegationFilter">Délégation</label>
+            <div className="audience-color-filter" id="diligenceDelegationFilterContainer">
+              <label htmlFor="diligenceDelegationFilter" id="diligenceDelegationFilterLabel">Délégation</label>
               <select id="diligenceDelegationFilter">
                 <option value="all">Toutes</option>
               </select>

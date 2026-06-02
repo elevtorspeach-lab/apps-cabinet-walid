@@ -1,5 +1,6 @@
 // ================== STATE ==================
-const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [], teamHistory: [] };
+const AppState = { clients: [], salleAssignments: [], recycleBin: [], recycleArchive: [], importHistory: [], deletedImportBatches: [], teamHistory: [] };
+const CLIENT_BLOCKED_DILIGENCE_IMPORT_BATCH_IDS = new Set();
 const DEFAULT_MANAGER_USERNAME = 'manager';
 const DEFAULT_MANAGER_PASSWORD = '1234';
 const REMOTE_MANAGER_USERNAME = 'manager';
@@ -138,6 +139,8 @@ let filterDiligenceDelegation = 'all';
 let filterDiligenceOrdonnance = 'all';
 let filterDiligenceTribunal = 'all';
 let filterDiligenceMiseAPrix = 'all';
+let filterDiligenceLotDu = '';
+let filterDiligenceObservation = '';
 let diligenceTribunalAliasMap = new Map();
 let diligenceTribunalLabelMap = new Map();
 let filterDiligenceCheckedFirst = false;
@@ -247,6 +250,8 @@ let remoteRefreshInFlight = false;
 let suppressStateConflictUntil = 0;
 let lastRemoteRefreshStartedAt = 0;
 let lastRemoteRefreshCompletedAt = 0;
+let diligenceOpenRemoteRefreshInFlight = false;
+let lastDiligenceOpenRemoteRefreshAt = 0;
 let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
@@ -496,6 +501,7 @@ const DOSSIER_PATCH_DEBOUNCE_MS = 500;
 const DOSSIER_HISTORY_FIELD_LABELS = {
   debiteur: 'Débiteur',
   cin: 'CIN',
+  cinNonDebiteur: 'CIN non débiteur',
   adversaire: 'Adversaire',
   nRef: 'N / ref',
   boiteNo: 'Boîte N°',
@@ -548,6 +554,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.certificatNonAppelStatus': 'Statut certificat non appel',
   'procedureDetails.notificationStatus': 'Statut notification',
   'procedureDetails.notificationSort': 'Sort notification',
+  'procedureDetails.sortSci': 'Sort SCI',
   'procedureDetails.notifConservateur': 'Not conservateur',
   'procedureDetails.notifDebiteur': 'Not débiteur',
   'procedureDetails.refExpertise': 'Ref expertise',
@@ -589,7 +596,7 @@ const CONTENT_ZOOM_MIN = 0.3;
 const CONTENT_ZOOM_MAX = 1.4;
 const CONTENT_ZOOM_STEP = 0.05;
 const REMOTE_SYNC_POLL_INTERVAL_MS = 5000;
-const REMOTE_SYNC_PING_INTERVAL_MS = 60000;
+const REMOTE_SYNC_PING_INTERVAL_MS = 20000;
 const REMOTE_SYNC_HEALTH_EVERY_TICKS = 18;
 const REMOTE_SYNC_EVENT_DEBOUNCE_MS = 250;
 const REMOTE_SYNC_BLOCKED_RETRY_MS = 2000;
@@ -2407,7 +2414,10 @@ function getDossierStatusOptions(currentStatus = ''){
 }
 
 function getDossierNormalizedStatusKey(dossier){
-  return normalizeLooseText(getDossierDisplayStatusSnapshot(dossier)?.statut || '').toLowerCase();
+  return normalizeLooseText(getDossierDisplayStatusSnapshot(dossier)?.statut || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }
 
 function isDossierClosedStatus(dossier){
@@ -8404,10 +8414,13 @@ function normalizeImportHistoryEntries(rawEntries){
       if(!entry || typeof entry !== 'object') return null;
       const id = String(entry.id || '').trim() || createImportTrackingId('import');
       const type = String(entry.type || '').trim() === 'audience' ? 'audience' : 'global';
+      const fileName = String(entry.fileName || '').trim() || 'Import Excel';
+      const diligenceHint = /^dil_/i.test(id)
+        || /saisie\s*arr[êe]t/i.test(fileName)
+        || /diligence/i.test(fileName);
       const category = type === 'audience'
         ? 'audience'
-        : (String(entry.category || '').trim() === 'diligence' ? 'diligence' : 'global');
-      const fileName = String(entry.fileName || '').trim() || 'Import Excel';
+        : (String(entry.category || '').trim() === 'diligence' || diligenceHint ? 'diligence' : 'global');
       const fileDataUrl = String(entry.fileDataUrl || '').trim();
       const createdAt = String(entry.createdAt || '').trim() || new Date().toISOString();
       const createdClientIds = Array.isArray(entry.createdClientIds)
@@ -8462,6 +8475,52 @@ function normalizeImportHistoryEntries(rawEntries){
     })
     .filter(Boolean)
     .slice(-IMPORT_HISTORY_MAX_ENTRIES);
+}
+
+function getDeletedImportBatchIdSet(extraIds = []){
+  const ids = new Set(CLIENT_BLOCKED_DILIGENCE_IMPORT_BATCH_IDS);
+  (Array.isArray(AppState.deletedImportBatches) ? AppState.deletedImportBatches : [])
+    .concat(Array.isArray(extraIds) ? extraIds : [])
+    .map(value=>String(value || '').trim())
+    .filter(Boolean)
+    .forEach(id=>ids.add(id));
+  return ids;
+}
+
+function getDeletedImportBatchIds(){
+  return [...getDeletedImportBatchIdSet()];
+}
+
+function rememberDeletedImportBatch(batchId){
+  const id = String(batchId || '').trim();
+  if(!id) return;
+  AppState.deletedImportBatches = getDeletedImportBatchIds().concat(id)
+    .map(value=>String(value || '').trim())
+    .filter(Boolean)
+    .filter((value, index, list)=>list.indexOf(value) === index);
+}
+
+function purgeDeletedImportBatchesFromAppState(extraIds = []){
+  const deletedBatchIds = getDeletedImportBatchIdSet(extraIds);
+  let removedDossiers = 0;
+  AppState.clients = (Array.isArray(AppState.clients) ? AppState.clients : []).map(client=>{
+    const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+    const keptDossiers = dossiers.filter(dossier=>{
+      const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+      const globalBatchId = String(dossier?.importGlobalBatchId || '').trim();
+      return !(diligenceBatchId && deletedBatchIds.has(diligenceBatchId))
+        && !(globalBatchId && deletedBatchIds.has(globalBatchId));
+    });
+    removedDossiers += Math.max(0, dossiers.length - keptDossiers.length);
+    return { ...client, dossiers: keptDossiers };
+  }).filter(client=>Array.isArray(client?.dossiers) ? client.dossiers.length || String(client?.name || '').trim() : true);
+  AppState.importHistory = normalizeImportHistoryEntries(AppState.importHistory)
+    .filter(entry=>!deletedBatchIds.has(String(entry?.id || '').trim()));
+  AppState.deletedImportBatches = [...deletedBatchIds];
+  if(removedDossiers > 0){
+    clearImportHistoryRenderCaches();
+  }
+  return removedDossiers;
 }
 
 function splitReferenceValues(value){
@@ -8770,6 +8829,14 @@ function parseExcelMontantValues(value){
   });
 
   return [...new Set(out)];
+}
+
+function compactImportProcedureHint(value){
+  return normalizeLooseText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 function makeAudienceDraftKey(ci, di, procKey){
@@ -9596,14 +9663,68 @@ function importHistoryEntryLooksLikeDiligence(entry){
   );
 }
 
+function buildDiligenceImportHistoryEntriesFromDossiers(){
+  const batches = new Map();
+  (Array.isArray(AppState.clients) ? AppState.clients : []).forEach(client=>{
+    const clientId = Number(client?.id);
+    (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
+      const batchId = String(dossier?.importDiligenceBatchId || dossier?.importGlobalBatchId || '').trim();
+      if(!batchId) return;
+      const dossierUid = ensureDossierImportUid(dossier);
+      if(!batches.has(batchId)){
+        batches.set(batchId, {
+          id: batchId,
+          type: 'global',
+          category: 'diligence',
+          fileName: `Diligence SAISIE ARRET - ${batchId}.xlsx`,
+          fileDataUrl: '',
+          createdAt: String(dossier?.createdAt || dossier?.updatedAt || new Date().toISOString()).trim(),
+          createdClientIds: [],
+          createdDossierUids: [],
+          createdOrphanClientIds: [],
+          createdOrphanDossierUids: [],
+          operations: [],
+          stats: { dossiers: 0, audiences: 0 }
+        });
+      }
+      const entry = batches.get(batchId);
+      if(Number.isFinite(clientId) && !entry.createdClientIds.includes(clientId)){
+        entry.createdClientIds.push(clientId);
+      }
+      if(dossierUid && !entry.createdDossierUids.includes(dossierUid)){
+        entry.createdDossierUids.push(dossierUid);
+      }
+      entry.stats.dossiers = entry.createdDossierUids.length;
+    });
+  });
+  return normalizeImportHistoryEntries([...batches.values()]);
+}
+
 function getImportHistoryEntriesByType(type){
   const requestedType = String(type || '').trim();
   const targetType = requestedType === 'audience' ? 'audience' : 'global';
   const targetCategory = requestedType === 'diligence'
     ? 'diligence'
     : (targetType === 'audience' ? 'audience' : 'global');
-  return normalizeImportHistoryEntries(AppState.importHistory)
-    .filter(entry=>entry.type === targetType && entry.category === targetCategory)
+  const deletedBatchIds = getDeletedImportBatchIdSet();
+  const isDiligenceHistoryEntry = (entry)=>{
+    if(!entry || typeof entry !== 'object') return false;
+    const id = String(entry.id || '').trim();
+    const fileName = String(entry.fileName || '').trim();
+    return String(entry.category || '').trim() === 'diligence'
+      || /^dil_/i.test(id)
+      || /saisie\s*arr[êe]t/i.test(fileName)
+      || /diligence/i.test(fileName);
+  };
+  const entries = normalizeImportHistoryEntries(AppState.importHistory)
+    .filter(entry=>!deletedBatchIds.has(String(entry?.id || '').trim()))
+    .filter(entry=>{
+      if(requestedType === 'diligence') return entry.type === 'global' && isDiligenceHistoryEntry(entry);
+      return entry.type === targetType && entry.category === targetCategory;
+    })
+    .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  if(requestedType !== 'diligence' || entries.length) return entries;
+  return buildDiligenceImportHistoryEntriesFromDossiers()
     .sort((a, b)=>String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -9674,10 +9795,16 @@ function removeImportHistoryEntry(batchId){
 function collectRelevantImportHistoryEntries({ clientId = null, dossiers = [] } = {}){
   const safeClientId = Number(clientId);
   const globalBatchIds = new Set();
+  const diligenceBatchIds = new Set();
   const audienceBatchIds = new Set();
   (Array.isArray(dossiers) ? dossiers : []).forEach(dossier=>{
     const globalBatchId = String(dossier?.importGlobalBatchId || '').trim();
     if(globalBatchId) globalBatchIds.add(globalBatchId);
+    const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+    if(diligenceBatchId) diligenceBatchIds.add(diligenceBatchId);
+    if(globalBatchId && normalizeProcedures(dossier).some(proc=>['SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Nantissement MED', 'Commandement', 'Nantissement'].includes(getDiligenceProcedureFilterValue(proc)))){
+      diligenceBatchIds.add(globalBatchId);
+    }
     const orphanAudienceBatchId = String(dossier?.importAudienceBatchId || '').trim();
     if(orphanAudienceBatchId) audienceBatchIds.add(orphanAudienceBatchId);
     const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
@@ -9693,7 +9820,8 @@ function collectRelevantImportHistoryEntries({ clientId = null, dossiers = [] } 
       if(audienceBatchIds.has(entry.id)) return true;
       return Number.isFinite(safeClientId) && entry.createdOrphanClientIds.includes(safeClientId);
     }
-    if(globalBatchIds.has(entry.id)) return true;
+    if(entry.category === 'diligence' && diligenceBatchIds.has(entry.id)) return true;
+    if(entry.category !== 'diligence' && globalBatchIds.has(entry.id)) return true;
     return Number.isFinite(safeClientId) && entry.createdClientIds.includes(safeClientId);
   });
 }
@@ -9707,6 +9835,7 @@ function syncImportHistoryWithCurrentState(){
 
   const existingClientIds = new Set();
   const globalDossierUidsByBatch = new Map();
+  const diligenceDossierUidsByBatch = new Map();
   const audienceOrphanDossierUidsByBatch = new Map();
   const audienceOperationKeysByBatch = new Map();
   const pushBatchValue = (map, batchId, value)=>{
@@ -9722,6 +9851,11 @@ function syncImportHistoryWithCurrentState(){
       const dossierUid = String(dossier?.importUid || '').trim();
       const globalBatchId = String(dossier?.importGlobalBatchId || '').trim();
       pushBatchValue(globalDossierUidsByBatch, globalBatchId, dossierUid);
+      const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+      pushBatchValue(diligenceDossierUidsByBatch, diligenceBatchId, dossierUid);
+      if(globalBatchId && normalizeProcedures(dossier).some(proc=>['SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Nantissement MED', 'Commandement', 'Nantissement'].includes(getDiligenceProcedureFilterValue(proc)))){
+        pushBatchValue(diligenceDossierUidsByBatch, globalBatchId, dossierUid);
+      }
 
       const orphanAudienceBatchId = String(dossier?.importAudienceBatchId || '').trim();
       pushBatchValue(audienceOrphanDossierUidsByBatch, orphanAudienceBatchId, dossierUid);
@@ -9756,7 +9890,8 @@ function syncImportHistoryWithCurrentState(){
     }
 
     const createdClientIds = entry.createdClientIds.filter(id=>existingClientIds.has(id));
-    const createdDossierUids = [...(globalDossierUidsByBatch.get(entry.id) || new Set())];
+    const batchMap = entry.category === 'diligence' ? diligenceDossierUidsByBatch : globalDossierUidsByBatch;
+    const createdDossierUids = [...(batchMap.get(entry.id) || new Set())];
     if(!createdDossierUids.length) return null;
     return {
       ...entry,
@@ -9788,8 +9923,9 @@ function isProtectedManualDossier(dossier){
   if(dossier.isManualEntry === true) return true;
   if(dossier.isAudienceOrphanImport === true) return false;
   const globalBatchId = String(dossier.importGlobalBatchId || '').trim();
+  const diligenceBatchId = String(dossier.importDiligenceBatchId || '').trim();
   const audienceBatchId = String(dossier.importAudienceBatchId || '').trim();
-  return !globalBatchId && !audienceBatchId;
+  return !globalBatchId && !diligenceBatchId && !audienceBatchId;
 }
 
 function syncUsersWithVisibleClients(){
@@ -9835,7 +9971,12 @@ async function deleteGlobalImportBatch(batchId){
     const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
     const keptDossiers = dossiers.filter(dossier=>{
       if(isProtectedManualDossier(dossier)) return true;
-      return String(dossier?.importGlobalBatchId || '').trim() !== batch.id;
+      const dossierGlobalBatchId = String(dossier?.importGlobalBatchId || '').trim();
+      const dossierDiligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+      const dossierBatchId = batch.category === 'diligence'
+        ? (dossierDiligenceBatchId || dossierGlobalBatchId)
+        : dossierGlobalBatchId;
+      return dossierBatchId !== batch.id;
     });
     removedDossiers += Math.max(0, dossiers.length - keptDossiers.length);
     client.dossiers = keptDossiers;
@@ -9844,17 +9985,18 @@ async function deleteGlobalImportBatch(batchId){
   });
 
   removeImportHistoryEntry(batch.id);
+  rememberDeletedImportBatch(batch.id);
   audienceDraft = {};
   audiencePrintSelection = new Set();
   diligencePrintSelection = new Set();
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
-  handleDossierDataChange({ audience: true });
+  handleDossierDataChange({ audience: true, rerenderLinked: true });
   await persistImportDeleteBatchNow('global', batch.id).catch((err)=>{
     console.error(`Erreur pendant la sauvegarde suppression import ${importLabel}`, err);
     alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
   });
-  refreshPrimaryViews({ includeSalle: true });
+  refreshPrimaryViews({ includeSalle: true, force: true });
   alert(`Import ${importLabel} supprimé.\nDossiers retirés: ${removedDossiers}`);
 }
 
@@ -9927,12 +10069,12 @@ async function deleteAudienceImportBatch(batchId){
   diligencePrintSelection = new Set();
   syncUsersWithVisibleClients();
   reconcileAudienceOrphanDossiers();
-  handleDossierDataChange({ audience: true });
+  handleDossierDataChange({ audience: true, rerenderLinked: true });
   await persistImportDeleteBatchNow('audience', batch.id).catch((err)=>{
     console.error('Erreur pendant la sauvegarde suppression import audience', err);
     alert('Import supprime de l ecran, mais la sauvegarde serveur a echoue. Rafraichissez puis reessayez.');
   });
-  refreshPrimaryViews({ includeSalle: true });
+  refreshPrimaryViews({ includeSalle: true, force: true });
   alert(`Import audience supprimé.\nProcédures restaurées: ${restoredProcedures}\nProcédures manuelles conservées: ${preservedManualProcedures}\nDossiers hors global retirés: ${removedOrphanDossiers}`);
 }
 
@@ -10133,7 +10275,7 @@ function renderImportHistoryPanel(containerId, type){
   const subtitle = normalizedType === 'audience'
     ? 'Les imports ci-dessous peuvent etre supprimes individuellement.'
     : (normalizedType === 'diligence' ? 'Chaque fichier diligence importe peut etre retire separement.' : 'Chaque fichier importe peut etre retire separement.');
-  const compactMode = normalizedType !== 'diligence';
+  const compactMode = true;
   const compactSummaryLabel = normalizedType === 'audience'
     ? 'Cliquez pour voir la liste complete'
     : 'Cliquez pour voir tous les fichiers importes';
@@ -11339,6 +11481,7 @@ function getStateSignatureFromPayload(payload){
 }
 
 function buildAppStatePayload(){
+  purgeDeletedImportBatchesFromAppState();
   return {
     clients: AppState.clients,
     salleAssignments: AppState.salleAssignments,
@@ -11350,6 +11493,7 @@ function buildAppStatePayload(){
       ...entry,
       fileDataUrl: ''
     })),
+    deletedImportBatches: getDeletedImportBatchIds(),
     teamHistory: normalizeTeamHistoryEntries(AppState.teamHistory)
   };
 }
@@ -13330,13 +13474,12 @@ function startRemoteSync(){
   }else{
     setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
   }
-  let lastRemoteSyncPingAt = 0;
+  let lastRemoteSyncPingAt = Date.now();
   refreshServerConnectionStatus({ force: true }).catch(()=>{});
   remoteSyncTimer = setInterval(()=>{
     remoteSyncHealthTick = (remoteSyncHealthTick + 1) % REMOTE_SYNC_HEALTH_EVERY_TICKS;
     const now = Date.now();
-    const shouldProbeConnection = !remoteSyncStreamConnected
-      && (now - lastRemoteSyncPingAt) >= REMOTE_SYNC_PING_INTERVAL_MS;
+    const shouldProbeConnection = (now - lastRemoteSyncPingAt) >= REMOTE_SYNC_PING_INTERVAL_MS;
     if(shouldProbeConnection){
       lastRemoteSyncPingAt = now;
       refreshServerConnectionStatus({ force: true }).then((connected)=>{
@@ -13493,7 +13636,7 @@ function parseExcelData(rows, sheet = null){
     debiteur: ['debiteur', 'debiteur ', 'débiteur'],
     montant: ['montant'],
     immatriculation: ['immatriculation'],
-    boiteNo: ['boite n', 'boite no', 'boite n°', 'boîte n', 'boîte no', 'boîte n°'],
+    boiteNo: ['boite', 'boîte', 'box', 'boite dossier', 'boîte dossier', 'boite n', 'boite no', 'boite n°', 'boîte n', 'boîte no', 'boîte n°'],
     caution: ['caution', 'nom caution', 'nom de caution'],
     marque: ['marque'],
     adresse: ['adresse', 'adress', 'adresse complete', 'adresse complète'],
@@ -14108,6 +14251,20 @@ function parseExcelData(rows, sheet = null){
       }
       const isClientTitleRow = /^client\s*:/i.test(clientName) && !refClient && !debiteur && !procedureText && !type && !montant;
       if(isClientTitleRow) continue;
+      const inferredProcedureParts = [];
+      const procedureTextBase = String(procedureText || '').trim();
+      if(procedureTextBase) inferredProcedureParts.push(procedureTextBase);
+      const procedureTextBaseCompact = normalizeLooseText(procedureTextBase)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      if(isSaisieArretImportRow && !procedureTextBaseCompact.includes('saisiearret') && !procedureTextBaseCompact.includes('saisiearrt')){
+        inferredProcedureParts.push('SAISIE ARRET');
+      }
+      if(isCommandementImportRow && !procedureTextBaseCompact.includes('commandement')){
+        inferredProcedureParts.push('Commandement');
+      }
 
       dossiers.push({
         rowNumber: j + 1,
@@ -14120,7 +14277,7 @@ function parseExcelData(rows, sheet = null){
         carriedMontant,
         dateAffectationExtra,
         type,
-        procedureText: procedureText || (isSaisieArretImportRow ? 'SAISIE ARRET' : (isCommandementImportRow ? 'Commandement' : '')),
+        procedureText: inferredProcedureParts.join('+'),
         refClient,
         debiteur,
         adversaire,
@@ -18858,13 +19015,6 @@ async function applyExcelImport(payload, options = {}){
       }
       importedDossiersCount += 1;
     } else {
-      // For existing dossiers, ensure new procedures are added to procedureList
-      procedures.forEach(p => {
-        if(!targetDossier.procedureList.includes(p)){
-          targetDossier.procedureList.push(p);
-        }
-      });
-      targetDossier.procedure = targetDossier.procedureList.join(', ');
       importedDossiersCount += 1; // Mark as "imported" (updated)
     }
     registerFallbackFromDossier(client, targetDossier);
@@ -19773,6 +19923,7 @@ function setupEvents(){
   $('audienceLink')?.addEventListener('click', ()=>showView('audience'));
   $('diligenceLink')?.addEventListener('click', ()=>{
     syncDiligenceMiseAPrixFilterVisibility();
+    syncDiligenceSaisieArretFilterVisibility();
     showView('diligence');
   });
   $('salleLink')?.addEventListener('click', ()=>showView('salle'));
@@ -19991,6 +20142,7 @@ function setupEvents(){
   ensureProcedureVisualStyles();
   ensureStandardProcedureCheckbox('Nantissement MED', 'Nantissement MED', 'Nantissement');
   ensureStandardProcedureCheckbox('SAISIE ARRÊT', 'SAISIE ARRÊT', 'SFDC');
+  ensureStandardProcedureCheckbox('SCI TF', 'SCI TF', 'Sanlam');
   document.querySelectorAll('.proc-check').forEach(cb=>{
     cb.addEventListener('change', e=>{
       if(suppressProcedureChange) return;
@@ -20097,6 +20249,7 @@ function setupEvents(){
       resetDiligenceAuxFilters();
       paginationState.diligence = 1;
       syncDiligenceMiseAPrixFilterVisibility();
+      syncDiligenceSaisieArretFilterVisibility();
     }
     renderDiligence();
   });
@@ -20105,13 +20258,24 @@ function setupEvents(){
     paginationState.diligence = 1;
     renderDiligence();
   });
+  $('diligenceLotDuFilter')?.addEventListener('input', (e)=>{
+    filterDiligenceLotDu = String(e.target?.value || '').trim();
+    paginationState.diligence = 1;
+    renderDiligenceDebounced();
+  });
+  $('diligenceObservationFilter')?.addEventListener('input', (e)=>{
+    filterDiligenceObservation = String(e.target?.value || '').trim();
+    paginationState.diligence = 1;
+    renderDiligenceDebounced();
+  });
   $('diligenceSortFilter')?.addEventListener('change', (e)=>{
     const nextValue = applyDiligenceFilterSelectionToCheckedRows('sort', e.target?.value);
     filterDiligenceSort = nextValue;
     renderDiligence();
   });
   $('diligenceDelegationFilter')?.addEventListener('change', (e)=>{
-    const nextValue = applyDiligenceFilterSelectionToCheckedRows('attDelegationOuDelegat', e.target?.value);
+    const batchField = isDiligenceSaisieArretProcedure(filterDiligenceProcedure) ? 'sortPle' : 'attDelegationOuDelegat';
+    const nextValue = applyDiligenceFilterSelectionToCheckedRows(batchField, e.target?.value);
     filterDiligenceDelegation = nextValue;
     renderDiligence();
   });
@@ -20400,6 +20564,25 @@ function setSelectedAudienceColor(color, syncFilter){
   }
 }
 
+function refreshDiligenceFromServerOnOpen(){
+  if(!currentUser || !hasRemoteAuthSession() || importInProgress) return;
+  if(diligenceOpenRemoteRefreshInFlight) return;
+  const now = Date.now();
+  if((now - lastDiligenceOpenRemoteRefreshAt) < 2500) return;
+  diligenceOpenRemoteRefreshInFlight = true;
+  lastDiligenceOpenRemoteRefreshAt = now;
+  remoteRefreshPending = true;
+  refreshRemoteState({ force: true }).then(()=>{
+    if(currentView !== 'diligence') return;
+    markDeferredRenderDirty('diligence');
+    runSectionRenderSafely('diligence', ()=>renderDiligence({ force: true }), { delayMs: 30 });
+  }).catch((err)=>{
+    console.warn('Actualisation diligence depuis serveur impossible', err);
+  }).finally(()=>{
+    diligenceOpenRemoteRefreshInFlight = false;
+  });
+}
+
 // ================== NAV ==================
 function showView(v, options = {}){
   const nextView = resolveAccessibleView(v);
@@ -20471,6 +20654,9 @@ function showView(v, options = {}){
   currentView = nextView;
   if(nextView === 'dashboard' && options.warmup !== false && !isSameView){
     scheduleBackgroundDataWarmup(1800);
+  }
+  if(nextView === 'diligence'){
+    refreshDiligenceFromServerOnOpen();
   }
   if(isMobileViewport()){
     setSidebarCollapsed(true);
@@ -21290,6 +21476,16 @@ async function addDossier(){
     const previousImportMeta = editingDossier
       ? AppState.clients.find(c=>c.id == editingDossier.clientId)?.dossiers?.[editingDossier.index]
       : null;
+    if(editingDossier && previousImportMeta?.procedureDetails && typeof previousImportMeta.procedureDetails === 'object'){
+      Object.keys(details).forEach((procedureName)=>{
+        const previousProcedureDetails = previousImportMeta.procedureDetails?.[procedureName];
+        if(!previousProcedureDetails || typeof previousProcedureDetails !== 'object') return;
+        details[procedureName] = {
+          ...previousProcedureDetails,
+          ...details[procedureName]
+        };
+      });
+    }
 
     const dossier = {
       importUid: String(previousImportMeta?.importUid || '').trim() || createImportTrackingId('dossier'),
@@ -21304,6 +21500,7 @@ async function addDossier(){
       suiviUpdatedAt: new Date().toISOString(),
       debiteur: $('debiteurInput').value.trim(),
       cin: $('cinInput')?.value.trim() || '',
+      cinNonDebiteur: String(previousImportMeta?.cinNonDebiteur || '').trim(),
       adversaire: $('adversaireInput')?.value.trim() || '',
       nRef: $('nRefInput')?.value.trim() || '',
       boiteNo: $('boiteNoInput')?.value.trim() || '',
@@ -21551,7 +21748,18 @@ function parseSuiviReferenceParts(value){
   };
 }
 
+function isSuiviSaisieArretRow(row){
+  const source = row?.procSet instanceof Set
+    ? [...row.procSet]
+    : (Array.isArray(row?.procSource) ? row.procSource : normalizeProcedures(row?.d || {}));
+  return source.some(proc=>getDiligenceProcedureFilterValue(proc) === 'SAISIE ARRÊT');
+}
+
 function buildSuiviRefDebiteurKey(row){
+  if(isSuiviSaisieArretRow(row)){
+    if(row && typeof row === 'object') row.__suiviPairKey = '';
+    return '';
+  }
   if(typeof row?.__suiviPairKey === 'string' && row.__suiviPairKey) return row.__suiviPairKey;
   const rawReference = String(row?.d?.referenceClient || '').trim();
   if(isLetterOnlyClientReference(rawReference)) return '';
@@ -21720,6 +21928,7 @@ function renderProcedureBadges(procedureText){
     if(name === 'S/bien') cls = 'proc-sbien';
     if(name === 'Injonction') cls = 'proc-injonction';
     if(name === 'Sanlam') cls = 'proc-sanlam';
+    if(name === 'SCI TF') cls = 'proc-sci-tf';
     return `<span class="proc-pill ${cls}">${escapeHtml(name)}</span>`;
   }).join('');
   return `<div class="proc-pill-list">${pills}</div>`;
@@ -21981,7 +22190,11 @@ function getDiligenceSearchValues(row){
     row.dossier?.adresse,
     row.dossier?.montant,
     row.dossier?.cin,
+    row.dossier?.cinNonDebiteur,
     row.dossier?.cautionCin,
+    row.dossier?.efNumber,
+    row.dossier?.conservation,
+    row.dossier?.statut,
     row.dossier?.ville,
     details.referenceClient,
     details.dateDepot,
@@ -21995,6 +22208,8 @@ function getDiligenceSearchValues(row){
     details.adresse,
     details.ville,
     details.montant,
+    details.efNumber,
+    details.conservation,
     details.rib,
     details.banque,
     details.banqueFr,
@@ -22004,6 +22219,7 @@ function getDiligenceSearchValues(row){
     details.avocat,
     details.juge,
     details.sort,
+    details.sortSci,
     details.sortPle,
     details.notificationNo,
     details.notificationStatus,
@@ -23438,6 +23654,10 @@ function isDiligenceNantissementMedProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'Nantissement MED';
 }
 
+function isDiligenceSciTfProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'SCI TF';
+}
+
 function isCasablancaTpiTribunal(tribunal){
   const raw = String(tribunal || '').trim().toLowerCase();
   if(!raw) return false;
@@ -23481,6 +23701,9 @@ function getDiligenceNantissementMedHeaderMode(rows){
 }
 
 function getDiligenceRowDelegationFilterValue(procedure, details){
+  if(isDiligenceSaisieArretProcedure(procedure)){
+    return String(details?.sortPle || '').trim() || 'att plie';
+  }
   if(isDiligenceNantissementMedProcedure(procedure)){
     return normalizeDiligenceAttOk(details?.curateurSortNotif || '') || 'att';
   }
@@ -23610,6 +23833,7 @@ function getDiligenceRows(){
           && baseProc !== 'Commandement'
           && baseProc !== 'Nantissement MED'
           && baseProc !== 'Nantissement'
+          && baseProc !== 'SCI TF'
         ) return;
         const details = d?.procedureDetails?.[proc] || {};
         if(baseProc === 'Nantissement MED'
@@ -23619,7 +23843,9 @@ function getDiligenceRows(){
         }
         const isCommandement = baseProc === 'Commandement';
         const tribunal = isCommandement ? '' : String(details.tribunal || '').trim();
-        const rawSort = isDiligenceNantissementMedProcedure(baseProc)
+        const rawSort = isDiligenceSciTfProcedure(baseProc)
+          ? String(details.sortSci || '').trim()
+          : isDiligenceNantissementMedProcedure(baseProc)
           ? (normalizeDiligenceOrdonnance(details.sortOrd || '') === 'ok' ? 'ORD OK' : 'ATT ORD')
           : String(details.sort || '').trim();
         const sort = isDiligenceExecutionProcedure(baseProc) && !isDiligenceFreeTextExecutionSortProcedure(baseProc)
@@ -23665,6 +23891,8 @@ function resetDiligenceAuxFilters(){
   filterDiligenceDelegation = 'all';
   filterDiligenceOrdonnance = 'all';
   filterDiligenceTribunal = 'all';
+  filterDiligenceLotDu = '';
+  filterDiligenceObservation = '';
   const sortSelect = $('diligenceSortFilter');
   if(sortSelect) sortSelect.value = 'all';
   const delegationSelect = $('diligenceDelegationFilter');
@@ -23673,6 +23901,10 @@ function resetDiligenceAuxFilters(){
   if(ordonnanceSelect) ordonnanceSelect.value = 'all';
   const tribunalInput = $('diligenceTribunalFilter');
   if(tribunalInput) tribunalInput.value = '';
+  const lotDuInput = $('diligenceLotDuFilter');
+  if(lotDuInput) lotDuInput.value = '';
+  const observationInput = $('diligenceObservationFilter');
+  if(observationInput) observationInput.value = '';
 }
 
 function syncDiligenceProcedureFilter(rows){
@@ -23680,6 +23912,7 @@ function syncDiligenceProcedureFilter(rows){
   if(!select) return;
   if(rows === diligenceFilterProcedureRowsRef){
     select.value = filterDiligenceProcedure;
+    syncDiligenceSaisieArretFilterVisibility();
     return;
   }
   const set = new Set();
@@ -23693,6 +23926,7 @@ function syncDiligenceProcedureFilter(rows){
     filterDiligenceProcedure = 'all';
   }
   select.value = filterDiligenceProcedure;
+  syncDiligenceSaisieArretFilterVisibility();
   diligenceFilterProcedureRowsRef = rows;
 }
 
@@ -23744,6 +23978,9 @@ function syncDiligenceSortFilter(rows){
 function syncDiligenceDelegationFilter(rows){
   const select = $('diligenceDelegationFilter');
   if(!select) return;
+  const isSaisieArret = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
+  const label = $('diligenceDelegationFilterLabel') || document.querySelector('label[for="diligenceDelegationFilter"]');
+  if(label) label.textContent = isSaisieArret ? 'Sort plie' : 'Délégation';
   if(rows === diligenceFilterDelegationRowsRef){
     select.value = filterDiligenceDelegation;
     return;
@@ -23753,9 +23990,11 @@ function syncDiligenceDelegationFilter(rows){
     const delegation = String(r.delegation || '').trim();
     if(delegation) set.add(delegation);
   });
-  const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
-  select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
-  if(filterDiligenceDelegation !== 'all' && !set.has(filterDiligenceDelegation)){
+  const sorted = isSaisieArret
+    ? ['att plie', 'plie ok']
+    : [...set].sort((a,b)=>a.localeCompare(b, 'fr'));
+  select.innerHTML = `<option value="all">${isSaisieArret ? 'Tous' : 'Toutes'}</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+  if(filterDiligenceDelegation !== 'all' && !sorted.includes(filterDiligenceDelegation)){
     filterDiligenceDelegation = 'all';
   }
   select.value = filterDiligenceDelegation;
@@ -24025,10 +24264,10 @@ function getDiligenceAvisCurateurValue(value){
 function getDiligenceNantissementMedAvisCurateurValue(value){
   const raw = String(value ?? '').trim();
   const lower = raw.toLowerCase();
-  if(!raw) return 'CURATEUR NOTIFIER';
+  if(!raw) return '';
   if(lower === 'nb') return 'NB';
   if(lower.includes('nb')) return 'NB';
-  if(lower.includes('curateur') || lower.includes('notifier')) return 'CURATEUR NOTIFIER';
+  if(lower.includes('curateur') || lower.includes('notifier')) return '';
   return raw;
 }
 
@@ -24139,6 +24378,51 @@ function applyDiligenceAutoSizing(root = document){
   root.querySelectorAll('.diligence-autosize').forEach(autoSizeDiligenceControl);
 }
 
+const DILIGENCE_FIELD_DATALIST_IDS = {
+  lotDu: 'diligenceLotDuOptions',
+  observation: 'diligenceObservationOptions',
+  tribunal: 'diligenceTribunalEditOptions'
+};
+
+function getDiligenceFieldDatalistId(field){
+  return DILIGENCE_FIELD_DATALIST_IDS[String(field || '').trim()] || '';
+}
+
+function ensureDiligenceFieldDatalist(id){
+  const safeId = String(id || '').trim();
+  if(!safeId) return null;
+  let datalist = document.getElementById(safeId);
+  if(datalist) return datalist;
+  datalist = document.createElement('datalist');
+  datalist.id = safeId;
+  document.body.appendChild(datalist);
+  return datalist;
+}
+
+function renderDiligenceEditFieldDatalists(rows){
+  const sourceRows = Array.isArray(rows) ? rows : getDiligenceRows();
+  const valuesByField = {
+    lotDu: new Set(),
+    observation: new Set(),
+    tribunal: new Set()
+  };
+  sourceRows.forEach(row=>{
+    const details = row?.details && typeof row.details === 'object' ? row.details : {};
+    const lotDu = String(details.lotDu || '').trim();
+    const observation = String(details.observation || '').trim();
+    const tribunal = String(row?.tribunal || details.tribunal || '').trim();
+    if(lotDu) valuesByField.lotDu.add(lotDu);
+    if(observation) valuesByField.observation.add(observation);
+    if(tribunal) valuesByField.tribunal.add(tribunal);
+  });
+  Object.entries(DILIGENCE_FIELD_DATALIST_IDS).forEach(([field, id])=>{
+    const datalist = ensureDiligenceFieldDatalist(id);
+    if(!datalist) return;
+    const values = [...(valuesByField[field] || new Set())].sort((a, b)=>a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' }));
+    datalist.innerHTML = values.map(value=>`<option value="${escapeAttr(value)}"></option>`).join('');
+  });
+}
+
 function renderDiligenceEditableCell(row, procEncoded, field, value){
   const normalized = String(value ?? '').trim();
   const isAutoSize = shouldAutoSizeDiligenceField(field);
@@ -24146,6 +24430,8 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
   const autoSizeAttrs = isAutoSize ? ` data-field="${escapeAttr(field)}"` : '';
   const autoSizeStyle = isAutoSize ? ` style="width:${getDiligenceAutoSizeWidthCh(field, normalized)}ch"` : '';
   const onSizeChange = isAutoSize ? 'autoSizeDiligenceControl(this);' : '';
+  const datalistId = getDiligenceFieldDatalistId(field);
+  const datalistAttrs = datalistId ? ` list="${escapeAttr(datalistId)}" autocomplete="off"` : '';
   const isOrdonnanceField = field === 'attOrdOrOrdOk';
   const isDelegationField = field === 'attDelegationOuDelegat';
   const isSbienOrdonnanceField = isOrdonnanceField && getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien';
@@ -24200,7 +24486,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     `;
   }
   if(field === 'sortPle'){
-    const status = normalized;
+    const status = normalized || 'att plie';
     if(!row?.canEdit){
       return escapeHtml(status || '-');
     }
@@ -24208,7 +24494,6 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="" ${status === '' ? 'selected' : ''}>-</option>
         <option value="att plie" ${status === 'att plie' ? 'selected' : ''}>att plie</option>
         <option value="plie ok" ${status === 'plie ok' ? 'selected' : ''}>plie ok</option>
       </select>
@@ -24240,6 +24525,22 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         class="diligence-inline-input"
         value="${escapeAttr(val)}"
         onkeydown="if(event.key === 'Enter'){ updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value); }">
+    `;
+  }
+  if(field === 'sortSci'){
+    const val = String(value || '').trim();
+    if(!row?.canEdit){
+      return escapeHtml(val || '-');
+    }
+    return `
+      <select
+        class="diligence-inline-select"
+        onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="" ${val === '' ? 'selected' : ''}>Sort SCI</option>
+        <option value="att enregistrer" ${val === 'att enregistrer' ? 'selected' : ''}>ATT ENREGISTRER</option>
+        <option value="sci enregistrer" ${val === 'sci enregistrer' ? 'selected' : ''}>SCI ENREGISTRER</option>
+        <option value="pas enregistrer" ${val === 'pas enregistrer' ? 'selected' : ''}>PAS ENREGISTRER</option>
+      </select>
     `;
   }
   if(field === 'notifDebiteur'){
@@ -24287,9 +24588,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
     `;
     }
-    const status = isNantissementMed
-      ? getDiligenceNantissementMedAvisCurateurValue(normalized)
-      : getDiligenceAvisCurateurValue(normalized);
+    const status = getDiligenceAvisCurateurValue(normalized);
     if(!row?.canEdit){
       return escapeHtml(status || '-');
     }
@@ -24298,8 +24597,9 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="CURATEUR NOTIFIER" ${status === 'CURATEUR NOTIFIER' ? 'selected' : ''}>CURATEUR NOTIFIER</option>
-        <option value="NB" ${status === 'NB' ? 'selected' : ''}>NB</option>
+        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 Avis en TR</option>
+        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 Att Pub.</option>
+        <option value="pub au J" ${status === 'pub au J' ? 'selected' : ''}>3 pub au J</option>
       </select>
     `;
     }
@@ -24470,6 +24770,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     <input
       type="text"
       class="diligence-inline-input${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+      ${datalistAttrs}
       value="${escapeAttr(value || '')}"
       oninput="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
   `;
@@ -24477,6 +24778,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
 
 const DILIGENCE_BATCH_UPDATE_FIELDS = new Set([
   'attDelegationOuDelegat',
+  'sortPle',
   'sort'
 ]);
 
@@ -24489,7 +24791,14 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
   if(!dossier.procedureDetails) dossier.procedureDetails = {};
   if(!dossier.procedureDetails[proc]) dossier.procedureDetails[proc] = {};
   const details = dossier.procedureDetails[proc];
-  const isDossierField = field === 'ville' || field === 'boiteNo' || field === 'gestionnaire';
+  const isDossierField = field === 'ville'
+    || field === 'boiteNo'
+    || field === 'gestionnaire'
+    || field === 'cinNonDebiteur'
+    || field === 'montant'
+    || (field === 'efNumber' && !isDiligenceSciTfProcedure(proc))
+    || (field === 'conservation' && !isDiligenceSciTfProcedure(proc))
+    || field === 'statut';
   const previousValue = isDossierField ? dossier[field] : details[field];
   const previousOrdonnanceValue = details.attOrdOrOrdOk;
   let nextValue = value;
@@ -24499,7 +24808,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
     nextValue = isDiligenceExecutionProcedure(proc) && !isDiligenceFreeTextExecutionSortProcedure(proc)
       ? normalizeDiligenceSort(value)
       : String(value ?? '').trim();
-  }else if(field === 'notificationSort'){
+  }else if(field === 'notificationSort' || field === 'sortSci'){
     nextValue = String(value ?? '').trim();
   }else if(field === 'lettreRec'){
     nextValue = normalizeDiligenceLettreRec(value);
@@ -24700,6 +25009,8 @@ function extractYearFromReferenceDiligence(ref) {
 
 function getFilteredDiligenceRows(allRows){
   const q = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
+  const lotDuQuery = normalizeDiligenceSearchQuery(filterDiligenceLotDu);
+  const observationQuery = normalizeDiligenceSearchQuery(filterDiligenceObservation);
   const executionOnlyQuery = isDiligenceExecutionOnlyQuery(q);
   const restrictAssAttOrdToAudience = shouldRestrictDiligenceAssAttOrdToAudience();
   const audienceAssAttOrdKeySet = restrictAssAttOrdToAudience ? getDiligenceAudienceAssAttOrdKeySet() : null;
@@ -24712,6 +25023,8 @@ function getFilteredDiligenceRows(allRows){
     filterDiligenceOrdonnance,
     filterDiligenceTribunal,
     filterDiligenceMiseAPrix,
+    lotDuQuery,
+    observationQuery,
     restrictAssAttOrdToAudience ? `audience-green-only:${audienceAssAttOrdKeySet?.size || 0}` : 'all-ass-att-ord'
   ].join('||');
   if(allRows === diligenceFilteredRowsCacheInput && filterKey === diligenceFilteredRowsCacheKey){
@@ -24727,6 +25040,8 @@ function getFilteredDiligenceRows(allRows){
     ) return false;
     if(restrictAssAttOrdToAudience && isDiligenceAssProcedure(row?.procedure) && !audienceAssAttOrdKeySet?.has(makeDiligencePrintKey(row?.clientId, row?.dossierIndex, row?.procedure))) return false;
     if(filterDiligenceTribunal !== 'all' && resolveDiligenceTribunalFilterKey(row.tribunalFilterKey || row.tribunal) !== filterDiligenceTribunal) return false;
+    if(lotDuQuery && !normalizeDiligenceSearchQuery(row?.details?.lotDu || '').includes(lotDuQuery)) return false;
+    if(observationQuery && !normalizeDiligenceSearchQuery(row?.details?.observation || '').includes(observationQuery)) return false;
     if(filterDiligenceMiseAPrix === 'vide'){
       const miseAPrixVal = String(row?.details?.miseAPrix || '').trim();
       if(miseAPrixVal && miseAPrixVal !== '-') return false;
@@ -24964,6 +25279,12 @@ function shouldShowDiligenceNantissementMedColumnsForRows(rows){
   return !!sourceRows.length && sourceRows.every((row)=>isDiligenceNantissementMedProcedure(row?.procedure));
 }
 
+function shouldShowDiligenceSciTfColumnsForRows(rows){
+  if(isDiligenceSciTfProcedure(filterDiligenceProcedure)) return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceSciTfProcedure(row?.procedure));
+}
+
 function shouldShowDiligenceSbienExportColumnsForRows(rows){
   if(getDiligenceProcedureFilterValue(filterDiligenceProcedure) === 'S/bien') return true;
   const sourceRows = Array.isArray(rows) ? rows : [];
@@ -24979,6 +25300,31 @@ function buildDiligenceExportRowCells(row, columns){
 
 function finalizeDiligenceExportDataset(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
+  const showSciTfColumns = shouldShowDiligenceSciTfColumnsForRows(sourceRows);
+  if(showSciTfColumns){
+    const columns = [
+      { header: 'Réf client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
+      { header: 'CIN non débiteur', width: 20, getValue: (row)=>row?.dossier?.cinNonDebiteur || '' },
+      { header: 'Montant', width: 18, getValue: (row)=>row?.dossier?.montant || '' },
+      { header: 'TF N°', width: 18, getValue: (row)=>row?.details?.efNumber || row?.dossier?.efNumber || '' },
+      { header: 'Conservation', width: 24, getValue: (row)=>row?.details?.conservation || row?.dossier?.conservation || '' },
+      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
+      { header: 'Date dépôt', width: 20, getValue: (row)=>row?.details?.dateDepot || '' },
+      { header: 'Référence dossier', width: 26, getValue: (row)=>row?.details?.referenceClient || '' },
+      { header: 'État ordonnance', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
+      { header: 'Sort SCI', width: 22, getValue: (row)=>row?.details?.sortSci || '' },
+      { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
+      { header: 'Statut', width: 20, getValue: (row)=>row?.dossier?.statut || '' },
+      { header: 'Boîte', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+    ];
+    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    return {
+      rows: sourceRows,
+      headers: columns.map((column)=>column.header),
+      tableRows,
+      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+    };
+  }
   const showSaisieArretColumns = shouldShowDiligenceSaisieArretColumnsForRows(sourceRows);
   if(showSaisieArretColumns){
     const columns = [
@@ -24997,12 +25343,12 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Banque / STE AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
       { header: 'Adresse Banque', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
       { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
-      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
       { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
       { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
+      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
       { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
       { header: 'Execution N°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
-      { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
+      { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || 'att plie' },
       { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
@@ -26741,6 +27087,15 @@ function getSuiviRequiredProcedureFields(procName, details){
       fields.push('dateNotification');
     }
     return fields;
+  }
+  if(baseProc === 'SCI TF'){
+    return [
+      'dateDepot',
+      'referenceClient',
+      'attOrdOrOrdOk',
+      'sortSci',
+      'tribunal'
+    ];
   }
   if(baseProc === 'Redressement' || baseProc === 'Liquidation judiciaire'){
     return [
@@ -29766,7 +30121,20 @@ function setAudienceDossierStatusFromEncoded(keyEncoded, value){
   if(!dossier) return false;
   const beforeSnapshot = getDossierDisplayStatusSnapshot(dossier);
   const beforeStatus = String(beforeSnapshot?.statut || 'En cours').trim() || 'En cours';
-  if(beforeStatus === nextStatus) return false;
+  const hadDraftStatus = !!(
+    audienceDraft?.[key]
+    && Object.prototype.hasOwnProperty.call(audienceDraft[key], 'dossierStatus')
+  );
+  const clearDraftStatus = ()=>{
+    if(!hadDraftStatus || !audienceDraft?.[key]) return;
+    delete audienceDraft[key].dossierStatus;
+    if(!Object.keys(audienceDraft[key]).length) delete audienceDraft[key];
+    persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
+  };
+  if(beforeStatus === nextStatus){
+    clearDraftStatus();
+    return false;
+  }
   const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
     ? dossier.procedureDetails
     : {};
@@ -29780,9 +30148,7 @@ function setAudienceDossierStatusFromEncoded(keyEncoded, value){
     }
   });
   dossier.statut = nextStatus;
-  if(nextStatus === 'En cours'){
-    dossier.statutDetails = '';
-  }
+  dossier.statutDetails = '';
   queueDossierHistoryEntry(dossier, {
     source: 'audience',
     field: 'statut',
@@ -29795,6 +30161,7 @@ function setAudienceDossierStatusFromEncoded(keyEncoded, value){
     preserveClientListSummary: true
   });
   persistDossierReferenceNow(client.id, dossier, { source: 'audience-status' }).catch(()=>{});
+  clearDraftStatus();
   if(isDeferredRenderSectionVisible('audience')){
     renderAudienceKeepingPosition();
   }else{
@@ -30331,9 +30698,7 @@ function saveAllAudience(options = {}){
           }
         });
         dossier.statut = afterStatus;
-        if(afterStatus === 'En cours'){
-          dossier.statutDetails = '';
-        }
+        dossier.statutDetails = '';
         queueDossierHistoryEntry(dossier, {
           source: 'audience',
           field: 'statut',
@@ -30451,6 +30816,7 @@ function collectProcedureDraftFromCards({ root = document, trimValues = false } 
     draft[name] = {};
     card.querySelectorAll('input, select').forEach(fieldEl=>{
       const fieldName = fieldEl.dataset.field;
+      if(!fieldName) return;
       let fieldValue = fieldEl.type === 'checkbox'
         ? (fieldEl.checked ? '1' : '')
         : (trimValues ? fieldEl.value.trim() : fieldEl.value);
@@ -30777,6 +31143,25 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       ${tribunalFieldHtml}
     `;
   }
+  if(baseProc === 'SCI TF'){
+    return `
+      <input type="text" data-field="dateDepot" placeholder="Date dépôt">
+      <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
+      <select data-field="attOrdOrOrdOk">
+        <option value="att ord" selected>ATT ORD</option>
+        <option value="ord ok">ORD OK</option>
+      </select>
+      <select data-field="sortSci">
+        <option value="">Sort SCI</option>
+        <option value="att enregistrer">ATT ENREGISTRER</option>
+        <option value="sci enregistrer">SCI ENREGISTRER</option>
+        <option value="pas enregistrer">PAS ENREGISTRER</option>
+      </select>
+      <input type="text" data-field="efNumber" placeholder="TF N&deg;">
+      <input type="text" data-field="conservation" placeholder="Conservation">
+      ${tribunalFieldHtml}
+    `;
+  }
   if(baseProc === 'Redressement' || baseProc === 'Liquidation judiciaire'){
     const fixedLabel = 'Declaration';
     return `
@@ -30870,6 +31255,7 @@ function getProcedureColorClass(procName){
   if(b === 'saisie arrêt' || b === 'saisie arret') return 'proc-saisie-arret';
   if(b === 's/bien') return 'proc-sbien';
   if(b === 'injonction') return 'proc-injonction';
+  if(b === 'sci tf') return 'proc-sci-tf';
   if(b === 'sanlam'){
     const variantIndex = getProcedureVariantIndex(procName);
     if(variantIndex === 2) return 'proc-sanlam-2';
@@ -31106,7 +31492,8 @@ function renderProcedureDetails(forceList, forceDraft){
     'saisie arrêt': 'SAISIE ARR\u00caT',
     'saisie arret': 'SAISIE ARR\u00caT',
     's/bien': 'S/bien',
-    'injonction': 'Injonction'
+    'injonction': 'Injonction',
+    'sci tf': 'SCI TF'
   };
   const seen = new Set();
   selected.forEach(v => {
@@ -31287,7 +31674,8 @@ function isStandardProcedureName(value){
     'saisie arret',
     's/bien',
     'injonction',
-    'sanlam'
+    'sanlam',
+    'sci tf'
   ]).has(normalized);
 }
 
@@ -31348,6 +31736,16 @@ function syncDiligenceMiseAPrixFilterVisibility(){
   if(!container) return;
   const isCommandement = isDiligenceCommandementProcedure(filterDiligenceProcedure);
   container.style.display = isCommandement ? 'inline-block' : 'none';
+}
+
+function syncDiligenceSaisieArretFilterVisibility(){
+  const lotDuContainer = $('diligenceLotDuFilterContainer');
+  const observationContainer = $('diligenceObservationFilterContainer');
+  const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
+  const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
+  if(lotDuContainer) lotDuContainer.style.display = show ? 'inline-block' : 'none';
+  if(observationContainer) observationContainer.style.display = show ? 'inline-block' : 'none';
+  if(sortContainer) sortContainer.style.display = show ? 'none' : 'inline-block';
 }
 
 // Final override: keep audience date validation inline and non-blocking.

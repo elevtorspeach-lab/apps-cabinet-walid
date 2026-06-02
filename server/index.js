@@ -82,6 +82,7 @@ const DEFAULT_STATE = {
   recycleBin: [],
   recycleArchive: [],
   importHistory: [],
+  deletedImportBatches: [],
   teamHistory: [],
   version: 0,
   updatedAt: new Date().toISOString()
@@ -601,86 +602,6 @@ async function ensureDataFile() {
   await db.initializeDatabase();
 }
 
-function compactProcedureText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function isSaisieArretProcedureName(value) {
-  const compact = compactProcedureText(value);
-  return compact === 'saisiearret'
-    || compact === 'saisiearrt'
-    || compact === 'saisiarret'
-    || compact === 'saisiarrt'
-    || compact.includes('saisiearret')
-    || compact.includes('saisiearrt');
-}
-
-function splitProcedureText(value) {
-  return String(value || '')
-    .split(/[,+;]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function isImportedDossierRecord(dossier) {
-  if (!dossier || typeof dossier !== 'object') return false;
-  const importIds = [
-    dossier.importGlobalBatchId,
-    dossier.importAudienceBatchId,
-    dossier.importDiligenceBatchId
-  ].map((value) => String(value || '').trim()).filter(Boolean);
-  return importIds.length > 0
-    || String(dossier.importUid || '').trim().startsWith('imp-')
-    || !!String(dossier.importSource || '').trim();
-}
-
-function stripImportedSaisieArretFromDossier(dossier) {
-  if (!isImportedDossierRecord(dossier)) return dossier;
-  const next = dossier && typeof dossier === 'object' ? { ...dossier } : dossier;
-  if (!next || typeof next !== 'object') return next;
-  const detailMap = next.procedureDetails && typeof next.procedureDetails === 'object'
-    ? { ...next.procedureDetails }
-    : {};
-  Object.keys(detailMap).forEach((key) => {
-    if (isSaisieArretProcedureName(key)) {
-      delete detailMap[key];
-    }
-  });
-  next.procedureDetails = detailMap;
-  const keepProcedures = [
-    ...splitProcedureText(next.procedure),
-    ...(Array.isArray(next.procedureList) ? next.procedureList : []),
-    ...Object.keys(detailMap)
-  ].filter((name) => !isSaisieArretProcedureName(name));
-  const seen = new Set();
-  const cleanedProcedures = keepProcedures.filter((name) => {
-    const key = compactProcedureText(name);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  if (!cleanedProcedures.length) return null;
-  next.procedure = cleanedProcedures.join(', ');
-  if (Array.isArray(next.procedureList)) next.procedureList = cleanedProcedures;
-  return next;
-}
-
-function stripImportedSaisieArretFromClients(clients) {
-  return (Array.isArray(clients) ? clients : []).map((client) => {
-    if (!client || typeof client !== 'object') return client;
-    return {
-      ...client,
-      dossiers: (Array.isArray(client.dossiers) ? client.dossiers : [])
-        .map(stripImportedSaisieArretFromDossier)
-        .filter(Boolean)
-    };
-  });
-}
-
 function normalizeStoredState(rawState, previousState = null) {
   const previousVersion = Number(previousState?.version);
   const nextVersion = Number.isFinite(previousVersion) && previousVersion >= 0
@@ -691,15 +612,34 @@ function normalizeStoredState(rawState, previousState = null) {
   const previous = previousState && typeof previousState === 'object' ? previousState : DEFAULT_STATE;
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(sourceState, key);
 
+  const deletedImportBatches = (Array.isArray(previous.deletedImportBatches) ? previous.deletedImportBatches : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const deletedImportBatchSet = new Set(deletedImportBatches);
+  const normalizeClientsForDeletedImports = (clients) => (Array.isArray(clients) ? clients : [])
+    .map((client) => ({
+      ...client,
+      dossiers: (Array.isArray(client?.dossiers) ? client.dossiers : [])
+        .filter((dossier) => {
+          const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+          const globalBatchId = String(dossier?.importGlobalBatchId || '').trim();
+          return !(diligenceBatchId && deletedImportBatchSet.has(diligenceBatchId))
+            && !(globalBatchId && deletedImportBatchSet.has(globalBatchId));
+        })
+    }))
+    .filter((client) => Array.isArray(client?.dossiers) ? client.dossiers.length || String(client?.name || '').trim() : true);
+
+  const normalizeImportHistoryForDeletedImports = (entries) => (Array.isArray(entries) ? entries : [])
+    .filter((entry) => !deletedImportBatchSet.has(String(entry?.id || '').trim()));
+
   return {
     ...DEFAULT_STATE,
     ...previous,
     ...sourceState,
-    clients: stripImportedSaisieArretFromClients(
-      hasOwn('clients')
-        ? (Array.isArray(sourceState.clients) ? sourceState.clients : [])
-        : (Array.isArray(previous.clients) ? previous.clients : [])
-    ),
+    clients: normalizeClientsForDeletedImports(hasOwn('clients')
+      ? (Array.isArray(sourceState.clients) ? sourceState.clients : [])
+      : (Array.isArray(previous.clients) ? previous.clients : [])),
     salleAssignments: hasOwn('salleAssignments')
       ? (Array.isArray(sourceState.salleAssignments) ? sourceState.salleAssignments : [])
       : (Array.isArray(previous.salleAssignments) ? previous.salleAssignments : []),
@@ -717,9 +657,10 @@ function normalizeStoredState(rawState, previousState = null) {
     recycleArchive: hasOwn('recycleArchive')
       ? (Array.isArray(sourceState.recycleArchive) ? sourceState.recycleArchive : [])
       : (Array.isArray(previous.recycleArchive) ? previous.recycleArchive : []),
-    importHistory: hasOwn('importHistory')
+    importHistory: normalizeImportHistoryForDeletedImports(hasOwn('importHistory')
       ? (Array.isArray(sourceState.importHistory) ? sourceState.importHistory : [])
-      : (Array.isArray(previous.importHistory) ? previous.importHistory : []),
+      : (Array.isArray(previous.importHistory) ? previous.importHistory : [])),
+    deletedImportBatches: [...deletedImportBatchSet],
     teamHistory: hasOwn('teamHistory')
       ? (Array.isArray(sourceState.teamHistory) ? sourceState.teamHistory : [])
       : (Array.isArray(previous.teamHistory) ? previous.teamHistory : []),
@@ -730,10 +671,14 @@ function normalizeStoredState(rawState, previousState = null) {
 
 function hydrateStoredState(rawState) {
   const parsedVersion = Number(rawState?.version);
+  const deletedImportBatches = Array.isArray(rawState?.deletedImportBatches)
+    ? rawState.deletedImportBatches.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
   return {
     ...DEFAULT_STATE,
     ...(rawState && typeof rawState === 'object' ? rawState : {}),
     users: ensureManagerUser(Array.isArray(rawState?.users) ? rawState.users : []),
+    deletedImportBatches,
     version: Number.isFinite(parsedVersion) && parsedVersion >= 0 ? parsedVersion : 0,
     updatedAt: String(rawState?.updatedAt || new Date().toISOString())
   };
@@ -1210,6 +1155,17 @@ function isDangerousEmptyStateReplace(currentState, nextState) {
   return currentClients > 0 || currentDossiers > 0 || currentImportHistory > 0 || currentUsers > 1;
 }
 
+function isStaleShrinkingStateReplace(currentState, nextState) {
+  if (!nextState || typeof nextState !== 'object') return false;
+  if (!Object.prototype.hasOwnProperty.call(nextState, 'clients')) return false;
+  const currentDossiers = countStateDossiers(currentState);
+  const nextDossiers = countStateDossiers(nextState);
+  if (currentDossiers <= 0 || nextDossiers >= currentDossiers) return false;
+  const currentVersion = Number(currentState?.version || 0);
+  const nextVersion = Number(nextState?.version || 0);
+  return !Number.isFinite(nextVersion) || nextVersion <= currentVersion;
+}
+
 function shouldCreateSafetyBackup(currentState, mutation, nextState = null) {
   const type = String(mutation?.type || '').trim();
   const body = mutation?.body && typeof mutation.body === 'object' ? mutation.body : {};
@@ -1519,7 +1475,6 @@ function enrichDossierPatchBody(currentState, rawBody) {
     body.dossier = sanitizePatchObject(body.dossier) || {};
     body.dossier.externalId = buildGeneratedDossierExternalId(snapshot.clientId, body.dossier);
     body.dossier.clientId = snapshot.clientId;
-    body.dossier = stripImportedSaisieArretFromDossier(body.dossier);
     return body;
   }
 
@@ -1534,7 +1489,6 @@ function enrichDossierPatchBody(currentState, rawBody) {
       || {};
     body.dossier.externalId = String(body.dossier.externalId || snapshot.previousExternalId).trim();
     body.dossier.clientId = snapshot.targetClientId;
-    body.dossier = stripImportedSaisieArretFromDossier(body.dossier);
   }
   return body;
 }
@@ -1905,8 +1859,9 @@ function isProtectedManualDossierForImportDelete(dossier) {
   if (dossier.isManualEntry === true) return true;
   if (dossier.isAudienceOrphanImport === true) return false;
   const globalBatchId = String(dossier.importGlobalBatchId || '').trim();
+  const diligenceBatchId = String(dossier.importDiligenceBatchId || '').trim();
   const audienceBatchId = String(dossier.importAudienceBatchId || '').trim();
-  return !globalBatchId && !audienceBatchId;
+  return !globalBatchId && !diligenceBatchId && !audienceBatchId;
 }
 
 function hasManualAudienceChangesAfterImportForServer(dossier, procKey, importCreatedAt) {
@@ -1950,6 +1905,16 @@ function applyImportDeletePatch(currentState, body) {
 
   let nextClients = clients;
   if (importType === 'global') {
+    const hasDiligenceDossiers = clients.some((client) => (
+      Array.isArray(client?.dossiers)
+      && client.dossiers.some((dossier) => (
+        String(dossier?.importDiligenceBatchId || '').trim() === batchId
+        || String(dossier?.importGlobalBatchId || '').trim() === batchId
+      ))
+    ));
+    const isDiligenceBatch = String(batch?.category || '').trim() === 'diligence'
+      || /^dil_/i.test(batchId)
+      || hasDiligenceDossiers;
     const createdClientIds = new Set((Array.isArray(batch?.createdClientIds) ? batch.createdClientIds : [])
       .map((value) => Number(value))
       .filter(Number.isFinite));
@@ -1957,7 +1922,12 @@ function applyImportDeletePatch(currentState, body) {
       const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
       const keptDossiers = dossiers.filter((dossier) => {
         if (isProtectedManualDossierForImportDelete(dossier)) return true;
-        return String(dossier?.importGlobalBatchId || '').trim() !== batchId;
+        const dossierGlobalBatchId = String(dossier?.importGlobalBatchId || '').trim();
+        const dossierDiligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+        const dossierBatchId = isDiligenceBatch
+          ? (dossierDiligenceBatchId || dossierGlobalBatchId)
+          : dossierGlobalBatchId;
+        return dossierBatchId !== batchId;
       });
       client.dossiers = keptDossiers;
       if (keptDossiers.length) return true;
@@ -2021,7 +1991,13 @@ function applyImportDeletePatch(currentState, body) {
     ...currentState,
     clients: nextClients,
     audienceDraft: {},
-    importHistory: importHistory.filter((entry) => String(entry?.id || '').trim() !== batchId)
+    importHistory: importHistory.filter((entry) => String(entry?.id || '').trim() !== batchId),
+    deletedImportBatches: [
+      ...new Set([
+        ...(Array.isArray(currentState?.deletedImportBatches) ? currentState.deletedImportBatches : []),
+        batchId
+      ].map((value) => String(value || '').trim()).filter(Boolean))
+    ]
   };
 }
 
@@ -2829,6 +2805,9 @@ app.post('/api/state', async (req, res) => {
       if (isDangerousEmptyStateReplace(currentState, statePayload)) {
         return { emptyReplaceRejected: true, state: currentState };
       }
+      if (isStaleShrinkingStateReplace(currentState, statePayload)) {
+        return { staleShrinkRejected: true, state: currentState };
+      }
       if (shouldCreateSafetyBackup(currentState, { type: 'replace', body: statePayload }, statePayload)) {
         await maybeWriteBackupSnapshot(currentState);
       }
@@ -2867,6 +2846,14 @@ app.post('/api/state', async (req, res) => {
         409,
         'EMPTY_STATE_REPLACE_REJECTED',
         'Refusing to replace existing cabinet data with an empty state snapshot.'
+      );
+    }
+    if (result?.staleShrinkRejected) {
+      return sendJsonError(
+        res,
+        409,
+        'STALE_SHRINK_REJECTED',
+        'Refusing to replace server data with an older smaller snapshot.'
       );
     }
     return sendVersionedOk(res, result.saved);
@@ -2955,6 +2942,9 @@ app.post('/api/state/upload-chunk', async (req, res) => {
       if (session.mode !== 'merge' && isDangerousEmptyStateReplace(currentState, nextState)) {
         return { emptyReplaceRejected: true, state: currentState };
       }
+      if (session.mode !== 'merge' && isStaleShrinkingStateReplace(currentState, nextState)) {
+        return { staleShrinkRejected: true, state: currentState };
+      }
       if (session.mode !== 'merge' && shouldCreateSafetyBackup(currentState, { type: 'replace', body: nextState }, nextState)) {
         await maybeWriteBackupSnapshot(currentState);
       }
@@ -2977,6 +2967,14 @@ app.post('/api/state/upload-chunk', async (req, res) => {
         409,
         'EMPTY_STATE_REPLACE_REJECTED',
         'Refusing to replace existing cabinet data with an empty state snapshot.'
+      );
+    }
+    if (result?.staleShrinkRejected) {
+      return sendJsonError(
+        res,
+        409,
+        'STALE_SHRINK_REJECTED',
+        'Refusing to replace server data with an older smaller snapshot.'
       );
     }
     return sendVersionedOk(res, result.saved, { complete: true });

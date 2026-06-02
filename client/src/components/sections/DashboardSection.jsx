@@ -15,7 +15,7 @@ function DashboardSection() {
         </div>
         <div id="dashboardClotureCard" className="stat-card purple is-clickable" role="button" tabIndex="0">
           <i className="fa-solid fa-check fa-2x"></i>
-          <h3>Dossiers Clôture</h3>
+          <h3>Dossiers Soldés / Clôturés</h3>
           <p id="dossiersTermines">0</p>
         </div>
         <div id="dashboardAttSortCard" className="stat-card orange is-clickable" role="button" tabIndex="0">

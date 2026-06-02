@@ -214,6 +214,7 @@ function CreationSection() {
               <label data-proc="Redressement"><input type="checkbox" defaultValue="Redressement" className="proc-check" /> Redressement</label>
               <label data-proc="Liquidation judiciaire"><input type="checkbox" defaultValue="Liquidation judiciaire" className="proc-check" /> Liquidation judiciaire</label>
               <label data-proc="Sanlam"><input type="checkbox" defaultValue="Sanlam" className="proc-check" /> Sanlam</label>
+              <label data-proc="SCI TF"><input type="checkbox" defaultValue="SCI TF" className="proc-check" /> SCI TF</label>
             </div>
             <div className="proc-add">
               <input type="text" id="procedureCustom" placeholder="Nouvelle procédure" />

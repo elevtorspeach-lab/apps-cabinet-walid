@@ -26,87 +26,9 @@ function buildPersistedStateSignature({
   );
 }
 
-function compactPersistedProcedureText(value){
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function isPersistedSaisieArretProcedure(value){
-  const compact = compactPersistedProcedureText(value);
-  return compact === 'saisiearret'
-    || compact === 'saisiearrt'
-    || compact === 'saisiarret'
-    || compact === 'saisiarrt'
-    || compact.includes('saisiearret')
-    || compact.includes('saisiearrt');
-}
-
-function splitPersistedProcedureText(value){
-  return String(value || '')
-    .split(/[,+;]/)
-    .map(item=>item.trim())
-    .filter(Boolean);
-}
-
-function isPersistedImportedDossier(dossier){
-  if(!dossier || typeof dossier !== 'object') return false;
-  const importIds = [
-    dossier.importGlobalBatchId,
-    dossier.importAudienceBatchId,
-    dossier.importDiligenceBatchId
-  ].map(value=>String(value || '').trim()).filter(Boolean);
-  return importIds.length > 0
-    || String(dossier.importUid || '').trim().startsWith('imp-')
-    || !!String(dossier.importSource || '').trim();
-}
-
-function stripPersistedImportedSaisieArretDossier(dossier){
-  if(!isPersistedImportedDossier(dossier)) return dossier;
-  const next = dossier && typeof dossier === 'object' ? { ...dossier } : dossier;
-  if(!next || typeof next !== 'object') return next;
-  const detailMap = next.procedureDetails && typeof next.procedureDetails === 'object'
-    ? { ...next.procedureDetails }
-    : {};
-  Object.keys(detailMap).forEach(key=>{
-    if(isPersistedSaisieArretProcedure(key)) delete detailMap[key];
-  });
-  const keepProcedures = [
-    ...splitPersistedProcedureText(next.procedure),
-    ...(Array.isArray(next.procedureList) ? next.procedureList : []),
-    ...Object.keys(detailMap)
-  ].filter(name=>!isPersistedSaisieArretProcedure(name));
-  const seen = new Set();
-  const cleanedProcedures = keepProcedures.filter(name=>{
-    const key = compactPersistedProcedureText(name);
-    if(!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  if(!cleanedProcedures.length) return null;
-  next.procedure = cleanedProcedures.join(', ');
-  if(Array.isArray(next.procedureList)) next.procedureList = cleanedProcedures;
-  next.procedureDetails = detailMap;
-  return next;
-}
-
-function stripPersistedImportedSaisieArretClients(clients){
-  return (Array.isArray(clients) ? clients : []).map(client=>{
-    if(!client || typeof client !== 'object') return client;
-    return {
-      ...client,
-      dossiers: (Array.isArray(client.dossiers) ? client.dossiers : [])
-        .map(stripPersistedImportedSaisieArretDossier)
-        .filter(Boolean)
-    };
-  });
-}
-
 function normalizePersistedStateSource(rawState){
   const loadedClients = Array.isArray(rawState?.clients)
-    ? stripPersistedImportedSaisieArretClients(rawState.clients).map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
+    ? rawState.clients.map(client=>normalizeClient(client, { deep: false })).filter(Boolean)
     : [];
   const loadedUsers = Array.isArray(rawState?.users)
     ? rawState.users.map(normalizeUser).filter(Boolean)
@@ -117,11 +39,25 @@ function normalizePersistedStateSource(rawState){
     : {};
   const loadedRecycleBin = normalizeRecycleBinEntries(rawState?.recycleBin);
   const loadedRecycleArchive = normalizeRecycleArchiveEntries(rawState?.recycleArchive);
-  const loadedImportHistory = normalizeImportHistoryEntries(rawState?.importHistory);
+  const loadedDeletedImportBatches = Array.isArray(rawState?.deletedImportBatches)
+    ? rawState.deletedImportBatches.map(value=>String(value || '').trim()).filter(Boolean)
+    : [];
+  const deletedBatchIds = typeof getDeletedImportBatchIdSet === 'function'
+    ? getDeletedImportBatchIdSet(loadedDeletedImportBatches)
+    : new Set(loadedDeletedImportBatches);
+  const loadedImportHistory = normalizeImportHistoryEntries(rawState?.importHistory)
+    .filter(entry=>!deletedBatchIds.has(String(entry?.id || '').trim()));
   const loadedTeamHistory = normalizeTeamHistoryEntries(rawState?.teamHistory);
+  const filteredClients = loadedClients.map(client=>({
+    ...client,
+    dossiers: (Array.isArray(client?.dossiers) ? client.dossiers : []).filter(dossier=>{
+      const batchId = String(dossier?.importDiligenceBatchId || '').trim();
+      return !batchId || !deletedBatchIds.has(batchId);
+    })
+  })).filter(client=>Array.isArray(client?.dossiers) ? client.dossiers.length || String(client?.name || '').trim() : true);
   const nextUsers = ensureManagerUser(loadedUsers);
   const nextSignature = buildPersistedStateSignature({
-    clients: loadedClients,
+    clients: filteredClients,
     salleAssignments: loadedSalleAssignments,
     users: nextUsers,
     audienceDraft: loadedDraft,
@@ -133,13 +69,14 @@ function normalizePersistedStateSource(rawState){
     updatedAt: rawState?.updatedAt
   });
   return {
-    clients: loadedClients,
+    clients: filteredClients,
     salleAssignments: loadedSalleAssignments,
     users: nextUsers,
     audienceDraft: loadedDraft,
     recycleBin: loadedRecycleBin,
     recycleArchive: loadedRecycleArchive,
     importHistory: loadedImportHistory,
+    deletedImportBatches: [...deletedBatchIds],
     teamHistory: loadedTeamHistory,
     signature: nextSignature
   };
@@ -220,6 +157,12 @@ async function applyPersistedStateSource(normalizedState, options = {}){
   AppState.recycleBin = normalizedState.recycleBin;
   AppState.recycleArchive = normalizedState.recycleArchive;
   AppState.importHistory = normalizedState.importHistory;
+  AppState.deletedImportBatches = Array.isArray(normalizedState.deletedImportBatches)
+    ? normalizedState.deletedImportBatches
+    : [];
+  if(typeof purgeDeletedImportBatchesFromAppState === 'function'){
+    purgeDeletedImportBatchesFromAppState();
+  }
   AppState.teamHistory = normalizedState.teamHistory;
   lastPersistedStateSignature = normalizedState.signature || buildPersistedStateSignature({
     clients: AppState.clients,

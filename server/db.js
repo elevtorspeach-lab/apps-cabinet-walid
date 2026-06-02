@@ -23,8 +23,91 @@ const COLLECTION_DEFAULTS = {
   recycleBin: [],
   recycleArchive: [],
   importHistory: [],
+  deletedImportBatches: [],
   teamHistory: []
 };
+
+const BLOCKED_DILIGENCE_IMPORT_BATCH_IDS = new Set();
+
+function isBlockedDiligenceImportBatchId(value) {
+  return BLOCKED_DILIGENCE_IMPORT_BATCH_IDS.has(String(value || '').trim());
+}
+
+function getDeletedImportBatchIds(state) {
+  const ids = new Set(BLOCKED_DILIGENCE_IMPORT_BATCH_IDS);
+  (Array.isArray(state?.deletedImportBatches) ? state.deletedImportBatches : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .forEach((id) => ids.add(id));
+  return ids;
+}
+
+function isBlockedDiligenceImportDossier(dossier, deletedBatchIds = BLOCKED_DILIGENCE_IMPORT_BATCH_IDS) {
+  const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
+  const globalBatchId = String(dossier?.importGlobalBatchId || '').trim();
+  return (diligenceBatchId && deletedBatchIds.has(diligenceBatchId))
+    || (globalBatchId && deletedBatchIds.has(globalBatchId));
+}
+
+function removeBlockedDiligenceImportHistoryEntries(entries, deletedBatchIds = BLOCKED_DILIGENCE_IMPORT_BATCH_IDS) {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter((entry) => !deletedBatchIds.has(String(entry?.id || '').trim()));
+}
+
+async function loadDeletedImportBatchIds(executor = pool) {
+  const ids = new Set(BLOCKED_DILIGENCE_IMPORT_BATCH_IDS);
+  try {
+    const [rows] = await runQuery(
+      executor,
+      "SELECT data FROM collections WHERE name = 'deletedImportBatches' LIMIT 1",
+      [],
+      'Load deleted import batches'
+    );
+    const stored = parseJsonValue(rows?.[0]?.data, []);
+    (Array.isArray(stored) ? stored : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .forEach((id) => ids.add(id));
+  } catch (error) {
+    logDatabaseError('Load deleted import batches failed', error);
+  }
+  return ids;
+}
+
+async function purgeDeletedImportBatches(executor = pool) {
+  const deletedBatchIds = await loadDeletedImportBatchIds(executor);
+  const ids = [...deletedBatchIds].filter(Boolean);
+  if (!ids.length) return { deletedDossiers: 0, deletedHistoryEntries: 0 };
+
+  const [deleteResult] = await runQuery(
+    executor,
+    "DELETE FROM dossiers WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.importDiligenceBatchId')) IN (?) OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.importGlobalBatchId')) IN (?)",
+    [ids, ids],
+    'Purge deleted diligence import dossiers'
+  );
+
+  const [historyRows] = await runQuery(
+    executor,
+    "SELECT data FROM collections WHERE name = 'importHistory' LIMIT 1",
+    [],
+    'Load import history for purge'
+  );
+  const history = parseJsonValue(historyRows?.[0]?.data, []);
+  const nextHistory = removeBlockedDiligenceImportHistoryEntries(history, deletedBatchIds);
+  if (Array.isArray(history) && nextHistory.length !== history.length) {
+    await runQuery(
+      executor,
+      "INSERT INTO collections (name, data) VALUES ('importHistory', ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+      [serializeJsonValue(nextHistory, [])],
+      'Save purged import history'
+    );
+  }
+
+  return {
+    deletedDossiers: Number(deleteResult?.affectedRows || 0),
+    deletedHistoryEntries: Array.isArray(history) ? history.length - nextHistory.length : 0
+  };
+}
 
 function logDatabaseError(context, error, details = {}) {
   console.error(`[DB] ${context}`, {
@@ -290,6 +373,7 @@ function initializeDatabase() {
       `, [], 'Create collections table');
 
       await ensureDossiersSchema(connection);
+      await purgeDeletedImportBatches(connection);
     } finally {
       connection.release();
     }
@@ -372,6 +456,7 @@ async function getPaginatedDossiers(offset = 0, limit = 50, filters = {}) {
 
 async function loadFullState() {
   try {
+    await purgeDeletedImportBatches(pool);
     const [metadataRows] = await runQuery(pool, 'SELECT * FROM app_metadata', [], 'Load app metadata');
     const [userRows] = await runQuery(pool, 'SELECT * FROM users ORDER BY username ASC', [], 'Load users');
     const [clientRows] = await runQuery(pool, 'SELECT * FROM clients ORDER BY name ASC', [], 'Load clients');
@@ -473,7 +558,14 @@ async function saveClientState(client) {
 async function saveFullState(state) {
   const connection = await pool.getConnection();
   const safeState = state && typeof state === 'object' ? state : {};
-  const safeClients = Array.isArray(safeState.clients) ? safeState.clients : [];
+  const deletedBatchIds = getDeletedImportBatchIds(safeState);
+  const safeClients = (Array.isArray(safeState.clients) ? safeState.clients : [])
+    .map((client) => ({
+      ...(isPlainObject(client) ? client : {}),
+      dossiers: (Array.isArray(client?.dossiers) ? client.dossiers : [])
+        .filter((dossier) => !isBlockedDiligenceImportDossier(dossier, deletedBatchIds))
+    }))
+    .filter((client) => String(client?.name || '').trim() || normalizeDatabaseId(client?.id) !== null);
   const safeUsers = Array.isArray(safeState.users) ? safeState.users : [];
 
   try {
@@ -567,9 +659,12 @@ async function saveFullState(state) {
     }
 
     for (const [collectionName, fallbackValue] of Object.entries(COLLECTION_DEFAULTS)) {
-      const collectionValue = Object.prototype.hasOwnProperty.call(safeState, collectionName)
+      let collectionValue = Object.prototype.hasOwnProperty.call(safeState, collectionName)
         ? safeState[collectionName]
         : fallbackValue;
+      if (collectionName === 'importHistory') {
+        collectionValue = removeBlockedDiligenceImportHistoryEntries(collectionValue, deletedBatchIds);
+      }
       await runQuery(
         connection,
         'INSERT INTO collections (name, data) VALUES (?, ?)',
@@ -577,6 +672,8 @@ async function saveFullState(state) {
         `Insert collection ${collectionName}`
       );
     }
+
+    await purgeDeletedImportBatches(connection);
 
     await connection.commit();
     console.info('[DB] Full snapshot committed', {
@@ -705,6 +802,11 @@ async function applyDossierMutation(patch, meta = {}) {
       if (clientId === null || !dossier) {
         throw new Error('Invalid dossier create payload.');
       }
+      if (isBlockedDiligenceImportDossier(dossier)) {
+        await saveStateMetadata(connection, meta);
+        await connection.commit();
+        return;
+      }
       const externalId = buildDossierExternalId(clientId, dossier, Date.now());
       const payload = {
         ...dossier,
@@ -736,6 +838,17 @@ async function applyDossierMutation(patch, meta = {}) {
     } else if (action === 'update') {
       if (!previousExternalId || !dossier) {
         throw new Error('Invalid dossier update payload.');
+      }
+      if (isBlockedDiligenceImportDossier(dossier)) {
+        await runQuery(
+          connection,
+          'DELETE FROM dossiers WHERE externalId = ?',
+          [previousExternalId],
+          `Delete blocked diligence dossier ${previousExternalId}`
+        );
+        await saveStateMetadata(connection, meta);
+        await connection.commit();
+        return;
       }
       const nextClientId = targetClientId === null ? clientId : targetClientId;
       const payload = {
@@ -891,5 +1004,6 @@ module.exports = {
   saveUsersState,
   upsertUserState,
   applyDossierMutation,
-  batchUpdateDossiers
+  batchUpdateDossiers,
+  purgeDeletedImportBatches
 };
