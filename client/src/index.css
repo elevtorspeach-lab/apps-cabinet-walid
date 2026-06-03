@@ -3792,6 +3792,12 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   border-color:#5eead4;
 }
 
+.proc-pill.proc-sci-tf{
+  background:#e0f2fe;
+  color:#0369a1;
+  border-color:#7dd3fc;
+}
+
 .proc-pill.proc-sanlam{
   background:#1e293b;
   color:#ffffff;

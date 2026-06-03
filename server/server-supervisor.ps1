@@ -1,10 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
 $serverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $serverDir '..')
 $logDir = Join-Path $serverDir 'logs'
 $stdoutLog = Join-Path $logDir 'server.stdout.log'
 $stderrLog = Join-Path $logDir 'server.stderr.log'
 $supervisorLog = Join-Path $logDir 'server.supervisor.log'
+$backupTaskEnsureScript = Join-Path $repoRoot 'tools\ensure-persistent-backup-tasks.ps1'
 
 if (-not (Test-Path -LiteralPath $logDir)) {
   New-Item -ItemType Directory -Path $logDir | Out-Null
@@ -48,6 +50,17 @@ function Resolve-NodePath {
 
 $nodePath = Resolve-NodePath
 Write-SupervisorLog "Supervisor started with Node at $nodePath"
+
+try {
+  if (Test-Path -LiteralPath $backupTaskEnsureScript) {
+    & $backupTaskEnsureScript *> $null
+    Write-SupervisorLog 'Daily snapshot scheduled task verified.'
+  } else {
+    Write-SupervisorLog "Daily snapshot ensure script not found: $backupTaskEnsureScript"
+  }
+} catch {
+  Write-SupervisorLog "Daily snapshot task verification failed: $($_.Exception.Message)"
+}
 
 while ($true) {
   try {

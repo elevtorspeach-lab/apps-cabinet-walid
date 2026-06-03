@@ -8,7 +8,9 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $NodePath = (Get-Command node).Source
 $ExportScriptPath = Join-Path $RepoRoot "tools\export-desktop-excel-backups.cjs"
 $EnvPath = Join-Path $RepoRoot "server\.env"
-$OutputDir = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop", "Sauvegarde Cabinet Excel")
+$BaseOutputDir = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop", "Sauvegarde Cabinet Excel")
+$RunStamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$OutputDir = Join-Path $BaseOutputDir $RunStamp
 $ClientsPath = Join-Path $OutputDir "Sauvegarde Excel Clients.xlsx"
 $DiligencePath = Join-Path $OutputDir "Sauvegarde Excel Diligence.xlsx"
 
@@ -42,6 +44,7 @@ if (-not (Test-Path -LiteralPath $ExportScriptPath)) {
   throw "Excel backup script not found: $ExportScriptPath"
 }
 
+$env:EXCEL_BACKUP_OUTPUT_DIR = $OutputDir
 & $NodePath $ExportScriptPath
 if ($LASTEXITCODE -ne 0) {
   throw "Excel backup export failed with exit code $LASTEXITCODE"

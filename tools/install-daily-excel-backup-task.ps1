@@ -18,17 +18,26 @@ $Action = New-ScheduledTaskAction `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`"" `
   -WorkingDirectory $RepoRoot
 
-$Trigger = New-ScheduledTaskTrigger -Daily -At $Time
+$TriggerTime = [DateTime]::ParseExact($Time, "HH:mm", [Globalization.CultureInfo]::InvariantCulture)
+$Trigger = New-ScheduledTaskTrigger -Daily -At $TriggerTime
 $Settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
-  -StartWhenAvailable
+  -StartWhenAvailable `
+  -MultipleInstances IgnoreNew `
+  -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+
+$Principal = New-ScheduledTaskPrincipal `
+  -UserId "SYSTEM" `
+  -LogonType ServiceAccount `
+  -RunLevel Highest
 
 Register-ScheduledTask `
   -TaskName $TaskName `
   -Action $Action `
   -Trigger $Trigger `
   -Settings $Settings `
+  -Principal $Principal `
   -Description "Creates daily Client and Diligence Excel backups on the Desktop and emails them for Cabinet Walid." `
   -Force | Out-Null
 

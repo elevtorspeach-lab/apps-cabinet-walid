@@ -1,5 +1,6 @@
 const { execFileSync } = require('child_process');
 const crypto = require('crypto');
+const fsSync = require('fs');
 const fs = require('fs/promises');
 const path = require('path');
 
@@ -42,8 +43,28 @@ function parseArgs() {
   return out;
 }
 
+function resolveGitPath() {
+  const candidates = [
+    process.env.GIT_EXE,
+    'C:\\Program Files\\Git\\cmd\\git.exe',
+    'C:\\Program Files\\Git\\bin\\git.exe',
+    'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+    'git'
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate === 'git' || fsSync.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'git';
+}
+
+const gitPath = resolveGitPath();
+
 function git(args) {
-  return execFileSync('git', args, {
+  return execFileSync(gitPath, ['-c', `safe.directory=${repoRoot}`, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
@@ -72,7 +93,8 @@ function getTrackedFiles() {
     .split('\0')
     .map((file) => file.trim())
     .filter(Boolean)
-    .filter((file) => !file.startsWith('backups/'));
+    .filter((file) => !file.startsWith('backups/'))
+    .filter((file) => fsSync.existsSync(path.join(repoRoot, file)));
 }
 
 async function copyTrackedFiles(files, targetFilesDir) {

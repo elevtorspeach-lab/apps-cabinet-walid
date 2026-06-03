@@ -169,6 +169,7 @@ let facturePreviewAutosaveTimer = null;
 let creationPinnedClientId = '';
 let editingDossier = null;
 let editingOriginalProcedures = [];
+let addDossierSaveInFlight = false;
 let customProcedures = [];
 let sanlamAdversaireDraft = {};
 let suppressProcedureChange = false;
@@ -559,8 +560,10 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.notifDebiteur': 'Not débiteur',
   'procedureDetails.refExpertise': 'Ref expertise',
   'procedureDetails.ord': 'Ord',
+  'procedureDetails.paiement': 'Paiement',
   'procedureDetails.expert': 'Expert',
   'procedureDetails.dateVente': 'Date vente',
+  'procedureDetails.historique': 'Historique',
   'procedureDetails.lettreRec': 'Lettre Rec',
   'procedureDetails.curateurNo': 'Curateur N°',
   'procedureDetails.notifCurateur': 'Notif curateur',
@@ -2677,6 +2680,7 @@ function buildDiligenceRelevantProcedureDetailsSnapshot(dossier){
       && baseProc !== 'S/bien'
       && baseProc !== 'Injonction'
       && baseProc !== 'Commandement'
+      && baseProc !== 'Nantissement'
       && baseProc !== 'Nantissement MED'
     ){
       return;
@@ -4666,34 +4670,48 @@ function buildClientFillDossierIndex(){
   const rows = getAllSuiviRows();
   const refMap = new Map();
   const all = [];
+  const pushRefEntry = (key, entry)=>{
+    const normalizedKey = normalizeReferenceValue(key || '');
+    if(!normalizedKey) return;
+    if(!refMap.has(normalizedKey)) refMap.set(normalizedKey, []);
+    refMap.get(normalizedKey).push(entry);
+  };
   rows.forEach((row)=>{
     const dossier = row?.d;
     if(!dossier) return;
+    const refKeys = getClientReferenceMatchKeys(dossier.referenceClient || '');
     const entry = {
       row,
       client: row.c,
       dossier,
       ref: normalizeReferenceValue(dossier.referenceClient || ''),
+      refKeys,
       debiteur: normalizeClientFillDebiteur(dossier.debiteur || '')
     };
     all.push(entry);
-    if(entry.ref){
-      if(!refMap.has(entry.ref)) refMap.set(entry.ref, []);
-      refMap.get(entry.ref).push(entry);
-    }
+    const pushed = new Set();
+    [entry.ref, ...refKeys].forEach((key)=>{
+      const normalizedKey = normalizeReferenceValue(key || '');
+      if(!normalizedKey || pushed.has(normalizedKey)) return;
+      pushed.add(normalizedKey);
+      pushRefEntry(normalizedKey, entry);
+    });
   });
   return { refMap, all };
 }
 
 function findClientFillMatch(refValue, debiteurValue, index){
-  const ref = normalizeReferenceValue(refValue || '');
+  const refKeys = getClientReferenceMatchKeys(refValue || '');
+  const ref = refKeys[0] || normalizeReferenceValue(refValue || '');
   const debiteur = normalizeClientFillDebiteur(debiteurValue || '');
-  const candidates = ref ? (index.refMap.get(ref) || []) : index.all;
+  const candidates = ref
+    ? [...new Set(refKeys.flatMap((key)=>index.refMap.get(key) || []))]
+    : index.all;
   let best = null;
   let bestScore = -1;
   candidates.forEach((entry)=>{
     let score = 0;
-    if(ref && entry.ref === ref) score += 100;
+    if(ref && (entry.ref === ref || (entry.refKeys || []).some(key=>refKeys.includes(key)))) score += 100;
     if(debiteur && entry.debiteur === debiteur) score += 60;
     else if(debiteur && entry.debiteur && (entry.debiteur.includes(debiteur) || debiteur.includes(entry.debiteur))) score += 25;
     if(score > bestScore){
@@ -4838,6 +4856,7 @@ function getClientFillBaseHeaders(){
     'Resultat matching',
     'Client systeme',
     'Type',
+    'Procedure affectee',
     'Reference client systeme',
     'Debiteur systeme',
     'Statut dossier',
@@ -4931,6 +4950,7 @@ buildClientFillOutput = function(entry, procedurePlan){
     'Trouve',
     client?.name || '',
     dossier?.type || '',
+    normalizeProcedures(dossier).join(', '),
     dossier?.referenceClient || '',
     dossier?.debiteur || '',
     dossier?.statut || '',
@@ -13732,6 +13752,8 @@ function parseExcelData(rows, sheet = null){
   dossierHeaderKeys.sanlamDateAccident = ['date accident', 'date d accident', 'date du sinistre'];
   dossierHeaderKeys.sanlamCinConducteur = ['cin conducteur', 'cni conducteur', 'cin du conducteur', 'cni du conducteur'];
   dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
+  dossierHeaderKeys.cinNonDebiteur = ['cin non debiteur', 'cin non dÃ©biteur', 'cni non debiteur', 'cni non dÃ©biteur', 'cin'];
+  dossierHeaderKeys.efNumber = [...new Set([...(dossierHeaderKeys.efNumber || []), 'tf n', 'tf nÂ°', 'tf no', 'tf numero', 'tf numÃ©ro', 'tf'])];
 
   dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'dÃ©biteur fr', 'débiteur fr', 'debiteur ep', 'dÃ©biteur ep', 'débiteur ep'])];
 
@@ -13988,6 +14010,7 @@ function parseExcelData(rows, sheet = null){
       cautionVille: getColIndex(dossierColMap, dossierHeaderKeys.cautionVille),
       cautionCin: getColIndex(dossierColMap, dossierHeaderKeys.cautionCin),
       cautionRc: getColIndex(dossierColMap, dossierHeaderKeys.cautionRc),
+      cinNonDebiteur: getColIndex(dossierColMap, dossierHeaderKeys.cinNonDebiteur),
       efNumber: getColIndex(dossierColMap, dossierHeaderKeys.efNumber),
       conservation: getColIndex(dossierColMap, dossierHeaderKeys.conservation),
       metrage: getColIndex(dossierColMap, dossierHeaderKeys.metrage),
@@ -14129,6 +14152,7 @@ function parseExcelData(rows, sheet = null){
       const cautionVille = idx.cautionVille !== -1 ? String(row[idx.cautionVille] || '').trim() : '';
       const cautionCin = idx.cautionCin !== -1 ? String(row[idx.cautionCin] || '').trim() : '';
       const cautionRc = idx.cautionRc !== -1 ? String(row[idx.cautionRc] || '').trim() : '';
+      const cinNonDebiteur = idx.cinNonDebiteur !== -1 ? String(row[idx.cinNonDebiteur] || '').trim() : '';
       const efNumber = idx.efNumber !== -1 ? String(row[idx.efNumber] || '').trim() : '';
       const conservation = idx.conservation !== -1 ? String(row[idx.conservation] || '').trim() : '';
       const metrage = idx.metrage !== -1 ? String(row[idx.metrage] || '').trim() : '';
@@ -14173,6 +14197,7 @@ function parseExcelData(rows, sheet = null){
         || cautionVille
         || cautionCin
         || cautionRc
+        || cinNonDebiteur
         || efNumber
         || conservation
         || metrage
@@ -14294,6 +14319,7 @@ function parseExcelData(rows, sheet = null){
         cautionVille,
         cautionCin,
         cautionRc,
+        cinNonDebiteur,
         efNumber,
         conservation,
         metrage,
@@ -18128,7 +18154,7 @@ async function applyExcelImport(payload, options = {}){
   const importWarningRows = [];
   const importInfoRows = [];
   const importIssueEntries = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Nantissement MED', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Sanlam']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Nantissement MED', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Sanlam', 'SCI TF']);
   const defaultDossierProceduresWhenMissing = diligenceMode
     ? ['Injonction']
     : ['ASS', 'Restitution', 'SFDC'];
@@ -18657,6 +18683,7 @@ async function applyExcelImport(payload, options = {}){
       cautionVille: row.cautionVille || '',
       cautionCin: row.cautionCin || '',
       cautionRc: row.cautionRc || '',
+      cinNonDebiteur: row.cinNonDebiteur || '',
       efNumber: row.efNumber || '',
       conservation: row.conservation || '',
       metrage: row.metrage || '',
@@ -18731,6 +18758,9 @@ async function applyExcelImport(payload, options = {}){
       if(!targetDossier.ville && row.ville) targetDossier.ville = row.ville;
       if(!targetDossier.adresse && row.adresse) targetDossier.adresse = row.adresse;
       if(!targetDossier.nRef && row.nRef) targetDossier.nRef = String(row.nRef).trim();
+      if(!targetDossier.cinNonDebiteur && row.cinNonDebiteur) targetDossier.cinNonDebiteur = String(row.cinNonDebiteur).trim();
+      if(!targetDossier.efNumber && row.efNumber) targetDossier.efNumber = String(row.efNumber).trim();
+      if(!targetDossier.conservation && row.conservation) targetDossier.conservation = String(row.conservation).trim();
     }
 
     const procedureSet = new Set(procedures);
@@ -18876,6 +18906,10 @@ async function applyExcelImport(payload, options = {}){
       if(importedOrdonnanceStatus && baseProc !== 'Commandement'){
         details.attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
       }
+      if(baseProc === 'SCI TF'){
+        applyDiligenceImportValue(details, 'sortSci', String(row.sort || row.sortExecution || '').trim());
+        return;
+      }
       if(String(row.sortExecution || '').trim()){
         details.sort = String(row.sortExecution || '').trim();
       }else{
@@ -18942,6 +18976,7 @@ async function applyExcelImport(payload, options = {}){
     applyDiligenceProcedureFields('ASS', assReference);
     applyDiligenceProcedureFields('Nantissement', String(row.refDossier || '').trim());
     applyDiligenceProcedureFields('Commandement', String(row.refDossier || getDiligenceImportField('refExpertise') || '').trim());
+    applyDiligenceProcedureFields('SCI TF', String(row.refDossier || '').trim());
     applyDiligenceProcedureFields('SFDC', sfdcReference);
     applyDiligenceProcedureFields('S/bien', String(row.refDossier || row.refSfdc || '').trim());
     applyDiligenceProcedureFields('Injonction', injonctionReference);
@@ -21419,7 +21454,18 @@ function goToCreation(clientId){
 }
 
 // ================== DOSSIERS ==================
+function setAddDossierSavingState(isSaving){
+  const btn = $('addDossierBtn');
+  if(!btn) return;
+  btn.disabled = !!isSaving;
+  btn.classList.toggle('is-saving', !!isSaving);
+  btn.setAttribute('aria-busy', isSaving ? 'true' : 'false');
+}
+
 async function addDossier(){
+  if(addDossierSaveInFlight) return;
+  addDossierSaveInFlight = true;
+  setAddDossierSavingState(true);
   try{
     if(!canEditData()) return alert('Accès refusé');
     const wasEditing = !!editingDossier;
@@ -21604,6 +21650,9 @@ async function addDossier(){
   }catch(err){
     console.error(err);
     alert('Erreur pendant la sauvegarde du dossier');
+  }finally{
+    addDossierSaveInFlight = false;
+    setAddDossierSavingState(false);
   }
 }
 
@@ -23650,6 +23699,16 @@ function isDiligenceAssLikeProcedure(procedure){
   return proc === 'ASS' || proc === 'Nantissement';
 }
 
+function isDiligenceNantissementProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'Nantissement';
+}
+
+function shouldUseDiligenceDelegationFilter(procedure = filterDiligenceProcedure){
+  return !isDiligenceNantissementProcedure(procedure)
+    && !isDiligenceSciTfProcedure(procedure)
+    && !isDiligenceCommandementProcedure(procedure);
+}
+
 function isDiligenceNantissementMedProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'Nantissement MED';
 }
@@ -24709,19 +24768,34 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       </select>
     `;
   }
+  if(field === 'paiement'){
+    const status = normalized === 'payer' ? 'payer' : 'att';
+    if(!row?.canEdit){
+      return escapeHtml(status || '-');
+    }
+    return `
+      <select
+        class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
+        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        <option value="att" ${status === 'att' ? 'selected' : ''}>att</option>
+        <option value="payer" ${status === 'payer' ? 'selected' : ''}>payer</option>
+      </select>
+    `;
+  }
   if(field === 'ord' && !isDiligenceNantissementMedProcedure(row?.procedure)){
     if(!row?.canEdit){
       return escapeHtml(normalized || '-');
     }
     const isCmdNotifierRow = isDiligenceCommandementNotifierLayout(row);
+    const isNantissementRow = isDiligenceNantissementProcedure(row?.procedure);
     return `
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         <option value="att ord" ${normalized === 'att ord' ? 'selected' : ''}>att ord</option>
         <option value="ord ok" ${normalized === 'ord ok' ? 'selected' : ''}>ord ok</option>
-        <option value="att paiement" ${normalized === 'att paiement' ? 'selected' : ''}>att paiement</option>
-        ${isCmdNotifierRow ? `<option value="paiement ok" ${normalized === 'paiement ok' ? 'selected' : ''}>paiement ok</option>` : ''}
+        ${isNantissementRow ? '' : `<option value="att paiement" ${normalized === 'att paiement' ? 'selected' : ''}>att paiement</option>`}
+        ${!isNantissementRow && isCmdNotifierRow ? `<option value="paiement ok" ${normalized === 'paiement ok' ? 'selected' : ''}>paiement ok</option>` : ''}
       </select>
     `;
   }
@@ -24795,6 +24869,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
     || field === 'boiteNo'
     || field === 'gestionnaire'
     || field === 'cinNonDebiteur'
+    || field === 'debiteur'
     || field === 'montant'
     || (field === 'efNumber' && !isDiligenceSciTfProcedure(proc))
     || (field === 'conservation' && !isDiligenceSciTfProcedure(proc))
@@ -24810,6 +24885,8 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
       : String(value ?? '').trim();
   }else if(field === 'notificationSort' || field === 'sortSci'){
     nextValue = String(value ?? '').trim();
+  }else if(field === 'paiement'){
+    nextValue = String(value ?? '').trim() === 'payer' ? 'payer' : 'att';
   }else if(field === 'lettreRec'){
     nextValue = normalizeDiligenceLettreRec(value);
   }else if(field === 'avisCurateur'){
@@ -25033,7 +25110,11 @@ function getFilteredDiligenceRows(allRows){
   const filteredRows = allRows.filter(row=>{
     if(!matchesDiligenceProcedureFilter(row, filterDiligenceProcedure)) return false;
     if(filterDiligenceSort !== 'all' && row.sort !== filterDiligenceSort) return false;
-    if(filterDiligenceDelegation !== 'all' && row.delegation !== filterDiligenceDelegation) return false;
+    if(
+      filterDiligenceDelegation !== 'all'
+      && shouldUseDiligenceDelegationFilter(row?.procedure)
+      && row.delegation !== filterDiligenceDelegation
+    ) return false;
     if(
       filterDiligenceOrdonnance !== 'all'
       && normalizeDiligenceOrdonnance(row.ordonnance) !== normalizeDiligenceOrdonnance(filterDiligenceOrdonnance)
@@ -25256,9 +25337,15 @@ function getDiligenceExportColumnDefinitions(){
 }
 
 function shouldShowDiligenceAssColumnsForRows(rows){
-  if(isDiligenceAssLikeProcedure(filterDiligenceProcedure)) return true;
+  if(isDiligenceAssProcedure(filterDiligenceProcedure)) return true;
   const sourceRows = Array.isArray(rows) ? rows : [];
-  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceAssLikeProcedure(row?.procedure));
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceAssProcedure(row?.procedure));
+}
+
+function shouldShowDiligenceNantissementColumnsForRows(rows){
+  if(isDiligenceNantissementProcedure(filterDiligenceProcedure)) return true;
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return !!sourceRows.length && sourceRows.every((row)=>isDiligenceNantissementProcedure(row?.procedure));
 }
 
 function shouldShowDiligenceCommandementColumnsForRows(rows){
@@ -25303,8 +25390,12 @@ function finalizeDiligenceExportDataset(rows){
   const showSciTfColumns = shouldShowDiligenceSciTfColumnsForRows(sourceRows);
   if(showSciTfColumns){
     const columns = [
+      { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
+      { header: 'Lot', width: 18, getValue: (row)=>row?.details?.lotDu || '' },
       { header: 'Réf client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
-      { header: 'CIN non débiteur', width: 20, getValue: (row)=>row?.dossier?.cinNonDebiteur || '' },
+      { header: 'CIN', width: 20, getValue: (row)=>row?.dossier?.cinNonDebiteur || '' },
+      { header: 'Débiteur', width: 30, getValue: (row)=>row?.dossier?.debiteur || '' },
+      { header: 'Adresse', width: 34, getValue: (row)=>row?.dossier?.adresse || '' },
       { header: 'Montant', width: 18, getValue: (row)=>row?.dossier?.montant || '' },
       { header: 'TF N°', width: 18, getValue: (row)=>row?.details?.efNumber || row?.dossier?.efNumber || '' },
       { header: 'Conservation', width: 24, getValue: (row)=>row?.details?.conservation || row?.dossier?.conservation || '' },
@@ -25377,6 +25468,43 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'PV POLICE', width: 16, getValue: (row)=>getDiligenceNantissementMedPvPoliceValue(row?.details?.pvPlice || '') },
       { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) }
+    ];
+    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    return {
+      rows: sourceRows,
+      headers: columns.map((column)=>column.header),
+      tableRows,
+      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+    };
+  }
+  const showNantissementColumns = shouldShowDiligenceNantissementColumnsForRows(sourceRows);
+  if(showNantissementColumns){
+    const columns = [
+      { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
+      { header: 'Type', width: 14, getValue: (row)=>row?.dossier?.type || '' },
+      { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
+      { header: 'Nom', width: 30, getValue: (row)=>row?.dossier?.debiteur || '' },
+      { header: 'Date depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
+      { header: 'Reference dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
+      { header: 'Juge', width: 28, getValue: (row)=>row?.details?.juge || '' },
+      { header: 'Sort', width: 24, getValue: (row)=>row?.details?.sort || '' },
+      { header: 'Ordonnance', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
+      { header: 'Notification N', width: 22, getValue: (row)=>getDiligenceNotificationNumberCellValue(row) },
+      { header: 'Plie', width: 16, getValue: (row)=>row?.details?.plie || '' },
+      { header: 'Sort notification', width: 24, getValue: (row)=>getDiligenceNotificationSortCellValue(row) },
+      { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
+      { header: 'Certificat non appel', width: 26, getValue: (row)=>row?.details?.certificatNonAppelStatus || '' },
+      { header: 'Execution N', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
+      { header: 'Ville', width: 20, getValue: (row)=>row?.dossier?.ville || '' },
+      { header: 'Ref expertise', width: 26, getValue: (row)=>row?.details?.refExpertise || '' },
+      { header: 'Ord', width: 18, getValue: (row)=>row?.details?.ord || '' },
+      { header: 'Paiement', width: 16, getValue: (row)=>row?.details?.paiement || '' },
+      { header: 'Expert', width: 24, getValue: (row)=>row?.details?.expert || '' },
+      { header: 'Mise a prix', width: 20, getValue: (row)=>row?.details?.miseAPrix || '' },
+      { header: 'Vente', width: 20, getValue: (row)=>row?.details?.dateVente || '' },
+      { header: 'Historique', width: 34, getValue: (row)=>row?.details?.historique || '' },
+      { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
+      { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
     return {
@@ -31146,6 +31274,8 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   if(baseProc === 'SCI TF'){
     return `
       <input type="text" data-field="dateDepot" placeholder="Date dépôt">
+      <input type="text" data-field="efNumber" placeholder="TF N&deg;">
+      <input type="text" data-field="conservation" placeholder="Conservation">
       <input type="text" data-field="referenceClient" placeholder="Référence dossier" autocomplete="off">
       <select data-field="attOrdOrOrdOk">
         <option value="att ord" selected>ATT ORD</option>
@@ -31157,8 +31287,6 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
         <option value="sci enregistrer">SCI ENREGISTRER</option>
         <option value="pas enregistrer">PAS ENREGISTRER</option>
       </select>
-      <input type="text" data-field="efNumber" placeholder="TF N&deg;">
-      <input type="text" data-field="conservation" placeholder="Conservation">
       ${tribunalFieldHtml}
     `;
   }
@@ -31742,10 +31870,25 @@ function syncDiligenceSaisieArretFilterVisibility(){
   const lotDuContainer = $('diligenceLotDuFilterContainer');
   const observationContainer = $('diligenceObservationFilterContainer');
   const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
+  const delegationContainer = $('diligenceDelegationFilterContainer') || $('diligenceDelegationFilter')?.closest?.('.audience-color-filter');
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
+  const isSciTf = isDiligenceSciTfProcedure(filterDiligenceProcedure);
+  const hideSort = show || isSciTf;
+  const useDelegationFilter = shouldUseDiligenceDelegationFilter(filterDiligenceProcedure) || show;
   if(lotDuContainer) lotDuContainer.style.display = show ? 'inline-block' : 'none';
   if(observationContainer) observationContainer.style.display = show ? 'inline-block' : 'none';
-  if(sortContainer) sortContainer.style.display = show ? 'none' : 'inline-block';
+  if(hideSort){
+    filterDiligenceSort = 'all';
+    const sortSelect = $('diligenceSortFilter');
+    if(sortSelect) sortSelect.value = 'all';
+  }
+  if(!useDelegationFilter){
+    filterDiligenceDelegation = 'all';
+    const delegationSelect = $('diligenceDelegationFilter');
+    if(delegationSelect) delegationSelect.value = 'all';
+  }
+  if(sortContainer) sortContainer.style.display = hideSort ? 'none' : 'inline-block';
+  if(delegationContainer) delegationContainer.style.display = useDelegationFilter ? 'inline-block' : 'none';
 }
 
 // Final override: keep audience date validation inline and non-blocking.

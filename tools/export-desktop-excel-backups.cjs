@@ -5,7 +5,9 @@ const path = require('path');
 const vm = require('vm');
 
 const repoRoot = path.resolve(__dirname, '..');
-const outputDir = path.join(os.homedir(), 'Desktop', 'Sauvegarde Cabinet Excel');
+const outputDir = process.env.EXCEL_BACKUP_OUTPUT_DIR
+  ? path.resolve(process.env.EXCEL_BACKUP_OUTPUT_DIR)
+  : path.join(os.homedir(), 'Desktop', 'Sauvegarde Cabinet Excel');
 const clientsFilename = 'Sauvegarde Excel Clients.xlsx';
 const diligenceFilename = 'Sauvegarde Excel Diligence.xlsx';
 
