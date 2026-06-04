@@ -363,10 +363,11 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
       <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateAudience',this,event)"></td>
       <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
       <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
+      <td data-label="Jugement N&deg;"><input value="${escapeAttr(draft.jugementNo || p.jugementNo || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','jugementNo',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','jugementNo',this,event)"></td>
       <td data-label="Tribunal">${escapeHtml(p.tribunal || '-')}</td>
-      <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dépôt">${escapeHtml(displayDateDepot)}</td>
       <td data-label="Statut">${renderAudienceStatusEditor(row, keyEncoded, canEdit)}</td>
+      <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Jugement ADD">
         <div class="audience-jugement-add">
           <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
@@ -470,8 +471,8 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       </td>
       <td data-label="Juge"><input value="${escapeAttr(draft.juge || p.juge || '')}" list="${AUDIENCE_FIELD_DATALISTS.juge}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','juge',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','juge',this,event)"></td>
       <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" list="${AUDIENCE_FIELD_DATALISTS.sort}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
+      <td data-label="Jugement N&deg;"><input value="${escapeAttr(draft.jugementNo || p.jugementNo || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','jugementNo',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','jugementNo',this,event)"></td>
       <td data-label="Tribunal"><input value="${escapeAttr(tribunalValue)}" list="${AUDIENCE_FIELD_DATALISTS.tribunal}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','tribunal',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','tribunal',this,event)"></td>
-      <td data-label="ProcÃ©dure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Date dÃ©pÃ´t">
         <div class="audience-date-field">
           <input class="${dateDepotInvalid ? 'date-input-invalid' : ''}" value="${escapeAttr(dateDepotValue)}" ${canEdit ? '' : 'readonly'} oninput="handleAudienceDateInputFromEncoded('${keyEncoded}','dateDepot',this)" onblur="normalizeAudienceDateDepotDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateDepot',this,event)" aria-invalid="${dateDepotInvalid ? 'true' : 'false'}">
@@ -479,6 +480,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
         </div>
       </td>
       <td data-label="Statut">${renderAudienceStatusEditor(row, keyEncoded, canEdit)}</td>
+      <td data-label="ProcÃ©dure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Jugement ADD">
         <div class="audience-jugement-add">
           <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>
@@ -572,7 +574,7 @@ function renderSuiviRowHtml(row){
         <button type="button" class="btn-primary" data-action="edit" data-client-id="${row.c.id}" data-dossier-index="${row.index}" ${canEditClient(row.c) ? '' : 'disabled'}>
           <i class="fa-solid fa-pen"></i>
         </button>
-        <button type="button" class="btn-danger" data-action="delete" data-client-id="${row.c.id}" data-dossier-index="${row.index}" ${canDeleteData() ? '' : 'disabled'}>
+        <button type="button" class="btn-danger" data-action="delete" data-client-id="${row.c.id}" data-dossier-index="${row.index}" ${canDeleteDossierOrImportData() ? '' : 'disabled'}>
           <i class="fa-solid fa-trash"></i>
         </button>
       </td>

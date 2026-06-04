@@ -49,8 +49,8 @@ function AudienceSection() {
             <button id="exportAudienceDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-list-check"></i> DILLIGENCE
             </button>
-            <button id="previewAudienceBtn" className="btn-primary" type="button">
-              <i className="fa-regular fa-eye"></i> {"Aper\u00e7u Excel"}
+            <button id="exportAudienceFactureBtn" className="btn-success" type="button">
+              <i className="fa-solid fa-file-invoice"></i> Exporter Facture
             </button>
           </div>
         </div>
@@ -139,10 +139,11 @@ function AudienceSection() {
               <th>Date d&apos;audience</th>
               <th>Juge</th>
               <th>Sort</th>
+              <th>{"Jugement N\u00b0"}</th>
               <th>Tribunal</th>
-              <th>{"Proc\u00e9dure"}</th>
               <th>{"Date d\u00e9p\u00f4t"}</th>
               <th>Statut</th>
+              <th>{"Proc\u00e9dure"}</th>
               <th>Jugement ADD</th>
               <th>Actions</th>
             </tr>

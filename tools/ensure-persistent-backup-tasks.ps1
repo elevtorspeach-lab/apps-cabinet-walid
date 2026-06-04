@@ -1,7 +1,7 @@
 param(
   [string]$SnapshotTime = "00:00",
   [string]$SnapshotTaskName = "Cabinet Walid Daily Snapshot",
-  [string]$ExcelTime = "12:30",
+  [string]$ExcelTime = "00:30",
   [string]$ExcelTaskName = "Cabinet Walid Daily Excel Backup"
 )
 

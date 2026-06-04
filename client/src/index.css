@@ -3558,11 +3558,13 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
     font-size:16px;
   }
   #audienceSection .audience-actions-right .btn-primary,
+  #audienceSection #exportAudienceFactureBtn,
   #audienceSection .audience-filter-import-row .btn-success,
   #audienceSection .audience-filter-import-row .import-excel{
     width:100%;
   }
   #audienceSection .audience-actions-right .btn-primary,
+  #audienceSection #exportAudienceFactureBtn,
   #audienceSection .audience-filter-import-row .btn-success,
   #audienceSection .audience-filter-import-row .import-excel .btn-primary{
     justify-content:center;
@@ -5485,6 +5487,21 @@ table{
   border-spacing:0 8px;
 }
 
+@media (min-width: 901px){
+  #audienceSection th:nth-child(n+5):nth-child(-n+11),
+  #audienceSection td:nth-child(n+5):nth-child(-n+11){
+    width:164px;
+    min-width:164px;
+    max-width:164px;
+  }
+
+  #audienceSection td:nth-child(n+5):nth-child(-n+11) input,
+  #audienceSection td:nth-child(n+5):nth-child(-n+11) .audience-date-field{
+    width:100%;
+    min-width:0;
+  }
+}
+
 th,td{
   border-bottom:1px solid #e8eef8;
 }
@@ -6166,6 +6183,36 @@ td[data-label="Actions"] .btn-danger{
 
 #audienceSection #exportAudienceDiligenceBtn:hover{
   background:linear-gradient(135deg,#be185d 0%, #831843 100%);
+}
+
+#audienceSection #exportAudienceFactureBtn{
+  min-height:46px;
+  padding:10px 18px;
+  border:1px solid #047857;
+  border-radius:999px;
+  background:
+    radial-gradient(80px 42px at 16% 0%, rgba(255,255,255,.22), transparent 72%),
+    linear-gradient(135deg,#10b981 0%, #047857 100%);
+  color:#ffffff;
+  font-weight:800;
+  letter-spacing:.1px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.24),
+    0 14px 24px rgba(4,120,87,.25);
+}
+
+#audienceSection #exportAudienceFactureBtn i{
+  color:#d1fae5;
+}
+
+#audienceSection #exportAudienceFactureBtn:hover{
+  background:
+    radial-gradient(80px 42px at 16% 0%, rgba(255,255,255,.24), transparent 72%),
+    linear-gradient(135deg,#059669 0%, #065f46 100%);
+  border-color:#065f46;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 16px 28px rgba(4,120,87,.32);
 }
 
 #audienceSection #previewAudienceBtn{

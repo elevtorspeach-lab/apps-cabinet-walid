@@ -94,7 +94,7 @@ Send-MailMessage `
   -From $from `
   -To $to `
   -Subject "Sauvegarde Excel Cabinet Walid - $stamp" `
-  -Body "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients et Diligence generees automatiquement a 12:30.`n`nCabinet Walid" `
+  -Body "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients et Diligence generees automatiquement a 00:30.`n`nCabinet Walid" `
   -Attachments $attachments `
   -Encoding UTF8
 

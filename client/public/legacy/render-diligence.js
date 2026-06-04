@@ -87,6 +87,16 @@ function shouldShowDiligenceNantissementColumns(rows){
   return !!list.length && list.every(row=>isDiligenceNantissementProcedure(row?.procedure));
 }
 
+function hasDiligenceNantissementNbRows(rows){
+  const list = Array.isArray(rows) ? rows : [];
+  return list.some(row=>isDiligenceNantissementProcedure(row?.procedure) && isDiligenceAssNbLayout(row));
+}
+
+function hasDiligenceNantissementCurateurNotifieRows(rows){
+  const list = Array.isArray(rows) ? rows : [];
+  return list.some(row=>isDiligenceNantissementProcedure(row?.procedure) && isDiligenceNantissementCurateurNotifieLayout(row));
+}
+
 function shouldShowDiligenceCommandementColumns(rows){
   if(isDiligenceCommandementProcedure(filterDiligenceProcedure)) return true;
   const list = Array.isArray(rows) ? rows : [];
@@ -116,7 +126,11 @@ function getDiligenceColCount(){
   }
   if(diligenceVirtualCompactProcedureMode === 'sbien') return 14;
   if(diligenceVirtualCompactProcedureMode === 'sfdc') return 13;
-  if(shouldShowDiligenceNantissementColumns(diligenceVirtualRows)) return 25;
+  if(shouldShowDiligenceNantissementColumns(diligenceVirtualRows)){
+    if(hasDiligenceNantissementNbRows(diligenceVirtualRows)) return 31;
+    if(hasDiligenceNantissementCurateurNotifieRows(diligenceVirtualRows)) return 27;
+    return 25;
+  }
   if(diligenceVirtualShowAssColumns){
     const assMode = getDiligenceAssHeaderMode(diligenceVirtualRows);
     const hasNantissementCurateurNotifie = Array.isArray(diligenceVirtualRows) && diligenceVirtualRows.some(row => isDiligenceNantissementCurateurNotifieLayout(row));
@@ -264,6 +278,8 @@ function buildDiligenceHeadHtml(){
     `;
   }
   if(shouldShowDiligenceNantissementColumns(diligenceVirtualRows)){
+    const showNbFollowupColumns = hasDiligenceNantissementNbRows(diligenceVirtualRows);
+    const showCurateurNotifieColumns = !showNbFollowupColumns && hasDiligenceNantissementCurateurNotifieRows(diligenceVirtualRows);
     return `
       <th>Client</th>
       <th>Type</th>
@@ -278,6 +294,8 @@ function buildDiligenceHeadHtml(){
       <th>Plie</th>
       <th>Sort notification</th>
       <th>Observation</th>
+      ${showNbFollowupColumns ? '<th>Lettre Rec</th><th>Curateur N&deg;</th><th>ORD</th><th>Notif curateur</th><th>Avis curateur</th><th>PV Police</th>' : ''}
+      ${showCurateurNotifieColumns ? '<th>Avis curateur</th><th>PV Police</th>' : ''}
       <th>Certificat non appel</th>
       <th>Execution N&deg;</th>
       <th>Ville</th>
@@ -482,6 +500,34 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     `;
   }
   if(shouldShowDiligenceNantissementColumns(diligenceVirtualRows) && isDiligenceNantissementProcedure(row?.procedure)){
+    const showNbFollowupColumns = hasDiligenceNantissementNbRows(diligenceVirtualRows);
+    const showCurateurNotifieColumns = !showNbFollowupColumns && hasDiligenceNantissementCurateurNotifieRows(diligenceVirtualRows);
+    const nbFollowupCells = showNbFollowupColumns
+      ? (isAssNbLayoutValue
+        ? `
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'lettreRec', row.details?.lettreRec || '')}</td>
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'curateurNo', row.details?.curateurNo || '')}</td>
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'notifCurateur', row.details?.notifCurateur || '')}</td>
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
+          <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue)}</td>
+        `
+        : (isNantissementCurateurNotifieLayoutValue
+          ? `
+            <td></td><td></td><td></td><td></td>
+            <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
+            <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue)}</td>
+          `
+          : '<td></td><td></td><td></td><td></td><td></td><td></td>')
+      )
+      : (showCurateurNotifieColumns
+        ? (isNantissementCurateurNotifieLayoutValue
+          ? `
+            <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
+            <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', pvPliceValue)}</td>
+          `
+          : '<td></td><td></td>')
+        : '');
     return `
       <tr ${rowAttrs}>
         <td>
@@ -506,6 +552,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'plie', row.details?.plie || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, notificationSortField, notificationSortValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+        ${nbFollowupCells}
         <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
@@ -808,12 +855,14 @@ function renderDiligence(options = {}){
 
       if(headRow){
         const showNantissementColumns = shouldShowDiligenceNantissementColumns(pageData.rows);
+        const hasNantissementNb = showNantissementColumns && hasDiligenceNantissementNbRows(pageData.rows);
+        const hasNantissementCurateurNotifie = showNantissementColumns && hasDiligenceNantissementCurateurNotifieRows(pageData.rows);
         const headMode = diligenceVirtualShowCommandementColumns
           ? 'commandement-columns'
           : (showNantissementColumns ? 'nantissement-columns' : (diligenceVirtualShowAssColumns ? 'ass-columns' : 'compact-columns'));
         const headVariant = diligenceVirtualShowCommandementColumns
           ? `commandement-${getDiligenceCommandementHeaderMode(pageData.rows)}`
-          : (showNantissementColumns ? 'nantissement' : (diligenceVirtualShowAssColumns ? getDiligenceAssHeaderMode(pageData.rows) : diligenceVirtualCompactProcedureMode));
+          : (showNantissementColumns ? `nantissement-${hasNantissementNb ? 'nb' : (hasNantissementCurateurNotifie ? 'curateur' : 'default')}` : (diligenceVirtualShowAssColumns ? getDiligenceAssHeaderMode(pageData.rows) : diligenceVirtualCompactProcedureMode));
         
         const hasNotifier = diligenceVirtualShowAssColumns && pageData.rows.some(row => isDiligenceAssNotifierLayout(row));
         const hasPlie = !!diligenceVirtualShowAssColumns;

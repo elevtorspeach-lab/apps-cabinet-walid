@@ -158,6 +158,7 @@ let selectedFactureDossierIndex = -1;
 let selectedFactureDossierIndexes = new Set();
 let selectedFactureProcedure = '';
 let selectedFactureProceduresByDossier = new Map();
+let suppressAudienceFactureHuissier = false;
 let currentFactureInvoiceKey = '';
 let currentFactureInvoiceNumber = '';
 let currentFacturePreviewRecord = null;
@@ -533,6 +534,7 @@ const DOSSIER_HISTORY_FIELD_LABELS = {
   'procedureDetails.audience': 'Date d’audience',
   'procedureDetails.juge': 'Juge',
   'procedureDetails.sort': 'Sort',
+  'procedureDetails.jugementNo': 'Jugement N°',
   'procedureDetails.tribunal': 'Tribunal',
   'procedureDetails.dateDepot': 'Date dépôt',
   'procedureDetails.depotLe': 'Date dépôt',
@@ -701,6 +703,7 @@ const AUDIENCE_EXPORT_HEADER_IMAGE_URL = IS_FILE_PROTOCOL ? './assets/audience-e
 const AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION = 'ad99528-audience-header';
 const AUDIENCE_EXPORT_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/audience-export-template.xlsx' : '/assets/audience-export-template.xlsx'}?v=${AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION}`;
 const AUDIENCE_EXPORT_TEMPLATE_BASE64_SCRIPT_URL = `${IS_FILE_PROTOCOL ? './assets/audience-export-template.base64.js' : '/assets/audience-export-template.base64.js'}?v=${AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION}`;
+const FACTURE_EXPORT_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/facture-export-template.xlsx' : '/assets/facture-export-template.xlsx'}?v=20260604-facture-reference-1`;
 const AUDIENCE_EXPORT_HEADER_IMAGE_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAlgCWAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAElBLoDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9U6KKKACiiigAooooAKKKKACiiigAooooAKKKKAMrxB4V0nxXarbavYQ6hAp3COYZAPrXmnir9k34Y+KrWWJ/DVvp08gwbqx+SUficj9K9goranWq0vgk18zGpRpVfjin8j8s/wBpf9lnU/gfeJf2kj6j4buH2xXWPmjbsj+/XmvA6/Z/4neBbP4keBdX8PXyr5V5AyK5GTG2OGHoR61+OPiLRp/D+tXmn3MZint5WjZG6gg4r7zKsdLF03Gp8UfxPg81wMcJUUqfwy/AzqKKVfvD617Z4h9Kfso/spj41NPreuTzWfh22fywIcCS4fuFY5wBjnjvX2xof7Knwu0KJFTwnZ3cqjHn3QLv+dc1+wzJDJ+z1pPkAAC6uA2P72/mvoCvz7McbXnXnBSaSdrI/QcuwVCGHhNxTbV7sxfDfg3RPB8MkWi6bBpscmN6wLgNjpW1RRXiOTk7tntpKKskFFFFIYUUUUAFZviTW7fw3oGoapdyCK3tYWldz2wK0q+df25vH3/CI/Bi406Jv9I1mUWhQHB8vBZm/wDHR+ddGHouvWjSXVnPiKyoUZVX0R+b/jjxPceL/GGqa1efNcXlw00nuSf8K/Tv9j74lH4jfBrTftEqvqOlj7FOoP3VXIj/ADUCvymJyc19V/sA/Ez/AIRn4kTeG7mYR2OtR7UX+9cKRs/QtX3ea4ZVcK+Vax1X9eh8JlWJdLFLmektH/Xqfo7RRRX54foYUUUUAFMmhS4heKRQ8bjaynoR6U+igDir74L+B9TDC68M2E4Y5O+M8/rXHeIP2Q/hbr0LovhqHTHccyWJKN9ec17NRXRHEVoO8ZtfM55YejUVpQT+R8NfFT/gneLexlu/A+qSXEkYLCxvyC8nsrgAD8a+K9e0G+8NarcadqVtJaXlu5jkikXBUg9K/bmvhP8A4KJ/DuxtdQ8PeJrKBY76/MltdFRjft2lWwOp+Y19RleZ1atVUKzvfZny+aZZSpUnXoq1t0fG3hzw3qXizV7fTNKtJb29nbYkUSliTX2j8Kf+CeIltIbzxzqbwSOAx0+wK74z6M/IP4V6n+xz+zvbfC/wjB4g1a2R/EupR+Zl1ybaI8qqn1IwSffFfSNZZhm8+d0sO7Jde/obZflEORVcQrt9O3qeP6H+yX8LdEhRT4Vtb+Rek15l3/pXf+GPh/4c8Fs7aHo9tphcbW+zrjI9K6Givm516tT45N/M+jhQpU/ggl8gooorA3CiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvy6/be8B/8Id8btRuUQiHV0W/XA+UZJUgfiv61+otfI3/AAUO8CnVvAek+I4IwH0+fyriTHPltgKP++j+te3k9b2WKUXtLT/I8TOKPtcK2t46n54UUUV+hH56fob/AME6fFQ1DwHruhlsHT7hJVU9xJuJP5rX13X5pfsD+N/+Ed+MC6XNKEtNUt2h25+9LkbP5mv0tr88zel7PFyf82p+h5PV9phIr+XQKKKK8U9oKKKKACiiigAr84f+CgfxAXxD8ULbQYJCYtGgCOFPys7gOT9RnFfo9X5jft0fDyTwd8YJtRTP2LWIxcQg84IAV+f96voMkUHive3s7f16Hz+duf1X3drq/wDXqfOFbHg/xFd+E/EunavYyeVdWkyyxv6EHNY9FfetJqzPg02ndH7V+BfFVr438H6Rrtk2+1v7dZkb69f1zW7XyX/wT6+Jn/CQ+BdQ8K3Mxku9Kk86IH+GBsAKPowb86+tK/LcXQeHrypPo/wP1HCV1iKEaq6/mFFFFch1hRRRQAUUUUAFeO/Gj4dn4lfED4e2kqMdN026mv7ptuVJQIUQ/UgivYqK1pVHSlzx3MqtNVY8kthqqsahVAVVGAAOAKdRRWRqFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAVxPxo8HQ+PPhf4i0aZN4mtHdFxnLoNy/qBXbUhAYEEZBq4ScJKS3RE4qcXF7M/EDULSWxvp7eZPLmjdkdD/CQcEVXr2L9rDwF/wAK/wDjXr9oiEQ3UpvUbHy4l+fA+hJrx2v1alUVWEai6q5+U1abpVJU30djoPAHiiXwV4y0fXIAWmsLlLhAPVSDX7MaBq0Wu6HYahA6yRXMKShl6cjNfiOrFWBHWv1H/Yj8fL4y+ClnZs5e40WVrJ2Y/MR98E/g36V83ntHmpxrLpp959JkVblqSovrr9x9A0UUV8UfahRRRQAUUUUAFeO/Gj4F+GviL4V0rXfD1xDqV5BuWaaM5TPsW4P4V6nRWRqQqTh8MkoTk3dfkdXRRRXAdwUUUUAFFFFABXyl/wVK+Gf9s+ENJ8Y2sRL6m4S3mHJ8s5I3D8FAr6Aqvo+rQaZpF9qN5I80N1C0jjuVYAj8q6sVo1o0V0Rz4ik5VJTfVH4k1j6rqEGkeKNN0e0jf7dqFslvGv95SHQj6iv1O/4J9eD7rxb8MtT1hRHeTUpEVz6F4VBn8a/Pqsj4G/Ev4i/CXxv9k8Ga3f6JqumS+VcXQQEIgkYEgyKc4x7fXmv11L8Ho4mM6tN+v/BP0vKcrq5djITaP5Iooqz4QvLTxX4V1W+HVprq20tz/ABHBBrMv2S3m1GUQNDfQykDPzM4OQfxrWrWl8UVPqWa4Kj7PfhqfceDPhXpHwj8N2WlaHbi2tpyrSIeZJHU46nsSa9MormqVVVJxpyc1oSak0FFFFMQUUUUAFFfIP/BQj4DWWo+JIPiBrESJZX83k6fM4Pl26j7sq+4r1+rquJnSlTjGMViIV4OUlyM/PCvz0/Zv+IGm+FPiv4w0DTdQNlBf2qW6W7wBtrvKxAEB7ZGfWv2Ar4E/wCCiXg2STxf4L8YzNBvWLSIwb/U7sDK1uFI/76r7XLaUaeXwh0uul/wAH5nmUcZTeYttbX/M+P6K+jP+G3vhd/0Suv/AH/lP/iaP+G3vhd/0Suv/AH/lP/ia5/7cw3/P58v/AABz/UMJfz7/AAQfG9foV/w298Lv+iV1/wC/8p/8TR/w298Lv+iV1/7/AMp/8TR/ZmG/5/Pl/wCAf2phL+ff4I8aor6M/wCG3vhd/wBErr/3/lP/AImj/ht74Xf9Err/AN/5T/4mj+zMN/z+fL/wD/ZmEv59/gjxqivoz/ht74Xf9Err/wB/5T/4mj/ht74Xf9Err/3/AJT/AOJo/szDf8/ny/8AAP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v8Ayn/xNH/Db3wu/wCiV1/7/yn/AMTR/ZmG/wCfz5f+AP7Mwl/Pv8EeNUV9Gf8ADb3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABP/2Q==';
 const CLIENT_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/client-filter.worker.js' : '/workers/client-filter.worker.js';
 const AUDIENCE_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/audience-filter.worker.js' : '/workers/audience-filter.worker.js';
@@ -728,6 +731,7 @@ let audienceDeferredRenderTimer = null;
 let audienceDeferredRenderSeq = 0;
 let audienceExportHeaderImageDataUrlPromise = null;
 let audienceExportTemplateArrayBufferPromise = null;
+let factureExportTemplateArrayBufferPromise = null;
 let suiviFilterWorker = null;
 let suiviFilterWorkerFailed = false;
 let suiviFilterRequestSeq = 0;
@@ -5757,6 +5761,14 @@ function canDeleteData(){
   return isManager();
 }
 
+function canDeleteDossierOrImportData(){
+  return canDeleteData() || (isAdmin() && canEditData());
+}
+
+function canEmptyRecycleBin(){
+  return canDeleteDossierOrImportData();
+}
+
 function canManageTeam(){
   return userCanManageTeam(currentUser);
 }
@@ -5846,7 +5858,9 @@ function getAccessibleViewsForCurrentUser(){
     return new Set(views);
   }
   if(isAdmin()){
-    return new Set(['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture']);
+    const views = ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture'];
+    if(canEmptyRecycleBin()) views.push('recycle');
+    return new Set(views);
   }
   return new Set(['dashboard', 'suivi', 'audience', 'diligence']);
 }
@@ -9026,6 +9040,27 @@ async function getAudienceExportTemplateArrayBuffer(){
   return cloneArrayBuffer(await audienceExportTemplateArrayBufferPromise);
 }
 
+async function getFactureExportTemplateArrayBuffer(){
+  if(!factureExportTemplateArrayBufferPromise){
+    factureExportTemplateArrayBufferPromise = (async ()=>{
+      try{
+        const response = await fetch(FACTURE_EXPORT_TEMPLATE_URL, { cache: 'no-store' });
+        if(!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.arrayBuffer();
+      }catch(fetchErr){
+        console.warn('Chargement template facture via fetch indisponible', fetchErr);
+        try{
+          return await loadArrayBufferWithXhr(FACTURE_EXPORT_TEMPLATE_URL);
+        }catch(xhrErr){
+          console.warn('Chargement template facture via XHR indisponible', xhrErr);
+          return null;
+        }
+      }
+    })();
+  }
+  return cloneArrayBuffer(await factureExportTemplateArrayBufferPromise);
+}
+
 async function getAudienceExportHeaderImageDataUrl(){
   if(!audienceExportHeaderImageDataUrlPromise){
     audienceExportHeaderImageDataUrlPromise = Promise.resolve(AUDIENCE_EXPORT_HEADER_IMAGE_DATA_URL);
@@ -9977,13 +10012,16 @@ async function persistImportDeleteBatchNow(importType, batchId){
 }
 
 async function deleteGlobalImportBatch(batchId){
-  if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import global');
+  if(!canDeleteDossierOrImportData()) return alert('Suppression non autorisee');
   const targetBatchId = String(batchId || '').trim();
   const batch = getImportHistoryEntriesByType('global').find(entry=>String(entry?.id || '').trim() === targetBatchId)
     || getImportHistoryEntriesByType('diligence').find(entry=>String(entry?.id || '').trim() === targetBatchId);
   if(!batch) return alert('Import introuvable.');
   const importLabel = batch.category === 'diligence' ? 'diligence' : 'global';
-  if(!window.confirm(`Supprimer l'import ${importLabel} "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`)) return;
+  if(!await confirmDangerousAction(
+    `Supprimer l'import ${importLabel} "${batch.fileName}" ?\nTous les dossiers importés par ce fichier seront supprimés.`,
+    { confirmationWord: 'SUPPRIMER' }
+  )) return;
 
   const createdClientIds = new Set((batch.createdClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
   let removedDossiers = 0;
@@ -10021,10 +10059,13 @@ async function deleteGlobalImportBatch(batchId){
 }
 
 async function deleteAudienceImportBatch(batchId){
-  if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un import audience');
+  if(!canDeleteDossierOrImportData()) return alert('Suppression non autorisee');
   const batch = getImportHistoryEntriesByType('audience').find(entry=>String(entry?.id || '').trim() === String(batchId || '').trim());
   if(!batch) return alert('Import audience introuvable.');
-  if(!window.confirm(`Supprimer l'import audience "${batch.fileName}" ?\nLes données audience importées par ce fichier seront retirées.`)) return;
+  if(!await confirmDangerousAction(
+    `Supprimer l'import audience "${batch.fileName}" ?\nLes données audience importées par ce fichier seront retirées.`,
+    { confirmationWord: 'SUPPRIMER' }
+  )) return;
 
   const operationMap = new Map((batch.operations || []).map(op=>[`${op.dossierUid}::${op.procKey}`, op]));
   const orphanClientIds = new Set((batch.createdOrphanClientIds || []).map(v=>Number(v)).filter(Number.isFinite));
@@ -10219,7 +10260,7 @@ function ensureImportHistoryHoverMenu(containerId, type){
   const normalizedType = requestedType === 'audience' ? 'audience' : (requestedType === 'diligence' ? 'diligence' : 'global');
   const entries = getImportHistoryEntriesByType(normalizedType);
   if(!entries.length) return;
-  const canDelete = canDeleteData();
+  const canDelete = canDeleteDossierOrImportData();
   const menu = container.querySelector('.import-history-hover-menu');
   if(!menu) return;
   const renderKey = buildImportHistoryPanelKey(entries, normalizedType, canDelete);
@@ -10288,7 +10329,7 @@ function renderImportHistoryPanel(containerId, type){
     return;
   }
 
-  const canDelete = canDeleteData();
+  const canDelete = canDeleteDossierOrImportData();
   const title = normalizedType === 'audience'
     ? 'Fichiers Audience importes'
     : (normalizedType === 'diligence' ? 'Fichiers Diligence importes' : 'Fichiers dossier global importes');
@@ -10745,12 +10786,12 @@ function restoreAllRecycleItems(){
 }
 
 async function clearRecycleBinToBackup(){
-  if(!canDeleteData()) return alert('Seul le gestionnaire peut vider la corbeille');
+  if(!canEmptyRecycleBin()) return alert('Suppression non autorisee');
   const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
   if(!items.length) return alert('Corbeille vide');
   if(!await confirmDangerousAction(
     `Vider la corbeille (${items.length} element(s)) ?\nLes elements seront gardes dans le backup interne.`,
-    { confirmationWord: 'VIDER' }
+    { confirmationWord: 'SUPPRIMER' }
   )) return;
   pushRecycleArchiveEntries(items);
   AppState.recycleBin = [];
@@ -10765,9 +10806,11 @@ function renderRecycleBin(options = {}){
   if(!body) return;
   const restoreAllBtn = $('restoreAllRecycleBtn');
   const clearBtn = $('clearRecycleBinBtn');
-  if(restoreAllBtn) restoreAllBtn.style.display = canDeleteData() ? '' : 'none';
-  if(clearBtn) clearBtn.style.display = canDeleteData() ? '' : 'none';
-  if(!canDeleteData()){
+  const canRestore = canDeleteData();
+  const canClear = canEmptyRecycleBin();
+  if(restoreAllBtn) restoreAllBtn.style.display = canRestore ? '' : 'none';
+  if(clearBtn) clearBtn.style.display = canClear ? '' : 'none';
+  if(!canRestore && !canClear){
     if(clearBtn) clearBtn.disabled = true;
     body.innerHTML = '<tr><td colspan="5">Accès réservé au gestionnaire.</td></tr>';
     renderPagination('recycle', { totalRows: 0 });
@@ -10801,9 +10844,11 @@ function renderRecycleBin(options = {}){
         <td data-label="Utilisateur">${escapeHtml(getRecycleEntryActorLabel(entry))}</td>
         <td data-label="Détails">${escapeHtml(getRecycleEntryDetails(entry))}</td>
         <td data-label="Restore">
-          <button type="button" class="btn-primary" data-action="restore" data-index="${row.originalIndex}">
-            <i class="fa-solid fa-rotate-left"></i>
-          </button>
+          ${canRestore ? `
+            <button type="button" class="btn-primary" data-action="restore" data-index="${row.originalIndex}">
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+          ` : '-'}
         </td>
       </tr>
     `;
@@ -15500,6 +15545,7 @@ function getFactureProcesVerbalLineEntries(){
   );
   return targetEntries.map(entry=>{
     const procedure = getFactureProcedureChoiceForDossier(entry.dossier, entry.dossierIndex);
+    const procedureDetails = findFactureProcedureDetails(entry.dossier, procedure) || {};
     const reference = getFactureProcedureReference(entry.dossier, procedure, entry.dossierIndex);
     const amountText = getFactureProcedureAmountText(entry.dossier, procedure) || '0';
     const amount = Number(String(amountText).replace(/\s+/g, '').replace(',', '.')) || 0;
@@ -15507,7 +15553,7 @@ function getFactureProcesVerbalLineEntries(){
     const vignette = 0;
     const med = 0;
     const fraisTimbrage = 0;
-    const huissierAudience = 200;
+    const huissierAudience = suppressAudienceFactureHuissier ? '' : 200;
     const deplacement = 0;
     return {
       client: entry.client,
@@ -15518,6 +15564,11 @@ function getFactureProcesVerbalLineEntries(){
       nom: entry.dossier?.debiteur || '-',
       procedure,
       reference,
+      stade: procedureDetails.stade || 'JUG',
+      dateDepot: procedureDetails.depotLe || procedureDetails.dateDepot || '',
+      dateJugement: procedureDetails.audience || '',
+      jugementNo: procedureDetails.jugementNo || '',
+      tribunal: procedureDetails.tribunal || '',
       amount,
       taxe,
       vignette,
@@ -15616,6 +15667,11 @@ function buildFactureTrackingRecord(data, tranche){
       procedure: String(line.procedure || '').trim(),
       reference: String(line.reference || '').trim(),
       ville: String(line.ville || '').trim(),
+      stade: String(line.stade || '').trim(),
+      dateDepot: String(line.dateDepot || '').trim(),
+      dateJugement: String(line.dateJugement || '').trim(),
+      jugementNo: String(line.jugementNo || '').trim(),
+      tribunal: String(line.tribunal || '').trim(),
       amount: Number(line.amount) || 0
     }))
   };
@@ -15697,6 +15753,11 @@ function buildFactureDataFromTrackingRecord(record){
       nom: String(line.nom || '-').trim() || '-',
       procedure: String(line.procedure || '').trim(),
       reference: String(line.reference || '').trim(),
+      stade: String(line.stade || 'JUG').trim() || 'JUG',
+      dateDepot: String(line.dateDepot || '').trim(),
+      dateJugement: String(line.dateJugement || '').trim(),
+      jugementNo: String(line.jugementNo || '').trim(),
+      tribunal: String(line.tribunal || '').trim(),
       amount,
       taxe: amount,
       vignette: 0,
@@ -16625,18 +16686,129 @@ async function exportEditedFacturePreviewExcel(){
   await saveBlobDirectOrDownload(blob, `Facture_${safeRef}_modifiee.xlsx`);
 }
 
+function cloneFactureTemplateStyle(style){
+  return style ? JSON.parse(JSON.stringify(style)) : {};
+}
+
+async function exportFactureReferenceTemplateExcel(data){
+  const templateBuffer = await getFactureExportTemplateArrayBuffer();
+  if(!templateBuffer) return false;
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(templateBuffer);
+  const sheet = workbook.worksheets?.[0];
+  if(!sheet) return false;
+
+  const lines = Array.isArray(data?.lines) && data.lines.length ? data.lines : [{}];
+  const dataRowStyles = Array.from({ length: 17 }, (_, index)=>cloneFactureTemplateStyle(sheet.getCell(12, index + 1).style));
+  const totalRowStyles = Array.from({ length: 17 }, (_, index)=>cloneFactureTemplateStyle(sheet.getCell(19, index + 1).style));
+  const summaryRowStyles = Array.from({ length: 5 }, (_, rowIndex)=>
+    Array.from({ length: 17 }, (_, colIndex)=>cloneFactureTemplateStyle(sheet.getCell(23 + rowIndex, colIndex + 1).style))
+  );
+  const summaryRowHeights = Array.from({ length: 5 }, (_, index)=>sheet.getRow(23 + index).height);
+  const dataRowHeight = sheet.getRow(12).height || 24;
+  const totalRowHeight = sheet.getRow(19).height;
+
+  sheet.spliceRows(12, 7, ...lines.map(()=>Array(17).fill(null)));
+  sheet.getCell('D6').value = String(data?.clientName || '').trim() || '-';
+  sheet.getCell('D7').value = `ICE ${String(data?.client?.ice || data?.client?.ICE || '001655642000019').trim()}`;
+  sheet.getCell('I7').value = `Casablanca le ${String(data?.today || '').trim()}`;
+  sheet.getCell('D8').value = `Facture N° ${String(data?.invoiceRef || '').trim()}`;
+
+  const numericValue = (value)=>Number(value) || 0;
+  lines.forEach((line, index)=>{
+    const rowNumber = 12 + index;
+    const values = [
+      line?.type || '',
+      line?.refClient || '',
+      line?.nom || '',
+      line?.stade || 'JUG',
+      line?.procedure || '',
+      line?.reference || '',
+      normalizeDateDDMMYYYY(line?.dateDepot || '') || String(line?.dateDepot || '').trim(),
+      normalizeDateDDMMYYYY(line?.dateJugement || '') || String(line?.dateJugement || '').trim(),
+      line?.jugementNo || '',
+      null,
+      numericValue(line?.vignette),
+      numericValue(line?.med),
+      line?.huissierAudience === '' ? null : numericValue(line?.huissierAudience),
+      line?.tribunal || '',
+      null,
+      null,
+      null
+    ];
+    const row = sheet.getRow(rowNumber);
+    row.height = dataRowHeight;
+    values.forEach((value, colIndex)=>{
+      const cell = sheet.getCell(rowNumber, colIndex + 1);
+      cell.style = cloneFactureTemplateStyle(dataRowStyles[colIndex]);
+      cell.value = value;
+    });
+    sheet.getCell(rowNumber, 17).value = null;
+  });
+
+  const totalRowNumber = 12 + lines.length;
+  const totalRow = sheet.getRow(totalRowNumber);
+  totalRow.height = totalRowHeight;
+  totalRowStyles.forEach((style, index)=>{
+    sheet.getCell(totalRowNumber, index + 1).style = cloneFactureTemplateStyle(style);
+    sheet.getCell(totalRowNumber, index + 1).value = null;
+  });
+  for(let col = 10; col <= 17; col += 1){
+    if([10, 15, 16, 17].includes(col) || (col === 13 && lines.every(line=>line?.huissierAudience === ''))){
+      sheet.getCell(totalRowNumber, col).value = null;
+      continue;
+    }
+    const colLetter = String.fromCharCode(64 + col);
+    const sum = lines.reduce((acc, line)=>{
+      if(col === 11) return acc + numericValue(line?.vignette);
+      if(col === 12) return acc + numericValue(line?.med);
+      if(col === 13) return acc + numericValue(line?.huissierAudience);
+      return acc;
+    }, 0);
+    sheet.getCell(totalRowNumber, col).value = {
+      formula: `SUM(${colLetter}12:${colLetter}${totalRowNumber - 1})`,
+      result: sum
+    };
+  }
+
+  const summaryStart = totalRowNumber + 4;
+  const summaryValues = [
+    ['TAXE', null],
+    ['FRAIS', lines.reduce((sum, line)=>sum + numericValue(line?.vignette) + numericValue(line?.med) + numericValue(line?.huissierAudience), 0)],
+    ['HONORAIRE', null],
+    ['TVA', null],
+    ['TOTAL', null]
+  ];
+  summaryValues.forEach(([label, value], index)=>{
+    const rowNumber = summaryStart + index;
+    sheet.getRow(rowNumber).height = summaryRowHeights[index];
+    summaryRowStyles[index].forEach((style, colIndex)=>{
+      sheet.getCell(rowNumber, colIndex + 1).style = cloneFactureTemplateStyle(style);
+      sheet.getCell(rowNumber, colIndex + 1).value = null;
+    });
+    sheet.getCell(rowNumber, 6).value = label;
+    sheet.getCell(rowNumber, 7).value = value;
+  });
+
+  workbook.creator = 'Cabinet Walid Araqi';
+  workbook.modified = new Date();
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const safeRef = String(data?.invoiceRef || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
+  await saveBlobDirectOrDownload(blob, `Facture_${safeRef}.xlsx`);
+  return true;
+}
+
 async function exportFactureProcesVerbalExcel(){
   if(!canExportData()) return alert('Acces refuse');
-  if($('factureDocumentPreviewContent')?.querySelector('.facture-sheet')){
-    await exportEditedFacturePreviewExcel();
-    return;
-  }
   const { dossier } = getFactureSelectedDossier();
   if(!dossier && !currentFacturePreviewRecord) return alert('Choisir dossier');
   const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: true });
   if(!excelReady || typeof ExcelJS === 'undefined') return alert('Export Excel indisponible.');
 
   const data = getFactureProcesVerbalData();
+  if(await exportFactureReferenceTemplateExcel(data)) return;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Cabinet Walid Araqi';
   workbook.created = new Date();
@@ -17116,6 +17288,59 @@ async function exportFactureProcesVerbalExcel(){
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const safeRef = String(data.invoiceRef || 'facture').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
   await saveBlobDirectOrDownload(blob, `Facture_${safeRef}.xlsx`);
+}
+
+async function exportSelectedAudienceFactureExcel(){
+  const selectedRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true })
+    .filter(row=>isAudienceSelectedForPrint(row?.ci, row?.di, row?.procKey));
+  if(!selectedRows.length){
+    return alert('Cochez les dossiers a exporter en facture.');
+  }
+
+  const clientIndexes = [...new Set(selectedRows.map(row=>Number(row?.ci)).filter(Number.isInteger))];
+  if(clientIndexes.length !== 1){
+    return alert('Cochez uniquement les dossiers du meme client pour exporter une facture.');
+  }
+
+  const client = AppState.clients?.[clientIndexes[0]];
+  if(!client) return alert('Client introuvable.');
+
+  const dossierIndexes = [...new Set(selectedRows.map(row=>Number(row?.di)).filter(Number.isInteger))];
+  if(!dossierIndexes.length) return alert('Dossier introuvable.');
+
+  const previousState = {
+    selectedFactureClientId,
+    selectedFactureDossierIndex,
+    selectedFactureDossierIndexes,
+    selectedFactureProcedure,
+    selectedFactureProceduresByDossier,
+    suppressAudienceFactureHuissier,
+    currentFacturePreviewRecord
+  };
+
+  try{
+    selectedFactureClientId = String(client.id || '');
+    selectedFactureDossierIndexes = new Set(dossierIndexes);
+    selectedFactureDossierIndex = dossierIndexes[0];
+    selectedFactureProceduresByDossier = new Map();
+    selectedRows.forEach(row=>{
+      const dossierIndex = Number(row?.di);
+      if(!Number.isInteger(dossierIndex) || selectedFactureProceduresByDossier.has(dossierIndex)) return;
+      selectedFactureProceduresByDossier.set(dossierIndex, String(row?.procKey || '').trim());
+    });
+    selectedFactureProcedure = String(selectedFactureProceduresByDossier.get(selectedFactureDossierIndex) || '').trim();
+    suppressAudienceFactureHuissier = true;
+    currentFacturePreviewRecord = null;
+    await exportFactureProcesVerbalExcel();
+  }finally{
+    selectedFactureClientId = previousState.selectedFactureClientId;
+    selectedFactureDossierIndex = previousState.selectedFactureDossierIndex;
+    selectedFactureDossierIndexes = previousState.selectedFactureDossierIndexes;
+    selectedFactureProcedure = previousState.selectedFactureProcedure;
+    selectedFactureProceduresByDossier = previousState.selectedFactureProceduresByDossier;
+    suppressAudienceFactureHuissier = previousState.suppressAudienceFactureHuissier;
+    currentFacturePreviewRecord = previousState.currentFacturePreviewRecord;
+  }
 }
 
 function openFactureDocumentPreviewModal(){
@@ -20513,7 +20738,12 @@ function setupEvents(){
     });
   });
   $('exportAudienceDiligenceBtn')?.addEventListener('click', ()=>exportAudienceDiligenceXLS({ openAfterExport: true, browserOpenInline: false }));
-  $('previewAudienceBtn')?.addEventListener('click', previewAudienceSelectedRows);
+  $('exportAudienceFactureBtn')?.addEventListener('click', ()=>{
+    exportSelectedAudienceFactureExcel().catch((err)=>{
+      console.error(err);
+      alert('Erreur pendant export facture Excel');
+    });
+  });
   $('calendarPrevBtn')?.addEventListener('click', ()=>{
     dashboardCalendarCursor = new Date(dashboardCalendarCursor.getFullYear(), dashboardCalendarCursor.getMonth() - 1, 1);
     renderDashboardCalendar();
@@ -21074,7 +21304,7 @@ function applyRoleUI(options = {}){
     'exportAudienceBtn',
     'exportAudienceDetailBtn',
     'exportAudienceDiligenceBtn',
-    'previewAudienceBtn',
+    'exportAudienceFactureBtn',
     'selectAllDiligenceBtn',
     'clearAllDiligenceBtn',
     'exportDiligenceBtn',
@@ -22752,7 +22982,7 @@ function editDossier(clientId, index){
 }
 
 async function deleteDossier(clientId, index){
-  if(!canDeleteData()) return alert('Seul le gestionnaire peut supprimer un dossier');
+  if(!canDeleteDossierOrImportData()) return alert('Suppression non autorisee');
   const client = AppState.clients.find(c=>c.id == clientId);
   if(!client) return;
   const dossier = client.dossiers[index];
@@ -22938,7 +23168,7 @@ function openDossierDetails(clientId, index){
       <button type="button" class="btn-primary" onclick="downloadDossierSummary(${client.id}, ${index})">
         <i class="fa-regular fa-eye"></i> Voir le fichier
       </button>
-      <button type="button" class="btn-danger" onclick="deleteDossier(${client.id}, ${index})" ${canDeleteData() ? '' : 'disabled'}>
+      <button type="button" class="btn-danger" onclick="deleteDossier(${client.id}, ${index})" ${canDeleteDossierOrImportData() ? '' : 'disabled'}>
         <i class="fa-solid fa-trash"></i> Supprimer dossier
       </button>
     </div>
@@ -24158,7 +24388,12 @@ function isDiligenceCurateurNotifieSort(value){
   const normalized = typeof raw.normalize === 'function'
     ? raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     : raw;
-  return normalized.includes('curateur') && normalized.includes('notif');
+  const compact = normalized.replace(/[^a-z0-9]+/g, ' ');
+  const hasCurateur = /\bcurat(?:eur|eut|er|r)?\b/.test(compact) || compact.includes('curateur');
+  const hasNotification = /\bnot(?:if|ifi|ifie|ifier|fie|fi)\b/.test(compact)
+    || compact.includes('notif')
+    || compact.includes('notfie');
+  return hasCurateur && hasNotification;
 }
 
 function normalizeDiligenceNotificationSort(value){
@@ -24583,6 +24818,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         type="text"
         class="diligence-inline-input"
         value="${escapeAttr(val)}"
+        onblur="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)"
         onkeydown="if(event.key === 'Enter'){ updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value); }">
     `;
   }
@@ -24656,8 +24892,8 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 Avis en TR</option>
-        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 Att Pub.</option>
+        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 avis en tr</option>
+        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 att pub</option>
         <option value="pub au J" ${status === 'pub au J' ? 'selected' : ''}>3 pub au J</option>
       </select>
     `;
@@ -24666,8 +24902,8 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       <select
         class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
         onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
-        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 Avis en TR</option>
-        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 Att Pub.</option>
+        <option value="Avis en TR" ${status === 'Avis en TR' ? 'selected' : ''}>1 avis en tr</option>
+        <option value="Att Pub." ${status === 'Att Pub.' ? 'selected' : ''}>2 att pub</option>
         <option value="pub au J" ${status === 'pub au J' ? 'selected' : ''}>3 pub au J</option>
       </select>
     `;
@@ -30073,6 +30309,10 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
   if(field === 'sort'){
     p.sort = value;
+    return;
+  }
+  if(field === 'jugementNo'){
+    p.jugementNo = value;
   }
 }
 
@@ -30170,7 +30410,8 @@ function updateAudienceDraft(key, field, value){
     dateDepot: 'procedureDetails.dateDepot',
     tribunal: 'procedureDetails.tribunal',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    jugementNo: 'procedureDetails.jugementNo'
   };
   if(fieldMap[field] && hasMeaningfulChange){
     queueDossierHistoryEntry(dossier, {
@@ -30521,7 +30762,8 @@ function saveAudienceDraftEntry(key, options = {}){
     dateDepot: 'procedureDetails.dateDepot',
     tribunal: 'procedureDetails.tribunal',
     juge: 'procedureDetails.juge',
-    sort: 'procedureDetails.sort'
+    sort: 'procedureDetails.sort',
+    jugementNo: 'procedureDetails.jugementNo'
   };
 
   if(data && typeof data === 'object'){
@@ -30598,6 +30840,18 @@ function saveAudienceDraftEntry(key, options = {}){
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
         field: 'procedureDetails.sort',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.jugementNo !== undefined){
+      const before = getAudienceProcedureFieldValue(p, 'jugementNo');
+      applyAudienceFieldToProcedure(p, 'jugementNo', data.jugementNo);
+      const after = getAudienceProcedureFieldValue(p, 'jugementNo');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.jugementNo',
         procedure: procKey,
         before,
         after
@@ -30780,6 +31034,18 @@ function saveAllAudience(options = {}){
       queueDossierHistoryEntry(dossier, {
         source: 'audience',
         field: 'procedureDetails.sort',
+        procedure: procKey,
+        before,
+        after
+      });
+    }
+    if(data.jugementNo!==undefined){
+      const before = getAudienceProcedureFieldValue(p, 'jugementNo');
+      applyAudienceFieldToProcedure(p, 'jugementNo', data.jugementNo);
+      const after = getAudienceProcedureFieldValue(p, 'jugementNo');
+      queueDossierHistoryEntry(dossier, {
+        source: 'audience',
+        field: 'procedureDetails.jugementNo',
         procedure: procKey,
         before,
         after
