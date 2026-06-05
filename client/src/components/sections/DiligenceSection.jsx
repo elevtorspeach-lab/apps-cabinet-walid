@@ -75,6 +75,12 @@ function DiligenceSection() {
             <button id="clearAllDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-eraser"></i> Décocher page
             </button>
+            <button id="addDiligenceSaisieArretBtn" className="btn-success" type="button" style={{ display: 'none' }}>
+              <i className="fa-solid fa-plus"></i> Ajouter saisie arrêt
+            </button>
+            <button id="deleteDiligenceSaisieArretBtn" className="btn-danger" type="button" style={{ display: 'none' }} disabled>
+              <i className="fa-solid fa-trash"></i> Supprimer cochés
+            </button>
             <button id="exportDiligenceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-file-export"></i> Exporter
             </button>

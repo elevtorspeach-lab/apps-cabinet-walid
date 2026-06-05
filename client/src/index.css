@@ -5495,10 +5495,46 @@ table{
     max-width:164px;
   }
 
+  #audienceSection th:nth-child(8),
+  #audienceSection td:nth-child(8){
+    width:180.4px;
+    min-width:180.4px;
+    max-width:180.4px;
+  }
+
+  #audienceSection th:nth-child(10),
+  #audienceSection td:nth-child(10){
+    width:214.81404px;
+    min-width:214.81404px;
+    max-width:214.81404px;
+    padding-right:24px;
+  }
+
+  #audienceSection th:nth-child(11),
+  #audienceSection td:nth-child(11){
+    width:176px;
+    min-width:176px;
+    max-width:176px;
+    padding-left:24px;
+  }
+
   #audienceSection td:nth-child(n+5):nth-child(-n+11) input,
   #audienceSection td:nth-child(n+5):nth-child(-n+11) .audience-date-field{
     width:100%;
     min-width:0;
+  }
+
+  #audienceSection td:nth-child(n+8):nth-child(-n+8) input{
+    min-width:154px;
+  }
+
+  #audienceSection td:nth-child(n+10):nth-child(-n+10) input{
+    min-width:174.83004px;
+  }
+
+  #audienceSection td:nth-child(11) .audience-date-field{
+    width:calc(100% - 12px);
+    margin-left:12px;
   }
 }
 

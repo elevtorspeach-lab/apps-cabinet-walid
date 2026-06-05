@@ -92,6 +92,20 @@ function renderAudienceRowsHtml(rows, duplicateKeySet){
   return rows.map(row=>renderAudienceRowHtml(row, duplicateKeySet)).join('');
 }
 
+function renderAudienceReferenceClientDisplay(value){
+  const raw = String(value || '').trim();
+  const references = raw
+    .split('/')
+    .map(reference=>reference.trim())
+    .filter(Boolean);
+  if(references.length <= 2) return escapeHtml(raw);
+  const lines = [];
+  for(let index = 0; index < references.length; index += 2){
+    lines.push(references.slice(index, index + 2).map(reference=>escapeHtml(reference)).join(' / '));
+  }
+  return lines.join('<br>');
+}
+
 function renderAudienceStatusEditor(row, keyEncoded, canEdit){
   const statusSnapshot = getDossierDisplayStatusSnapshot(row?.d || {});
   const rawStatus = String(row?.d?.statut || '').trim();
@@ -351,7 +365,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
       <td data-label="Référence Client" class="${refClientCellClass}">
         ${canFixRefClient
           ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(refClientInputDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
-          : escapeHtml(refClientDisplayMerged)
+          : renderAudienceReferenceClientDisplay(refClientDisplayMerged)
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
@@ -454,7 +468,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="RÃ©fÃ©rence Client" class="${refClientCellClass}">
         ${canFixRefClient
           ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(refClientInputDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
-          : escapeHtml(refClientDisplayMerged)
+          : renderAudienceReferenceClientDisplay(refClientDisplayMerged)
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>

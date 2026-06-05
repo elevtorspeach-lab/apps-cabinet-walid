@@ -1641,6 +1641,17 @@ function dossierHasAudienceImpact(dossier){
   return normalizeProcedures(dossier).some(procName=>isAudienceProcedure(procName));
 }
 
+function isDiligenceOnlyDossier(dossier){
+  if(!dossier || typeof dossier !== 'object') return false;
+  const markedDiligenceOnly = dossier.isDiligenceOnly === true || dossier.isDiligenceManualEntry === true;
+  if(!markedDiligenceOnly) return false;
+  return normalizeProcedures(dossier).some(procName=>isDiligenceSaisieArretProcedure(procName));
+}
+
+function getDossiersVisibleOutsideDiligence(client){
+  return (Array.isArray(client?.dossiers) ? client.dossiers : []).filter(dossier=>!isDiligenceOnlyDossier(dossier));
+}
+
 function handleDossierDataChange(options = {}){
   const hasAudienceImpact = options.audience === true;
   const rerenderLinked = options.rerenderLinked === true;
@@ -1905,7 +1916,7 @@ function getVisibleDossierCount(){
   let dossierCount = 0;
   const visibleClients = getVisibleClients();
   for(const client of visibleClients){
-    dossierCount += Array.isArray(client?.dossiers) ? client.dossiers.length : 0;
+    dossierCount += getDossiersVisibleOutsideDiligence(client).length;
   }
   visibleDossierCountCacheValue = dossierCount;
   visibleDossierCountCacheVersion = dossierDataVersion;
@@ -6312,7 +6323,7 @@ function getClientListSummaries(){
     id: client?.id,
     name: String(client?.name || ''),
     nameLower: normalizeCaseInsensitiveSearchText(client?.name || ''),
-    dossierCount: Array.isArray(client?.dossiers) ? client.dossiers.length : 0,
+    dossierCount: getDossiersVisibleOutsideDiligence(client).length,
     canEdit: canEditClient(client)
   }));
   clientListSummaryCache = next;
@@ -6330,7 +6341,7 @@ function getClientClotureCountTotal(){
     return clientClotureCountCacheValue;
   }
   const total = getVisibleClients().reduce((sum, client)=>{
-    const dossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+    const dossiers = getDossiersVisibleOutsideDiligence(client);
     return sum + dossiers.reduce((clientSum, dossier)=>clientSum + getDossierClotureContribution(dossier), 0);
   }, 0);
   clientClotureCountCacheValue = total;
@@ -20562,6 +20573,8 @@ function setupEvents(){
   });
   $('diligenceSearchInput')?.addEventListener('input', renderDiligenceDebounced);
   $('exportDiligenceBtn')?.addEventListener('click', exportDiligenceXLS);
+  $('addDiligenceSaisieArretBtn')?.addEventListener('click', addDiligenceSaisieArretDossier);
+  $('deleteDiligenceSaisieArretBtn')?.addEventListener('click', deleteCheckedDiligenceSaisieArretDossiers);
   $('importDiligenceBtn')?.addEventListener('click', handleDiligenceExcelImport);
   $('diligenceImportInput')?.addEventListener('change', (e)=> {
     if(e.target.files?.[0]){
@@ -21291,7 +21304,8 @@ function applyRoleUI(options = {}){
   // Sidebar and Dashboard visibility is now handled by React components (Sidebar.jsx, Dashboard.jsx, etc.)
   // No more manual style.display manipulations here to avoid conflicts.
   setRoleControlledVisibility(['importExcelBtn', 'importAudienceExcelBtn', 'exportBackupExcelBtn'], canImport);
-  setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup'], canCreateClient);
+  setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup', 'addDiligenceSaisieArretBtn'], canCreateClient);
+  setRoleControlledVisibility(['deleteDiligenceSaisieArretBtn'], canDeleteDossierOrImportData());
   setRoleControlledVisibility(['fillClientExcelBtn', 'fillClientExcelClientBtn', 'clientExcelFillGroup'], canUseClientExcelFill());
   setRoleControlledVisibility([
     'selectAllSuiviBtn',
@@ -21317,6 +21331,7 @@ function applyRoleUI(options = {}){
   if($('saveAudienceBtn')) $('saveAudienceBtn').style.display = audienceEditable ? '' : 'none';
   syncViewerReadOnlyUiObserver();
   applyViewerReadOnlyUi(document);
+  syncDiligenceSaisieArretFilterVisibility();
 
   if(skipNavigation) return;
   if(!getAccessibleViewsForCurrentUser().has(String(currentView || '').trim())){
@@ -21363,6 +21378,266 @@ async function addClient(name){
   $('clientName').value='';
   refreshPrimaryViews({ force: true, refreshClientDropdown: true });
   goToCreation(newClient.id);
+}
+
+function requestDiligenceSaisieArretModal(){
+  return new Promise((resolve)=>{
+    const backdrop = document.createElement('div');
+    backdrop.className = 'diligence-saisie-modal-backdrop';
+    backdrop.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:100000',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'padding:22px',
+      'background:rgba(15,23,42,.46)',
+      'backdrop-filter:blur(5px)'
+    ].join(';');
+    const card = document.createElement('div');
+    card.className = 'diligence-saisie-modal';
+    card.style.cssText = [
+      'width:min(100%,560px)',
+      'background:#fff',
+      'border:1px solid #dbe4f0',
+      'border-radius:16px',
+      'box-shadow:0 28px 80px rgba(15,23,42,.28)',
+      'overflow:hidden',
+      'font-family:inherit'
+    ].join(';');
+    card.innerHTML = `
+      <form id="diligenceSaisieArretForm" style="margin:0;">
+        <div style="display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid #e5edf7;background:linear-gradient(135deg,#f8fbff,#eef5ff);">
+          <div style="width:42px;height:42px;border-radius:12px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 22px rgba(29,78,216,.22);">
+            <i class="fa-solid fa-list-check"></i>
+          </div>
+          <div style="min-width:0;">
+            <h3 style="margin:0;color:#0f172a;font-size:18px;line-height:1.2;">Ajouter saisie arrêt</h3>
+            <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Créer un client/dossier et l’afficher directement dans Diligence.</p>
+          </div>
+        </div>
+        <div style="padding:18px 20px 8px;display:grid;gap:13px;">
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            Nom du client
+            <input id="diligenceSaisieClientName" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            Référence client
+            <input id="diligenceSaisieReferenceClient" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            Débiteur
+            <input id="diligenceSaisieDebiteur" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
+          <div id="diligenceSaisieError" style="display:none;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 11px;font-size:13px;font-weight:700;"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 20px 20px;">
+          <button type="button" id="diligenceSaisieCancelBtn" style="border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;">Annuler</button>
+          <button type="submit" style="border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:10px;padding:10px 16px;font-weight:900;cursor:pointer;box-shadow:0 10px 20px rgba(22,163,74,.18);">
+            <i class="fa-solid fa-plus"></i> Créer
+          </button>
+        </div>
+      </form>
+    `;
+    const cleanup = (value)=>{
+      document.removeEventListener('keydown', onKeyDown, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const showError = (message, input)=>{
+      const error = card.querySelector('#diligenceSaisieError');
+      if(error){
+        error.textContent = message;
+        error.style.display = '';
+      }
+      if(input){
+        input.style.borderColor = '#ef4444';
+        input.focus();
+      }
+    };
+    const clearInputError = (input)=>{
+      input.style.borderColor = '#cbd5e1';
+      input.style.boxShadow = '';
+    };
+    const onKeyDown = (event)=>{
+      if(event.key === 'Escape'){
+        event.preventDefault();
+        cleanup(null);
+      }
+    };
+    const form = card.querySelector('#diligenceSaisieArretForm');
+    const clientInput = card.querySelector('#diligenceSaisieClientName');
+    const referenceInput = card.querySelector('#diligenceSaisieReferenceClient');
+    const debiteurInput = card.querySelector('#diligenceSaisieDebiteur');
+    [clientInput, referenceInput, debiteurInput].forEach(input=>{
+      input.addEventListener('focus', ()=>{
+        input.style.borderColor = '#2563eb';
+        input.style.boxShadow = '0 0 0 3px rgba(37,99,235,.12)';
+      });
+      input.addEventListener('blur', ()=>clearInputError(input));
+      input.addEventListener('input', ()=>{
+        const error = card.querySelector('#diligenceSaisieError');
+        if(error) error.style.display = 'none';
+        clearInputError(input);
+      });
+    });
+    form.addEventListener('submit', (event)=>{
+      event.preventDefault();
+      const clientName = String(clientInput.value || '').trim();
+      const referenceClient = String(referenceInput.value || '').trim();
+      const debiteur = String(debiteurInput.value || '').trim();
+      if(!clientName) return showError('Nom du client obligatoire.', clientInput);
+      if(!referenceClient) return showError('Référence client obligatoire.', referenceInput);
+      if(!debiteur) return showError('Débiteur obligatoire.', debiteurInput);
+      cleanup({ clientName, referenceClient, debiteur });
+    });
+    card.querySelector('#diligenceSaisieCancelBtn')?.addEventListener('click', ()=>cleanup(null));
+    backdrop.addEventListener('click', (event)=>{
+      if(event.target === backdrop) cleanup(null);
+    });
+    document.addEventListener('keydown', onKeyDown, true);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    setTimeout(()=>clientInput?.focus(), 0);
+  });
+}
+
+function focusDiligenceSaisieArretRow(referenceClient){
+  filterDiligenceProcedure = 'SAISIE ARRÊT';
+  filterDiligenceSort = 'all';
+  filterDiligenceDelegation = 'all';
+  filterDiligenceOrdonnance = 'all';
+  filterDiligenceTribunal = 'all';
+  filterDiligenceLotDu = '';
+  filterDiligenceObservation = '';
+  filterDiligenceMiseAPrix = 'all';
+  paginationState.diligence = 1;
+  const search = $('diligenceSearchInput');
+  if(search) search.value = String(referenceClient || '').trim();
+  const procedureSelect = $('diligenceProcedureFilter');
+  if(procedureSelect) procedureSelect.value = filterDiligenceProcedure;
+  const sortSelect = $('diligenceSortFilter');
+  if(sortSelect) sortSelect.value = 'all';
+  const delegationSelect = $('diligenceDelegationFilter');
+  if(delegationSelect) delegationSelect.value = 'all';
+  const ordonnanceSelect = $('diligenceOrdonnanceFilter');
+  if(ordonnanceSelect) ordonnanceSelect.value = 'all';
+  const tribunalInput = $('diligenceTribunalFilter');
+  if(tribunalInput) tribunalInput.value = '';
+  const lotDuInput = $('diligenceLotDuFilter');
+  if(lotDuInput) lotDuInput.value = '';
+  const observationInput = $('diligenceObservationFilter');
+  if(observationInput) observationInput.value = '';
+  syncDiligenceSaisieArretFilterVisibility();
+}
+
+async function addDiligenceSaisieArretDossier(){
+  if(!canEditData()) return alert('Accès refusé');
+  const modalValues = await requestDiligenceSaisieArretModal();
+  if(!modalValues) return;
+  const { clientName, referenceClient, debiteur } = modalValues;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const today = formatDateDDMMYYYY(now);
+  let client = AppState.clients.find(c=>String(c?.name || '').trim().toLowerCase() === clientName.toLowerCase());
+  let createdClient = false;
+  if(!client){
+    client = { id: Date.now(), name: clientName, createdAt: nowIso, dossiers: [] };
+    AppState.clients.unshift(client);
+    createdClient = true;
+    grantCurrentViewerAccessToClient(client.id);
+  }
+  if(!canEditClient(client)) return alert('Accès refusé');
+  const dossier = {
+    importUid: createImportTrackingId('dossier'),
+    importGlobalBatchId: '',
+    importAudienceBatchId: '',
+    importDiligenceBatchId: '',
+    factureInvoices: [],
+    isManualEntry: true,
+    isDiligenceManualEntry: true,
+    isDiligenceOnly: true,
+    createdAt: nowIso,
+    suiviUpdatedAt: nowIso,
+    debiteur,
+    cin: '',
+    cinNonDebiteur: '',
+    adversaire: '',
+    nRef: '',
+    boiteNo: '',
+    referenceClient,
+    dateAffectation: today,
+    gestionnaire: '',
+    sanlamAdversaires: {},
+    procedure: 'SAISIE ARRÊT',
+    procedureList: ['SAISIE ARRÊT'],
+    procedureDetails: {
+      'SAISIE ARRÊT': {
+        dateDepot: '',
+        referenceClient: '',
+        debiteurEp: debiteur,
+        sortPle: 'att plie'
+      }
+    },
+    ville: '',
+    adresse: '',
+    montant: '',
+    montantByProcedure: [],
+    ww: '',
+    marque: '',
+    type: '',
+    caution: '',
+    cautionAdresse: '',
+    cautionVille: '',
+    cautionCin: '',
+    cautionRc: '',
+    efNumber: '',
+    conservation: '',
+    metrage: '',
+    note: '',
+    avancement: '',
+    statut: 'En cours',
+    files: [],
+    history: []
+  };
+  queueDossierHistoryEntry(dossier, {
+    source: 'diligence',
+    field: 'dossier',
+    before: '',
+    after: 'Dossier saisie arrêt créé depuis Diligence'
+  }, { immediate: true });
+  client.dossiers.unshift(dossier);
+  appendTeamHistoryEntry({
+    id: `diligence_saisie_arret_${client.id}_${Date.now()}`,
+    at: nowIso,
+    action: 'dossier-create',
+    target: `${client.name} - ${referenceClient}`,
+    actor: String(currentUser?.username || '-'),
+    actorRole: String(currentUser?.role || ''),
+    summary: `Dossier saisie arrêt ajouté: ${client.name}`,
+    details: [
+      `Client: ${client.name}`,
+      `Référence client: ${referenceClient}`,
+      `Débiteur: ${debiteur}`
+    ]
+  });
+  handleDossierDataChange({ audience: false, rerenderLinked: true });
+  focusDiligenceSaisieArretRow(referenceClient);
+  showView('diligence', { force: true });
+  renderDiligence({ force: true });
+  try{
+    const saved = createdClient
+      ? await persistClientPatchNow({ action: 'create', client }, { source: 'diligence-saisie-arret' })
+      : await persistDossierPatchNow({ action: 'create', clientId: Number(client.id), dossier }, { source: 'diligence-saisie-arret', immediate: true });
+    if(!saved){
+      alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
+    }
+    persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' }).catch(()=>{});
+  }catch(err){
+    console.warn('Impossible de sauvegarder le dossier saisie arrêt', err);
+    alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
+  }
 }
 
 function updateCreationPinnedClientUi(){
@@ -23257,9 +23532,12 @@ function buildSuiviRowForDossier(client, dossier, index){
 
 function buildSuiviRowsForClient(client){
   if(!client || !canViewClient(client)) return [];
-  return (Array.isArray(client?.dossiers) ? client.dossiers : []).map((dossier, index)=>{
-    return buildSuiviRowForDossier(client, dossier, index);
-  });
+  return (Array.isArray(client?.dossiers) ? client.dossiers : []).reduce((rows, dossier, index)=>{
+    if(!isDiligenceOnlyDossier(dossier)){
+      rows.push(buildSuiviRowForDossier(client, dossier, index));
+    }
+    return rows;
+  }, []);
 }
 
 function hydrateSuiviBaseRows(rawRows){
@@ -23754,6 +24032,7 @@ function updateDiligenceCheckedCount(){
   const node = $('diligenceCheckedCountValue');
   if(node) node.textContent = String(diligencePrintSelection.size);
   syncDiligencePageSelectionToggle();
+  syncDiligenceSaisieArretDeleteButton();
 }
 
 function clearDiligencePrintSelection(options = {}){
@@ -25222,6 +25501,84 @@ function getCheckedDiligenceRowsForBatchUpdate(){
   });
 }
 
+function getCheckedDiligenceSaisieArretRows(){
+  const seenDossiers = new Set();
+  return getCheckedDiligenceRowsForBatchUpdate().filter(row=>{
+    if(!isDiligenceSaisieArretProcedure(row?.procedure)) return false;
+    const key = `${row?.clientId}::${row?.dossierIndex}`;
+    if(seenDossiers.has(key)) return false;
+    seenDossiers.add(key);
+    return true;
+  });
+}
+
+function syncDiligenceSaisieArretDeleteButton(){
+  const btn = $('deleteDiligenceSaisieArretBtn');
+  if(!btn) return;
+  const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure) && canEditData();
+  btn.style.display = show ? '' : 'none';
+  btn.disabled = !show || !getCheckedDiligenceSaisieArretRows().length;
+}
+
+async function deleteCheckedDiligenceSaisieArretDossiers(){
+  if(!canEditData()) return alert('Suppression non autorisee');
+  const rows = getCheckedDiligenceSaisieArretRows()
+    .slice()
+    .sort((a, b)=>{
+      const clientCompare = String(a?.clientId ?? '').localeCompare(String(b?.clientId ?? ''), 'fr', { numeric: true });
+      if(clientCompare) return clientCompare;
+      return Number(b?.dossierIndex ?? -1) - Number(a?.dossierIndex ?? -1);
+    });
+  if(!rows.length) return alert('Selectionnez au moins un dossier SAISIE ARRET.');
+  const count = rows.length;
+  if(!await confirmDangerousAction(`Envoyer ${count} dossier(s) SAISIE ARRET coches vers la corbeille ?`, { confirmationWord: 'SUPPRIMER' })) return;
+
+  const patches = [];
+  const removedDossiers = [];
+  rows.forEach(row=>{
+    const client = AppState.clients.find(c=>c.id == row.clientId);
+    if(!client || !Array.isArray(client.dossiers)) return;
+    const index = Number(row.dossierIndex);
+    const dossier = client.dossiers[index];
+    if(!dossier || !normalizeProcedures(dossier).some(procName=>isDiligenceSaisieArretProcedure(procName))) return;
+    pushRecycleBinEntry('dossier_delete', {
+      clientId: client.id,
+      clientName: client.name || '',
+      dossierIndex: index,
+      dossier: JSON.parse(JSON.stringify(dossier || {})),
+      importHistoryEntries: collectRelevantImportHistoryEntries({
+        clientId: client.id,
+        dossiers: [dossier]
+      })
+    });
+    removedDossiers.push(dossier);
+    client.dossiers.splice(index, 1);
+    patches.push({
+      action: 'delete',
+      clientId: Number(client.id),
+      dossierIndex: Number(index),
+      referenceClient: String(dossier.referenceClient || '').trim()
+    });
+  });
+
+  if(!removedDossiers.length){
+    clearDiligencePrintSelection({ immediate: true });
+    renderDiligence({ force: true });
+    return alert('Aucun dossier SAISIE ARRET valide a supprimer.');
+  }
+
+  clearDiligencePrintSelection({ immediate: true });
+  syncImportHistoryWithCurrentState();
+  handleDossierDataChange({
+    audience: removedDossiers.some(dossier=>dossierHasAudienceImpact(dossier)),
+    rerenderLinked: true
+  });
+  patches.forEach(patch=>{
+    persistDossierPatchNow(patch, { source: 'diligence-saisie-arret-delete' }).catch(()=>{});
+  });
+  refreshPrimaryViews({ includeRecycle: true, force: true, showView: 'diligence' });
+}
+
 function shouldBatchUpdateCheckedDiligenceRows(clientId, dossierIndex, procKey, field){
   if(!DILIGENCE_BATCH_UPDATE_FIELDS.has(String(field || '').trim())) return false;
   if(!diligencePrintSelection.size) return false;
@@ -25278,7 +25635,10 @@ function updateDiligenceField(clientId, dossierIndex, procKey, field, value){
   const isLayoutField = field === 'notificationSort' || field === 'notifDebiteur';
   if(!result.changed && !isLayoutField) return;
   if(result.changed){
-    handleDossierDataChange({ audience: true, rerenderLinked: true });
+    handleDossierDataChange({
+      audience: (result.changedDossiers || []).some(entry=>dossierHasAudienceImpact(entry?.dossier)),
+      rerenderLinked: true
+    });
     (result.changedDossiers || []).forEach((entry)=>{
       persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'diligence' }).catch(()=>{});
     });
@@ -26639,6 +26999,7 @@ function getFactureSelectedDossier(){
   if(!client || !Number.isInteger(dossierIndex) || dossierIndex < 0 || dossierIndex >= dossiers.length){
     return { client: null, dossier: null, dossierIndex: -1 };
   }
+  if(isDiligenceOnlyDossier(dossiers[dossierIndex])) return { client: null, dossier: null, dossierIndex: -1 };
   return { client, dossier: dossiers[dossierIndex], dossierIndex };
 }
 
@@ -26649,6 +27010,7 @@ function getFactureSelectedDossierEntries(){
   return [...selectedFactureDossierIndexes]
     .map(index=>Number(index))
     .filter(index=>Number.isInteger(index) && index >= 0 && index < dossiers.length)
+    .filter(index=>!isDiligenceOnlyDossier(dossiers[index]))
     .map(index=>({ client, dossier: dossiers[index], dossierIndex: index }));
 }
 
@@ -26732,6 +27094,7 @@ function renderFactureDossierResults(){
   const seenIndexes = new Set(selectedMatches.map(entry=>Number(entry.dossierIndex)));
   const matches = selectedMatches.concat(dossiers
     .map((dossier, index)=>({ dossier, dossierIndex: index }))
+    .filter(({ dossier })=>!isDiligenceOnlyDossier(dossier))
     .filter(({ dossier })=>buildFactureDossierSearchText(dossier, client).includes(query))
     .filter(({ dossierIndex })=>{
       if(seenIndexes.has(Number(dossierIndex))) return false;
@@ -29068,6 +29431,8 @@ function getDiligenceRowReferenceValue(row){
 
 function buildDiligenceDuplicateKey(row){
   const refDossier = getDiligenceRowReferenceValue(row);
+  const procedureValue = getDiligenceProcedureFilterValue(row?.procedure || '');
+  if(procedureValue === 'SAISIE ARRÊT') return '';
   const procedure = String(row?.procedure || '').trim().toLowerCase();
   const debiteur = String(row?.dossier?.debiteur || '')
     .trim()
@@ -31455,11 +31820,28 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   if(b === 'saisie arrêt' || b === 'saisie arret'){
     return `
       <input type="text" data-field="dateDepot" placeholder="Date affectation">
+      <input type="text" data-field="lotDu" placeholder="Lot du">
       <input type="text" data-field="banque" placeholder="Banque">
+      <input type="text" data-field="banqueFr" placeholder="Banque / STE FR">
+      <input type="text" data-field="banqueAr" placeholder="Banque / STE AR">
+      <input type="text" data-field="adresseBanque" placeholder="Adresse banque">
+      <input type="text" data-field="rib" placeholder="RIB">
       <input type="text" data-field="depotLe" placeholder="Depot le">
       <input type="text" data-field="referenceClient" placeholder="Reference dossier" autocomplete="off">
+      <input type="text" data-field="debiteurEp" placeholder="Débiteur FR">
+      <input type="text" data-field="debiteurAp" placeholder="Débiteur AR">
+      <input type="text" data-field="cinRc" placeholder="CIN / RC">
+      <input type="text" data-field="adresse" placeholder="Adresse">
+      <input type="text" data-field="ville" placeholder="Ville">
+      <input type="text" data-field="montant" placeholder="Montant">
+      <input type="text" data-field="avocat" placeholder="Avocat">
+      <input type="text" data-field="observation" placeholder="Observation">
       <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
       <input type="text" data-field="executionNo" placeholder="Execution N">
+      <select data-field="sortPle">
+        <option value="att plie" selected>att plie</option>
+        <option value="plie ok">plie ok</option>
+      </select>
       <input type="text" data-field="notifBanque" placeholder="Notif banque">
       <input type="text" data-field="notifDebiteur" placeholder="Notif debiteur">
       ${tribunalFieldHtml}
@@ -32137,12 +32519,14 @@ function syncDiligenceSaisieArretFilterVisibility(){
   const observationContainer = $('diligenceObservationFilterContainer');
   const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
   const delegationContainer = $('diligenceDelegationFilterContainer') || $('diligenceDelegationFilter')?.closest?.('.audience-color-filter');
+  const addBtn = $('addDiligenceSaisieArretBtn');
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
   const isSciTf = isDiligenceSciTfProcedure(filterDiligenceProcedure);
   const hideSort = show || isSciTf;
   const useDelegationFilter = shouldUseDiligenceDelegationFilter(filterDiligenceProcedure) || show;
   if(lotDuContainer) lotDuContainer.style.display = show ? 'inline-block' : 'none';
   if(observationContainer) observationContainer.style.display = show ? 'inline-block' : 'none';
+  if(addBtn) addBtn.style.display = show && canEditData() ? '' : 'none';
   if(hideSort){
     filterDiligenceSort = 'all';
     const sortSelect = $('diligenceSortFilter');
@@ -32155,6 +32539,7 @@ function syncDiligenceSaisieArretFilterVisibility(){
   }
   if(sortContainer) sortContainer.style.display = hideSort ? 'none' : 'inline-block';
   if(delegationContainer) delegationContainer.style.display = useDelegationFilter ? 'inline-block' : 'none';
+  syncDiligenceSaisieArretDeleteButton();
 }
 
 // Final override: keep audience date validation inline and non-blocking.
