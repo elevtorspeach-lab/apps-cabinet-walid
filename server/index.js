@@ -1638,6 +1638,30 @@ function mergeJsonArrayEntries(currentEntries, incomingEntries) {
   return next;
 }
 
+function applyRecyclePatch(currentState, body) {
+  const state = currentState && typeof currentState === 'object' ? currentState : {};
+  const action = String(body?.action || '').trim().toLowerCase();
+  if (action !== 'clear') {
+    throw new Error('Unsupported recycle patch action.');
+  }
+  const entryIds = new Set(
+    sanitizePatchArray(body?.entryIds)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  );
+  const archiveEntries = sanitizePatchArray(body?.archiveEntries).map((entry) => deepCloneJson(entry));
+  const currentRecycleBin = Array.isArray(state.recycleBin) ? state.recycleBin : [];
+  const nextRecycleBin = entryIds.size
+    ? currentRecycleBin.filter((entry) => !entryIds.has(String(entry?.id || '').trim()))
+    : currentRecycleBin;
+  const nextRecycleArchive = mergeJsonArrayEntries(state.recycleArchive, archiveEntries).slice(-8000);
+  return normalizeStoredState({
+    ...state,
+    recycleBin: nextRecycleBin,
+    recycleArchive: nextRecycleArchive
+  }, state);
+}
+
 function mergeUsers(currentUsers, incomingUsers, importedClientIdToResolvedId) {
   const nextUsers = Array.isArray(currentUsers) ? currentUsers.slice() : [];
   const byUsername = new Map();
@@ -2040,6 +2064,10 @@ function applyMutationToState(currentState, mutation) {
         ? body.audienceDraft
         : {}
     }, safeCurrentState);
+  }
+
+  if (type === 'recycle') {
+    return applyRecyclePatch(safeCurrentState, body);
   }
 
   if (type === 'dossier') {
@@ -3156,6 +3184,38 @@ app.post('/api/state/import-delete', async (req, res) => {
   } catch (err) {
     if (isStateStoreUnavailableError(err)) return sendStateStoreUnavailable(res, err);
     return sendJsonError(res, 400, 'INVALID_IMPORT_DELETE', 'Invalid import delete request.', err);
+  }
+});
+
+app.post('/api/state/recycle', async (req, res) => {
+  try {
+    const result = await enqueueStateMutation(async () => {
+      await ensureDataFile();
+      const body = getRequestBodyObject(req);
+      const sourceId = String(body?._sourceId || '').trim();
+      const patch = {
+        action: String(body?.action || '').trim().toLowerCase(),
+        entryIds: sanitizePatchArray(body?.entryIds),
+        archiveEntries: sanitizePatchArray(body?.archiveEntries)
+      };
+      const saved = await persistJournalMutation({
+        type: 'recycle',
+        body: patch
+      }, {
+        patchKind: 'recycle',
+        patch
+      });
+      broadcastStateUpdated({
+        ...saved,
+        sourceId,
+        patchKind: 'recycle',
+        patch
+      });
+      return { saved, patch };
+    });
+    return sendVersionedOk(res, result.saved, { patch: result.patch });
+  } catch (err) {
+    return sendJsonError(res, 400, 'INVALID_RECYCLE_PATCH', 'Invalid recycle patch request.', err);
   }
 });
 

@@ -6,6 +6,7 @@ const STATUS_BADGE_CLASS_BY_VALUE = {
 };
 
 const AUDIENCE_ALLOWED_ROW_COLORS = new Set([
+  'white',
   'blue',
   'green',
   'red',
@@ -110,8 +111,10 @@ function getAudienceRowJugementAddStatus(row){
 }
 
 function isAudienceRowOrdonnanceColorSuppressed(row){
-  return String(row?.p?._disableAudienceRowColor || '').trim() === '1'
-    || String(row?.p?._suppressAudienceOrdonnanceColor || '').trim() === '1';
+  const explicitColor = String(row?.p?.color || '').trim();
+  if(explicitColor === 'white') return true;
+  if(getAudienceRowDelegationColor(row)) return true;
+  return false;
 }
 
 function getAudienceRowRefClientMismatchFallbackColor(row, options = {}){
@@ -131,7 +134,9 @@ function getAudienceRowEffectiveColor(row){
   const delegationColor = getAudienceRowDelegationColor(row);
   const explicitColor = String(row?.p?.color || '').trim();
   const ordonnanceColorSuppressed = isAudienceRowOrdonnanceColorSuppressed(row);
+  if(explicitColor === 'white') return '';
   if(AUDIENCE_ALLOWED_ROW_COLORS.has(explicitColor)) return explicitColor;
+  if(delegationColor && ordonnanceColorSuppressed) return delegationColor;
   if(!ordonnanceColorSuppressed && ordonnanceColor) return ordonnanceColor;
   if(statusDerivedColor) return statusDerivedColor;
   if(delegationColor) return delegationColor;

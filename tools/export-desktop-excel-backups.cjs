@@ -281,6 +281,45 @@ function buildClientsRows(state) {
   return rows;
 }
 
+function countStateRecords(state) {
+  const clients = Array.isArray(state?.clients) ? state.clients : [];
+  let dossiers = 0;
+  let procedureDetails = 0;
+  clients.forEach((client) => {
+    const clientDossiers = Array.isArray(client?.dossiers) ? client.dossiers : [];
+    dossiers += clientDossiers.length;
+    clientDossiers.forEach((dossier) => {
+      const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
+        ? dossier.procedureDetails
+        : {};
+      procedureDetails += Object.keys(details).length;
+    });
+  });
+  return { clients: clients.length, dossiers, procedureDetails };
+}
+
+function assertExportableState(state) {
+  const counts = countStateRecords(state);
+  if (counts.clients < 1 || counts.dossiers < 1) {
+    throw new Error(`Refusing to create empty Excel backup. Loaded state has ${counts.clients} clients and ${counts.dossiers} dossiers.`);
+  }
+  return counts;
+}
+
+function countNonEmptyRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => (
+    Array.isArray(row) && row.some((value) => String(value ?? '').trim() !== '')
+  )).length;
+}
+
+function assertWorkbookRows(rows, kind) {
+  const nonEmptyRows = countNonEmptyRows(rows);
+  if (nonEmptyRows < 2) {
+    throw new Error(`Refusing to write empty ${kind} Excel backup (${nonEmptyRows} non-empty rows).`);
+  }
+  return nonEmptyRows;
+}
+
 function buildClientsWorkbook(XLSX, state) {
   const rows = buildClientsRows(state);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
@@ -413,6 +452,7 @@ function isDiligenceHeader(values) {
 }
 
 async function writeStyledWorkbookFile(rows, filePath, kind) {
+  const nonEmptyRows = assertWorkbookRows(rows, kind);
   const ExcelJS = loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Cabinet Walid Araqi';
@@ -479,6 +519,11 @@ async function writeStyledWorkbookFile(rows, filePath, kind) {
 
   const buffer = await workbook.xlsx.writeBuffer();
   await fsp.writeFile(filePath, Buffer.from(buffer));
+  const stat = await fsp.stat(filePath);
+  if (!stat.size || stat.size < 10000) {
+    throw new Error(`Refusing ${kind} Excel backup because the file looks empty (${stat.size} bytes): ${filePath}`);
+  }
+  return { rows: nonEmptyRows, bytes: stat.size };
 }
 
 async function replaceOutputFiles(XLSX, state) {
@@ -489,18 +534,22 @@ async function replaceOutputFiles(XLSX, state) {
     fsp.rm(clientsPath, { force: true }),
     fsp.rm(diligencePath, { force: true })
   ]);
-  await Promise.all([
+  const [clientsMeta, diligenceMeta] = await Promise.all([
     writeStyledWorkbookFile(buildClientsRows(state), clientsPath, 'clients'),
     writeStyledWorkbookFile(buildDiligenceRows(state), diligencePath, 'diligence')
   ]);
-  return { clientsPath, diligencePath };
+  return { clientsPath, diligencePath, clientsMeta, diligenceMeta };
 }
 
 async function main() {
   const XLSX = loadXlsx();
   const state = await loadState();
+  const counts = assertExportableState(state);
   const result = await replaceOutputFiles(XLSX, state);
-  console.log(`Excel backups written:\n${result.clientsPath}\n${result.diligencePath}`);
+  console.log(`Excel backups written:
+${result.clientsPath} (${result.clientsMeta.rows} rows, ${result.clientsMeta.bytes} bytes)
+${result.diligencePath} (${result.diligenceMeta.rows} rows, ${result.diligenceMeta.bytes} bytes)
+Source state: ${counts.clients} clients, ${counts.dossiers} dossiers, ${counts.procedureDetails} procedure details`);
 }
 
 main().catch((error) => {

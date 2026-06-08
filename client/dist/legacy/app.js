@@ -104,6 +104,7 @@ let filterAudienceCheckedFirst = false;
 let paginationState = { clients: 1, audience: 1, suivi: 1, diligence: 1, recycle: 1, teamHistory: 1 };
 let paginationFilterState = { clients: '', audience: '', suivi: '', diligence: '', recycle: '', teamHistory: '' };
 let teamHistoryFilter = '';
+let teamHistoryLiveRenderTimer = null;
 let audienceTribunalAliasMap = new Map();
 let audienceTribunalLabelMap = new Map();
 let audiencePrintSelection = new Set();
@@ -1188,7 +1189,19 @@ function pushDossierHistoryEntry(dossier, entry){
   if(dossier.history.length > DOSSIER_HISTORY_MAX_ENTRIES){
     dossier.history = dossier.history.slice(-DOSSIER_HISTORY_MAX_ENTRIES);
   }
+  queueTeamHistoryLiveRender();
   return true;
+}
+
+function queueTeamHistoryLiveRender(){
+  markDeferredRenderDirty('teamHistory');
+  if(String(currentView || '') !== 'teamHistory') return;
+  paginationState.teamHistory = 1;
+  if(teamHistoryLiveRenderTimer) clearTimeout(teamHistoryLiveRenderTimer);
+  teamHistoryLiveRenderTimer = setTimeout(()=>{
+    teamHistoryLiveRenderTimer = null;
+    renderTeamHistory({ force: true });
+  }, 0);
 }
 
 function makeDossierHistoryPendingKey(dossier, entry){
@@ -1644,7 +1657,14 @@ function dossierHasAudienceImpact(dossier){
 function isDiligenceOnlyDossier(dossier){
   if(!dossier || typeof dossier !== 'object') return false;
   const markedDiligenceOnly = dossier.isDiligenceOnly === true || dossier.isDiligenceManualEntry === true;
-  if(!markedDiligenceOnly) return false;
+  const markedSource = String(dossier.creationSource || dossier.source || '').trim().toLowerCase() === 'diligence-saisie-arret';
+  const markedHidden = dossier.hideFromSuivi === true || dossier.hiddenFromSuivi === true;
+  const markedByHistory = Array.isArray(dossier.history) && dossier.history.some((entry)=>{
+    const source = String(entry?.source || '').trim().toLowerCase();
+    const text = `${entry?.after || ''} ${entry?.summary || ''}`.toLowerCase();
+    return source === 'diligence' && text.includes('saisie') && text.includes('diligence');
+  });
+  if(!markedDiligenceOnly && !markedSource && !markedHidden && !markedByHistory) return false;
   return normalizeProcedures(dossier).some(procName=>isDiligenceSaisieArretProcedure(procName));
 }
 
@@ -2082,6 +2102,7 @@ function refreshVisibleSectionsAfterRemoteSync(sectionKeys = null){
   }
   if(shouldRender('facture')) runSectionRenderSafely('facture', ()=>renderFacture(), { delayMs: 80 });
   if(shouldRender('equipe')) runSectionRenderSafely('equipe', ()=>renderEquipe(), { delayMs: 80 });
+  if(shouldRender('teamHistory')) runSectionRenderSafely('teamHistory', ()=>renderTeamHistory({ force: true }), { delayMs: 80 });
   if(shouldRender('recycle')) runSectionRenderSafely('recycle', ()=>renderRecycleBin(), { delayMs: 80 });
   if(shouldRender('creation')) updateClientDropdown();
 }
@@ -2099,6 +2120,15 @@ function flushRemoteSyncRenderQueue(){
   refreshVisibleSectionsAfterRemoteSync(sections);
 }
 
+function renderVisibleTeamHistoryAfterLiveSync(keys = []){
+  if(!Array.isArray(keys) || !keys.includes('teamHistory')) return false;
+  if(!isDeferredRenderSectionVisible('teamHistory')) return false;
+  markDeferredRenderDirty('teamHistory');
+  paginationState.teamHistory = 1;
+  runSectionRenderSafely('teamHistory', ()=>renderTeamHistory({ force: true }), { delayMs: 40 });
+  return true;
+}
+
 function queueRemoteSyncRender(sectionKeys = [], options = {}){
   const keys = Array.isArray(sectionKeys) ? sectionKeys : [];
   if(options.livePatch === true && options.incrementalPatch && typeof renderRemoteDossierPatchGranularly === 'function'){
@@ -2107,6 +2137,7 @@ function queueRemoteSyncRender(sectionKeys = [], options = {}){
   }
   if(options.livePatch === true){
     markDeferredRenderDirty(...keys);
+    renderVisibleTeamHistoryAfterLiveSync(keys);
     markRemoteSyncSectionsRendered(keys);
     return;
   }
@@ -2265,6 +2296,11 @@ function renderRemoteDossierPatchGranularly(meta, options = {}){
   if(sections.includes('audience')) renderRemoteAudiencePatchRows(meta);
   if(sections.includes('suivi')) renderRemoteSuiviPatchRows(meta);
   if(sections.includes('diligence')) renderRemoteDiligencePatchRows(meta);
+  if(sections.includes('teamHistory') && isDeferredRenderSectionVisible('teamHistory')){
+    markDeferredRenderDirty('teamHistory');
+    paginationState.teamHistory = 1;
+    renderTeamHistory({ force: true });
+  }
   markDeferredRenderDirty(...sections);
   markRemoteSyncSectionsRendered(sections);
   return true;
@@ -2734,10 +2770,12 @@ function buildRemoteDossierRefreshOptions(meta){
   if(patchMeta.audienceImpact === true){
     sections.add('suivi');
     sections.add('audience');
+    sections.add('teamHistory');
     secondarySections.add('diligence');
     secondarySections.add('salle');
   }else{
     sections.add('suivi');
+    sections.add('teamHistory');
     secondarySections.add('facture');
     const sourceClientId = Number(patchMeta.sourceClientId);
     const targetClientId = Number(patchMeta.targetClientId);
@@ -2783,7 +2821,7 @@ function getRemoteSliceRefreshOptions(patchKind){
   if(kind === 'clients'){
     return {
       audience: true,
-      sections: ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'recycle']
+      sections: ['dashboard', 'clients', 'creation', 'suivi', 'audience', 'diligence', 'salle', 'facture', 'equipe', 'teamHistory', 'recycle']
     };
   }
   if(kind === 'users'){
@@ -2802,6 +2840,12 @@ function getRemoteSliceRefreshOptions(patchKind){
     return {
       audience: true,
       sections: ['audience', 'salle']
+    };
+  }
+  if(kind === 'recycle'){
+    return {
+      audience: false,
+      sections: ['recycle']
     };
   }
   return {
@@ -8678,7 +8722,6 @@ function applyAudienceOrdonnanceColorState(procData, color){
   const targetColor = String(color || '').trim();
   const ordonnanceValue = getAudienceOrdonnanceColorValue(color);
   if(!p || !ordonnanceValue) return false;
-  const displayColor = targetColor;
   let changed = false;
   if(String(p.attOrdOrOrdOk || '').trim() !== ordonnanceValue){
     p.attOrdOrOrdOk = ordonnanceValue;
@@ -8688,8 +8731,12 @@ function applyAudienceOrdonnanceColorState(procData, color){
     p._audienceSortOrd = ordonnanceValue;
     changed = true;
   }
-  if(String(p?.color || '').trim() !== displayColor){
-    p.color = displayColor;
+  if(normalizeDiligenceAttOk(p.attDelegationOuDelegat || '') === 'att'){
+    delete p.attDelegationOuDelegat;
+    changed = true;
+  }
+  if(String(p?.color || '').trim()){
+    p.color = '';
     changed = true;
   }
   if(String(p?._disableAudienceRowColor || '').trim()){
@@ -8706,32 +8753,21 @@ function applyAudienceOrdonnanceColorState(procData, color){
 function applyAudienceWhiteColorState(procData, dossier, currentEffectiveColor = ''){
   const p = procData && typeof procData === 'object' ? procData : null;
   if(!p || !dossier || typeof dossier !== 'object') return false;
-  const effectiveColor = String(currentEffectiveColor || '').trim();
-  const hasOrdonnanceColor = hasAudienceOrdonnanceColorSource(p)
-    || ['green', 'yellow'].includes(String(p?.color || '').trim())
-    || ['green', 'yellow'].includes(effectiveColor);
   let changed = false;
-  if(hasOrdonnanceColor){
-    if(String(p?._disableAudienceRowColor || '').trim() !== '1'){
-      p._disableAudienceRowColor = '1';
-      changed = true;
-    }
-    if(String(p?._suppressAudienceOrdonnanceColor || '').trim() !== '1'){
-      p._suppressAudienceOrdonnanceColor = '1';
-      changed = true;
-    }
-  }else{
-    if(String(p?._disableAudienceRowColor || '').trim()){
-      delete p._disableAudienceRowColor;
-      changed = true;
-    }
-    if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
-      delete p._suppressAudienceOrdonnanceColor;
-      changed = true;
-    }
+  if(String(p?._disableAudienceRowColor || '').trim()){
+    delete p._disableAudienceRowColor;
+    changed = true;
   }
-  if(String(p?.color || '').trim()){
-    p.color = '';
+  if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
+    delete p._suppressAudienceOrdonnanceColor;
+    changed = true;
+  }
+  if(normalizeDiligenceAttOk(p.attDelegationOuDelegat || '') === 'att'){
+    delete p.attDelegationOuDelegat;
+    changed = true;
+  }
+  if(String(p?.color || '').trim() !== 'white'){
+    p.color = 'white';
     changed = true;
   }
   if(dossier.statut === 'Soldé' || dossier.statut === 'Arrêt définitif'){
@@ -10806,7 +10842,13 @@ async function clearRecycleBinToBackup(){
   )) return;
   pushRecycleArchiveEntries(items);
   AppState.recycleBin = [];
-  queuePersistAppState();
+  const saved = await persistRecycleClearNow(items, { source: 'recycle-clear', requireRemoteConfirmation: true });
+  if(!saved){
+    remoteRefreshPending = true;
+    await refreshRemoteState({ force: true }).catch((err)=>{
+      console.warn('Actualisation apres vidage corbeille impossible', err);
+    });
+  }
   renderRecycleBin();
   alert('Corbeille vidée. Backup interne conservé.');
 }
@@ -12956,6 +12998,16 @@ async function persistStateSliceNow(sliceKey, sliceValue, options = {}){
     return persistRemoteRequestNow('/state', payload, options);
   }
   return persistRemoteRequestNow(pathname, { [sliceKey]: sliceValue }, options);
+}
+
+async function persistRecycleClearNow(items = [], options = {}){
+  const archiveEntries = normalizeRecycleArchiveEntries(items);
+  const entryIds = archiveEntries.map((entry)=>String(entry?.id || '').trim()).filter(Boolean);
+  return persistRemoteRequestNow('/state/recycle', {
+    action: 'clear',
+    entryIds,
+    archiveEntries
+  }, options);
 }
 
 async function persistClientPatchNow(patch, options = {}){
@@ -18879,6 +18931,9 @@ async function applyExcelImport(payload, options = {}){
     const isStrictInjonctionDiligenceRow = diligenceMode
       && procedures.length === 1
       && procedures[0] === 'Injonction';
+    const isSaisieArretDiligenceRow = diligenceMode
+      && procedures.some(proc=>getDiligenceProcedureFilterValue(proc) === 'SAISIE ARRÊT');
+    const forceCreateDiligenceRow = isSaisieArretDiligenceRow;
     if(!procedures.length){
       skippedDossiersCount += 1;
       addSkippedImportIssue(`${rowNumberLabel}: dossier ignoré (aucune procédure valide) - Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${dossierContext}`);
@@ -18901,6 +18956,7 @@ async function applyExcelImport(payload, options = {}){
     const dossier = {
       importUid: createImportTrackingId('dossier'),
       importGlobalBatchId: globalImportEntry ? globalImportEntry.id : '',
+      importDiligenceBatchId: diligenceMode && globalImportEntry ? globalImportEntry.id : '',
       createdAt: new Date().toISOString(),
       debiteur: row.debiteur,
       adversaire: String(row.adversaire || '').trim(),
@@ -18940,6 +18996,12 @@ async function applyExcelImport(payload, options = {}){
       statutDetails: importedStatus.detail || '',
       files: []
     };
+    if(forceCreateDiligenceRow){
+      dossier.isDiligenceOnly = true;
+      dossier.isDiligenceManualEntry = false;
+      dossier.creationSource = 'diligence-saisie-arret-import';
+      dossier.hideFromSuivi = true;
+    }
 
     let existingDossierToUpdate = null;
     if(diligenceMode){
@@ -18954,29 +19016,31 @@ async function applyExcelImport(payload, options = {}){
         return;
       }
 
-      let targetCandidates = [];
-      if(rowRefDossierKey){
-        targetCandidates = [...targetCandidates, ...(refToStateProcMap.get(rowRefDossierKey) || [])];
-      }
-      if(rowRefClientKey){
-        targetCandidates = [...targetCandidates, ...(rowRefClientToProcMap.get(rowRefClientKey) || [])];
-      }
+      if(!forceCreateDiligenceRow){
+        let targetCandidates = [];
+        if(rowRefDossierKey){
+          targetCandidates = [...targetCandidates, ...(refToStateProcMap.get(rowRefDossierKey) || [])];
+        }
+        if(rowRefClientKey){
+          targetCandidates = [...targetCandidates, ...(rowRefClientToProcMap.get(rowRefClientKey) || [])];
+        }
 
-      if(targetCandidates.length){
-        let bestCandidate = null;
-        let bestScore = -1;
-        targetCandidates.forEach(c => {
-          let score = 0;
-          if(rowRefDossierKey && getDossierAudienceRefsCached(c.dossier).has(rowRefDossierKey)) score += 100;
-          if(rowRefClientKey && getDossierClientRefMatchKeysCached(c.dossier).has(rowRefClientKey)) score += 80;
-          if(rowDebiteur && String(c.dossier.debiteur || '').trim().toLowerCase() === rowDebiteur) score += 60;
-          if(score > bestScore){
-            bestScore = score;
-            bestCandidate = c.dossier;
+        if(targetCandidates.length){
+          let bestCandidate = null;
+          let bestScore = -1;
+          targetCandidates.forEach(c => {
+            let score = 0;
+            if(rowRefDossierKey && getDossierAudienceRefsCached(c.dossier).has(rowRefDossierKey)) score += 100;
+            if(rowRefClientKey && getDossierClientRefMatchKeysCached(c.dossier).has(rowRefClientKey)) score += 80;
+            if(rowDebiteur && String(c.dossier.debiteur || '').trim().toLowerCase() === rowDebiteur) score += 60;
+            if(score > bestScore){
+              bestScore = score;
+              bestCandidate = c.dossier;
+            }
+          });
+          if(bestScore >= 60){ // Require at least debiteur match if no ref match
+            existingDossierToUpdate = bestCandidate;
           }
-        });
-        if(bestScore >= 60){ // Require at least debiteur match if no ref match
-          existingDossierToUpdate = bestCandidate;
         }
       }
       if(isStrictInjonctionDiligenceRow && !existingDossierToUpdate){
@@ -20498,7 +20562,10 @@ function setupEvents(){
   $('exportSuiviBtn')?.addEventListener('click', exportSuiviSelectedXLS);
   $('previewSuiviBtn')?.addEventListener('click', previewSuiviSelectedRows);
   ensureClientExcelFillControls();
-  $('filterAudience')?.addEventListener('input', renderAudienceDebounced);
+  $('filterAudience')?.addEventListener('input', (e)=>{
+    clearAudiencePrintSelection({ immediate: true });
+    renderAudienceDebounced(e);
+  });
   $('audienceErrorsBtn')?.addEventListener('click', ()=>{
     filterAudienceErrorsOnly = !filterAudienceErrorsOnly;
     const btn = $('audienceErrorsBtn');
@@ -20642,7 +20709,19 @@ function setupEvents(){
     paginationState.teamHistory = 1;
     renderTeamHistory({ force: true });
   }, 180));
-  $('teamHistoryRefreshBtn')?.addEventListener('click', ()=>renderTeamHistory({ force: true }));
+  $('teamHistoryRefreshBtn')?.addEventListener('click', async ()=>{
+    try{
+      if(hasRemoteAuthSession()){
+        remoteRefreshPending = true;
+        await refreshRemoteState({ force: true });
+      }
+    }catch(err){
+      console.warn('Actualisation historique depuis serveur impossible', err);
+    }finally{
+      paginationState.teamHistory = 1;
+      renderTeamHistory({ force: true });
+    }
+  });
   $('passwordSetupSaveBtn')?.addEventListener('click', submitForcedPasswordChange);
   $('passwordSetupLogoutBtn')?.addEventListener('click', logout);
   $('passwordSetupInput')?.addEventListener('keydown', (e)=>{
@@ -20666,7 +20745,7 @@ function setupEvents(){
     if(!Number.isFinite(idx)) return;
     restoreRecycleItem(idx);
   });
-  $('filterAudienceColor')?.addEventListener('change', (e)=>{
+  $('filterAudienceColor')?.addEventListener('change', async (e)=>{
     const previousColor = normalizeAudienceFilterColorValue(filterAudienceColor);
     const nextColor = normalizeAudienceFilterColorValue(e.target.value);
     if(isViewer()){
@@ -20684,7 +20763,7 @@ function setupEvents(){
       && nextIsOrdonnanceColor
       && !previousIsOrdonnanceColor;
     if(canApplyOrdonnanceTransitionFromFilter){
-      const appliedToCheckedRows = applyColorToSelectedAudienceRows(nextColor);
+      const appliedToCheckedRows = await applyColorToSelectedAudienceRows(nextColor);
       if(appliedToCheckedRows){
         filterAudienceCheckedFirst = true;
         if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'checked-first';
@@ -20700,19 +20779,19 @@ function setupEvents(){
     renderAudience();
   });
   $('filterAudienceProcedure')?.addEventListener('change', (e)=>{
-    setAudienceProcedureFilter(e.target.value, { syncUi: false });
+    setAudienceProcedureFilter(e.target.value, { syncUi: false, clearSelection: false });
     renderAudience();
   });
   $('filterAudienceTribunal')?.addEventListener('change', (e)=>{
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: true });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: false });
   });
   $('filterAudienceTribunal')?.addEventListener('keydown', (e)=>{
     if(e.key !== 'Enter') return;
     e.preventDefault();
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: true });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: false });
   });
   $('filterAudienceTribunal')?.addEventListener('search', (e)=>{
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: false, clearSelection: true });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: false, clearSelection: false });
   });
   $('filterAudienceDate')?.addEventListener('change', (e)=>{
     filterAudienceDate = String(e.target?.value || '').trim();
@@ -20770,7 +20849,7 @@ function setupEvents(){
   // ===== Audience color filters =====
   audienceColorButtons = Array.from(document.querySelectorAll('.color-btn[data-color]'));
   audienceColorButtons.forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const color = btn.dataset.color;
       if(color === 'all'){
         clearAudiencePrintSelection({ immediate: true });
@@ -20791,10 +20870,10 @@ function setupEvents(){
       setSelectedAudienceColor(color, false);
       const undoEntries = color === 'all'
         ? []
-        : getAudienceRows({ ignoreSearch: true, ignoreColor: true })
+        : getAllFilteredAudienceRowsForPrintSelection()
           .filter(row=>audiencePrintSelection.has(makeAudiencePrintKey(row.ci, row.di, row.procKey)))
           .map(row=>buildAudienceColorUndoEntry(row.ci, row.di, row.procKey));
-      const appliedToCheckedRows = applyColorToSelectedAudienceRows(color);
+      const appliedToCheckedRows = await applyColorToSelectedAudienceRows(color);
       if(appliedToCheckedRows){
         rememberAudienceColorUndoState(undoEntries, {
           filterAudienceColor,
@@ -21366,14 +21445,15 @@ async function addClient(name){
   });
   paginationState.clients = 1;
   handleDossierDataChange({ audience: false });
-  persistClientPatchNow({
-    action: 'create',
-    client: newClient
-  }, { source: 'clients' }).catch((err)=>{
-    console.warn('Impossible de sauvegarder le client', err);
-  });
-  persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' }).catch((err)=>{
-    console.warn('Impossible de sauvegarder historique client', err);
+  (async ()=>{
+    const clientSaved = await persistClientPatchNow({
+      action: 'create',
+      client: newClient
+    }, { source: 'clients' });
+    if(!clientSaved) return;
+    await persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' });
+  })().catch((err)=>{
+    console.warn('Impossible de sauvegarder le client ou son historique', err);
   });
   $('clientName').value='';
   refreshPrimaryViews({ force: true, refreshClientDropdown: true });
@@ -21382,6 +21462,17 @@ async function addClient(name){
 
 function requestDiligenceSaisieArretModal(){
   return new Promise((resolve)=>{
+    const availableClients = (Array.isArray(AppState?.clients) ? AppState.clients : [])
+      .filter(client=>Number.isFinite(Number(client?.id)) && String(client?.name || '').trim())
+      .sort((a, b)=>String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base', numeric: true }));
+    const clientOptionsHtml = availableClients
+      .map(client=>`<option value="${escapeAttr(String(client.name || '').trim())}"></option>`)
+      .join('');
+    const findClientByName = (value)=>{
+      const normalized = String(value || '').trim().toLowerCase();
+      if(!normalized) return null;
+      return availableClients.find(client=>String(client?.name || '').trim().toLowerCase() === normalized) || null;
+    };
     const backdrop = document.createElement('div');
     backdrop.className = 'diligence-saisie-modal-backdrop';
     backdrop.style.cssText = [
@@ -21420,7 +21511,8 @@ function requestDiligenceSaisieArretModal(){
         <div style="padding:18px 20px 8px;display:grid;gap:13px;">
           <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
             Nom du client
-            <input id="diligenceSaisieClientName" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+            <input id="diligenceSaisieClientName" type="text" list="diligenceSaisieClientOptions" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+            <datalist id="diligenceSaisieClientOptions">${clientOptionsHtml}</datalist>
           </label>
           <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
             Référence client
@@ -21488,9 +21580,11 @@ function requestDiligenceSaisieArretModal(){
       const referenceClient = String(referenceInput.value || '').trim();
       const debiteur = String(debiteurInput.value || '').trim();
       if(!clientName) return showError('Nom du client obligatoire.', clientInput);
+      const selectedClient = findClientByName(clientName);
+      if(!selectedClient) return showError('Choisissez un client existant dans la liste.', clientInput);
       if(!referenceClient) return showError('Référence client obligatoire.', referenceInput);
       if(!debiteur) return showError('Débiteur obligatoire.', debiteurInput);
-      cleanup({ clientName, referenceClient, debiteur });
+      cleanup({ clientId: Number(selectedClient.id), clientName: String(selectedClient.name || '').trim(), referenceClient, debiteur });
     });
     card.querySelector('#diligenceSaisieCancelBtn')?.addEventListener('click', ()=>cleanup(null));
     backdrop.addEventListener('click', (event)=>{
@@ -21536,18 +21630,13 @@ async function addDiligenceSaisieArretDossier(){
   if(!canEditData()) return alert('Accès refusé');
   const modalValues = await requestDiligenceSaisieArretModal();
   if(!modalValues) return;
-  const { clientName, referenceClient, debiteur } = modalValues;
+  const { clientId, clientName, referenceClient, debiteur } = modalValues;
   const now = new Date();
   const nowIso = now.toISOString();
   const today = formatDateDDMMYYYY(now);
-  let client = AppState.clients.find(c=>String(c?.name || '').trim().toLowerCase() === clientName.toLowerCase());
-  let createdClient = false;
-  if(!client){
-    client = { id: Date.now(), name: clientName, createdAt: nowIso, dossiers: [] };
-    AppState.clients.unshift(client);
-    createdClient = true;
-    grantCurrentViewerAccessToClient(client.id);
-  }
+  const client = AppState.clients.find(c=>Number(c?.id) === Number(clientId))
+    || AppState.clients.find(c=>String(c?.name || '').trim().toLowerCase() === String(clientName || '').trim().toLowerCase());
+  if(!client) return alert('Choisissez un client existant dans la liste.');
   if(!canEditClient(client)) return alert('Accès refusé');
   const dossier = {
     importUid: createImportTrackingId('dossier'),
@@ -21558,6 +21647,8 @@ async function addDiligenceSaisieArretDossier(){
     isManualEntry: true,
     isDiligenceManualEntry: true,
     isDiligenceOnly: true,
+    creationSource: 'diligence-saisie-arret',
+    hideFromSuivi: true,
     createdAt: nowIso,
     suiviUpdatedAt: nowIso,
     debiteur,
@@ -21627,9 +21718,7 @@ async function addDiligenceSaisieArretDossier(){
   showView('diligence', { force: true });
   renderDiligence({ force: true });
   try{
-    const saved = createdClient
-      ? await persistClientPatchNow({ action: 'create', client }, { source: 'diligence-saisie-arret' })
-      : await persistDossierPatchNow({ action: 'create', clientId: Number(client.id), dossier }, { source: 'diligence-saisie-arret', immediate: true });
+    const saved = await persistDossierPatchNow({ action: 'create', clientId: Number(client.id), dossier }, { source: 'diligence-saisie-arret', immediate: true });
     if(!saved){
       alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
     }
@@ -23628,6 +23717,41 @@ function persistDossierReferenceNow(clientId, dossierRef, options = {}){
   }, options);
 }
 
+function buildDossierReferencePatch(clientId, dossierRef, options = {}){
+  const dossierIndex = getDossierIndexByReference(clientId, dossierRef);
+  if(dossierIndex === -1) return null;
+  return {
+    action: 'update',
+    clientId: Number(clientId),
+    dossierIndex,
+    targetClientId: Number(clientId),
+    previousReferenceClient: String(options.previousReferenceClient || '').trim(),
+    referenceClient: String(dossierRef?.referenceClient || '').trim(),
+    dossier: dossierRef,
+    field: String(options.field || '').trim(),
+    procedure: String(options.procedure || '').trim(),
+    value: options.value,
+    ...(Array.isArray(options.history) ? { history: options.history } : {})
+  };
+}
+
+async function persistDossierReferenceBatchNow(entries = [], options = {}){
+  const patches = (Array.isArray(entries) ? entries : [])
+    .map((entry)=>buildDossierReferencePatch(entry?.clientId, entry?.dossier, options))
+    .filter(Boolean);
+  if(!patches.length) return false;
+  if(patches.length === 1){
+    return persistRemoteRequestNow('/state/dossiers', patches[0], {
+      ...options,
+      requireRemoteConfirmation: true
+    });
+  }
+  return persistRemoteRequestNow('/state/dossiers/batch', { patches }, {
+    ...options,
+    requireRemoteConfirmation: true
+  });
+}
+
 function viewDossierFile(clientId, index, fileIndex){
   const data = getDossierByIds(clientId, index);
   if(!data) return;
@@ -25557,6 +25681,8 @@ async function deleteCheckedDiligenceSaisieArretDossiers(){
       action: 'delete',
       clientId: Number(client.id),
       dossierIndex: Number(index),
+      externalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
+      previousExternalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
       referenceClient: String(dossier.referenceClient || '').trim()
     });
   });
@@ -28285,10 +28411,11 @@ function setAudienceDelegationPinkState(dossier, p, procKey, enabled){
   if(!dossier || !p) return false;
   const before = p.attDelegationOuDelegat;
   const hadExplicitPink = String(p.color || '').trim() === 'pink';
+  const hadExplicitWhite = String(p.color || '').trim() === 'white';
   if(enabled){
     p.attDelegationOuDelegat = 'att';
     p._suppressAudienceOrdonnanceColor = '1';
-    if(hadExplicitPink) p.color = '';
+    if(hadExplicitPink || hadExplicitWhite) p.color = '';
   }else{
     if(normalizeDiligenceAttOk(p.attDelegationOuDelegat || '') === 'att'){
       delete p.attDelegationOuDelegat;
@@ -28306,7 +28433,41 @@ function setAudienceDelegationPinkState(dossier, p, procKey, enabled){
     before,
     after
   }, { immediate: true });
-  return normalizeHistoryValue(before) !== normalizeHistoryValue(after) || hadExplicitPink;
+  return normalizeHistoryValue(before) !== normalizeHistoryValue(after) || hadExplicitPink || hadExplicitWhite;
+}
+
+function applyAudienceExplicitColorState(dossier, p, procKey, color){
+  if(!p) return false;
+  const appliedColor = String(color || '').trim() === 'closed' ? 'purple-dark' : String(color || '').trim();
+  if(appliedColor === 'pink'){
+    return setAudienceDelegationPinkState(dossier, p, procKey, true);
+  }
+  let changed = false;
+  if(String(p?._disableAudienceRowColor || '').trim()){
+    delete p._disableAudienceRowColor;
+    changed = true;
+  }
+  if(String(p?._suppressAudienceOrdonnanceColor || '').trim()){
+    delete p._suppressAudienceOrdonnanceColor;
+    changed = true;
+  }
+  if(String(p?._audienceSortOrd || '').trim()){
+    delete p._audienceSortOrd;
+    changed = true;
+  }
+  if(String(p?.attOrdOrOrdOk || '').trim()){
+    delete p.attOrdOrOrdOk;
+    changed = true;
+  }
+  if(normalizeDiligenceAttOk(p.attDelegationOuDelegat || '') === 'att'){
+    delete p.attDelegationOuDelegat;
+    changed = true;
+  }
+  if(String(p?.color || '').trim() !== appliedColor){
+    p.color = appliedColor;
+    changed = true;
+  }
+  return changed;
 }
 
 function clearSelectedAudienceColorFromRow(ci, di, procKey, appliedColor){
@@ -28574,14 +28735,13 @@ function applyAudienceTransientPinnedRowOrder(rows){
   return list;
 }
 
-function applyColorToSelectedAudienceRows(color){
+async function applyColorToSelectedAudienceRows(color, rowsOverride = null){
   const targetColor = String(color || '').trim();
   const allowed = new Set(['white', 'blue', 'green', 'red', 'yellow', 'document-ok', 'pink', 'purple-dark', 'purple-light', 'closed']);
   if(!allowed.has(targetColor) || !audiencePrintSelection.size) return false;
-  const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  const rows = Array.isArray(rowsOverride) ? rowsOverride : getAllAudienceRowsForStoredPrintSelection();
   let changed = false;
-  let lastClientId = null;
-  let lastDossier = null;
+  const changedDossiers = new Map();
   rows.forEach(row=>{
     const key = makeAudiencePrintKey(row.ci, row.di, row.procKey);
     if(!audiencePrintSelection.has(key)) return;
@@ -28601,32 +28761,40 @@ function applyColorToSelectedAudienceRows(color){
       if(!rowChanged && getAudienceRowOrdonnanceColor(row) === targetColor) return;
     }else{
       const appliedColor = targetColor === 'closed' ? 'purple-dark' : targetColor;
-      delete p._disableAudienceRowColor;
-      delete p._suppressAudienceOrdonnanceColor;
-      if(String(p?.color || '').trim() === appliedColor) return;
-      p.color = appliedColor;
+      rowChanged = applyAudienceExplicitColorState(dossier, p, row.procKey, targetColor);
+      if(!rowChanged && String(getAudienceRowEffectiveColor({ ...row, p, d: dossier }) || '').trim() === appliedColor) return;
       if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
       if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
-      rowChanged = true;
     }
-    const nextColorForHistory = String(getAudienceRowEffectiveColor({
-      ...row,
-      p,
-      d: dossier
-    }) || '').trim();
+    const nextColorForHistory = targetColor === 'white'
+      ? 'white'
+      : String(getAudienceRowEffectiveColor({
+        ...row,
+        p,
+        d: dossier
+      }) || '').trim();
     queueAudienceColorHistoryEntry(dossier, row.procKey, previousColorForHistory, nextColorForHistory);
     rememberAudienceTransientPriorityColor(row.ci, row.di, row.procKey, currentEffectiveColor);
     pinAudienceRowTemporarily(row.ci, row.di, row.procKey);
     changed = changed || rowChanged;
-    lastClientId = client.id;
-    lastDossier = dossier;
+    const dossierPersistKey = [
+      Number(client.id) || 0,
+      String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || row.di || dossier.referenceClient || '').trim()
+    ].join('::');
+    changedDossiers.set(dossierPersistKey, {
+      clientId: client.id,
+      dossier
+    });
   });
   if(!changed) return false;
+  const saved = await persistDossierReferenceBatchNow([...changedDossiers.values()], { source: 'audience-color' });
+  if(!saved){
+    setSyncStatus('pending', 'Sauvegarde couleur en attente');
+    return false;
+  }
   markAudienceColorCachesDirty();
   queueAudienceColorBatchUpdate({
-    persist: true,
-    persistClientId: lastClientId,
-    persistDossier: lastDossier,
+    persist: false,
     dashboard: true,
     suivi: true
   });
@@ -28678,6 +28846,10 @@ function getAllFilteredAudienceRowsForPrintSelection(){
     return lastAudienceRenderedRows;
   }
   return getFilteredAudienceRows();
+}
+
+function getAllAudienceRowsForStoredPrintSelection(){
+  return getAudienceRows({ ignoreSearch: true, ignoreColor: true });
 }
 
 function syncAudiencePageSelectionToggle(){
@@ -30480,7 +30652,7 @@ function setAudienceColor(ci, di, procKey, checked){
       setAudienceDelegationPinkState(dossier, p, procKey, false);
     }
     applyAudienceWhiteColorState(p, dossier, '');
-    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, '');
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, 'white');
     rememberAudienceColorUndoState([undoEntry], {
       filterAudienceColor,
       selectedAudienceColor,
@@ -30506,7 +30678,7 @@ function setAudienceColor(ci, di, procKey, checked){
       ci,
       di
     }));
-    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, '');
+    queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, 'white');
     rememberAudienceColorUndoState([undoEntry], {
       filterAudienceColor,
       selectedAudienceColor,
@@ -30516,8 +30688,6 @@ function setAudienceColor(ci, di, procKey, checked){
     queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
     return;
   }
-  delete p._disableAudienceRowColor;
-  delete p._suppressAudienceOrdonnanceColor;
   if(appliedColor === 'green' || appliedColor === 'yellow'){
     if(!applyAudienceOrdonnanceColorState(p, appliedColor)){
       return;
@@ -30533,7 +30703,7 @@ function setAudienceColor(ci, di, procKey, checked){
     return;
   }
   if(appliedColor === 'pink'){
-    if(!setAudienceDelegationPinkState(dossier, p, procKey, true) && String(p?.color || '').trim() !== 'pink'){
+    if(!applyAudienceExplicitColorState(dossier, p, procKey, appliedColor) && getAudienceRowEffectiveColor({ c: client, d: dossier, procKey, p, draft: {}, ci, di }) !== 'pink'){
       return;
     }
     queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, 'pink');
@@ -30546,7 +30716,9 @@ function setAudienceColor(ci, di, procKey, checked){
     queueAudienceColorBatchUpdate({ persist: true, persistClientId: client.id, persistDossier: dossier, dashboard: true, suivi: true });
     return;
   }
-  p.color = appliedColor;
+  if(!applyAudienceExplicitColorState(dossier, p, procKey, appliedColor)){
+    return;
+  }
   if(appliedColor === 'purple-dark') dossier.statut = 'Soldé';
   if(appliedColor === 'purple-light') dossier.statut = 'Arrêt définitif';
   queueAudienceColorHistoryEntry(dossier, procKey, currentEffectiveColor, appliedColor);

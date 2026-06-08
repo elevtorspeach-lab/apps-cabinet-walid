@@ -10,9 +10,14 @@ $ExportScriptPath = Join-Path $RepoRoot "tools\export-desktop-excel-backups.cjs"
 $EnvPath = Join-Path $RepoRoot "server\.env"
 $BaseOutputDir = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop", "Sauvegarde Cabinet Excel")
 $RunStamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$OutputDir = Join-Path $BaseOutputDir $RunStamp
+if ($env:EXCEL_BACKUP_OUTPUT_DIR) {
+  $OutputDir = [System.IO.Path]::GetFullPath($env:EXCEL_BACKUP_OUTPUT_DIR)
+} else {
+  $OutputDir = Join-Path $BaseOutputDir $RunStamp
+}
 $ClientsPath = Join-Path $OutputDir "Sauvegarde Excel Clients.xlsx"
 $DiligencePath = Join-Path $OutputDir "Sauvegarde Excel Diligence.xlsx"
+$MinimumAttachmentBytes = 10000
 
 function Import-EnvFile {
   param([string]$Path)
@@ -38,6 +43,24 @@ function Import-EnvFile {
       [Environment]::SetEnvironmentVariable($key, $value, "Process")
     }
   }
+}
+
+function Assert-ExcelAttachment {
+  param(
+    [string]$Path,
+    [string]$Label
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "$Label Excel backup file was not created: $Path"
+  }
+
+  $item = Get-Item -LiteralPath $Path
+  if ($item.Length -lt $MinimumAttachmentBytes) {
+    throw "$Label Excel backup looks empty ($($item.Length) bytes): $Path"
+  }
+
+  return $item.FullName
 }
 
 if (-not (Test-Path -LiteralPath $ExportScriptPath)) {
@@ -70,6 +93,8 @@ if (-not $from) {
 $password = $env:EXCEL_BACKUP_GMAIL_APP_PASSWORD
 if (-not $password) {
   $password = $env:EXCEL_BACKUP_EMAIL_PASSWORD
+} else {
+  $password = $password -replace '\s+', ''
 }
 
 if (-not $password) {
@@ -77,25 +102,49 @@ if (-not $password) {
   exit 0
 }
 
-$attachments = @($ClientsPath, $DiligencePath) | Where-Object { Test-Path -LiteralPath $_ }
-if ($attachments.Count -lt 2) {
-  throw "Expected Excel backup files were not found in $OutputDir"
-}
+$attachments = [string[]]@(
+  (Assert-ExcelAttachment -Path $ClientsPath -Label "Clients")
+  (Assert-ExcelAttachment -Path $DiligencePath -Label "Diligence")
+)
 
 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 $credential = New-Object System.Management.Automation.PSCredential($from, $securePassword)
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm"
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
-Send-MailMessage `
-  -SmtpServer "smtp.gmail.com" `
-  -Port 587 `
-  -UseSsl `
-  -Credential $credential `
-  -From $from `
-  -To $to `
-  -Subject "Sauvegarde Excel Cabinet Walid - $stamp" `
-  -Body "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients et Diligence generees automatiquement a 00:30.`n`nCabinet Walid" `
-  -Attachments $attachments `
-  -Encoding UTF8
+$message = New-Object System.Net.Mail.MailMessage
+$smtpClient = $null
+try {
+  $message.From = $from
+  $message.To.Add($to)
+  $message.Subject = "Sauvegarde Excel Cabinet Walid - $stamp"
+  $message.Body = "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients et Diligence generees automatiquement le $stamp.`n`nCabinet Walid"
+  foreach ($attachment in $attachments) {
+    [void]$message.Attachments.Add((New-Object System.Net.Mail.Attachment($attachment)))
+  }
 
-Write-Host "Excel backup email sent to $to"
+  $smtpClient = New-Object System.Net.Mail.SmtpClient("smtp.gmail.com", 587)
+  $smtpClient.EnableSsl = $true
+  $smtpClient.UseDefaultCredentials = $false
+  $smtpClient.Credentials = New-Object System.Net.NetworkCredential($credential.UserName, $credential.GetNetworkCredential().Password)
+  $smtpClient.Send($message)
+} catch {
+  $detail = $_.Exception.Message
+  if ($_.Exception.InnerException) {
+    $detail = "$detail Inner: $($_.Exception.InnerException.Message)"
+  }
+  throw "Excel backup email send failed: $detail"
+} finally {
+  if ($message) {
+    $message.Dispose()
+  }
+  if ($smtpClient) {
+    $smtpClient.Dispose()
+  }
+}
+
+Write-Host "Excel backup email sent to $to with attachments:"
+$attachments | ForEach-Object {
+  $item = Get-Item -LiteralPath $_
+  Write-Host " - $($item.FullName) ($($item.Length) bytes)"
+}
