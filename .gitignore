@@ -22,6 +22,7 @@ generated/
 release/
 snapshot-*/
 tmp/
+tmp-excel*/
 .tmp-tests/
 .env
 .env.*
