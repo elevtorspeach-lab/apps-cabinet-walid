@@ -118,7 +118,7 @@ function shouldShowDiligenceNantissementMedColumns(rows){
 function getDiligenceColCount(){
   if(diligenceVirtualCompactProcedureMode === 'scitf') return 17;
   if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 12;
-  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 25;
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 26;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     if(cmdMode !== 'default') return 24;
@@ -248,8 +248,9 @@ function buildDiligenceHeadHtml(){
       <th>Sort plie</th>
       <th>Notif banque</th>
       <th>Notif d&eacute;biteur</th>
-      <th>Tribunal</th>
       <th>Bo&icirc;te</th>
+      <th>Statut</th>
+      <th>Tribunal</th>
     `;
   }
   if(diligenceVirtualShowCommandementColumns){
@@ -610,8 +611,9 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sortPle', row.details?.sortPle || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifBanque', row.details?.notifBanque || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifDebiteur', row.details?.notifDebiteur || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'statut', row.dossier?.statut || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
       </tr>
     `;
   }

@@ -93,6 +93,7 @@ function buildSeedUsers(){
 let USERS = buildSeedUsers();
 let uploadedFiles = [];
 let audienceDraft = {};
+let audienceDirtyDraftKeys = new Set();
 let selectedAudienceColor = 'all';
 let filterAudienceColor = 'all';
 let filterAudienceProcedure = 'all';
@@ -680,6 +681,7 @@ const REMOTE_STATE_PAGED_LOAD_MIN_CLIENTS = 250;
 const REMOTE_STATE_PAGED_LOAD_MIN_DOSSIERS = 25000;
 const IS_FILE_PROTOCOL = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
 const LOCAL_ONLY_MODE = false;
+const SERVER_REQUIRED_MODE = true;
 const IS_REMOTE_WEB_HOST = (() => {
   if(typeof window === 'undefined' || !window.location) return false;
   const hostname = String(window.location.hostname || '').toLowerCase();
@@ -12838,12 +12840,12 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
   const requireRemoteConfirmation = options?.requireRemoteConfirmation === true;
   const safePath = String(pathname || '').trim();
   if(LOCAL_ONLY_MODE){
-    setSyncStatus('ok', 'Mode local (données sauvegardées)');
-    return (preserveQueuedRequest || requireRemoteConfirmation) ? false : true;
+    setSyncStatus('error', 'Mode serveur obligatoire');
+    return false;
   }
   if(!hasRemoteAuthSession()){
-    setSyncStatus('ok', 'Mode local (données sauvegardées)');
-    return (preserveQueuedRequest || requireRemoteConfirmation) ? false : true;
+    setSyncStatus('error', 'Connexion serveur obligatoire');
+    return false;
   }
   if(!remoteServerReachable){
     try{
@@ -12854,7 +12856,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
   }
   if(!remoteServerReachable){
     setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
-    return (preserveQueuedRequest || requireRemoteConfirmation) ? false : true;
+    return false;
   }
   setSyncStatus('syncing');
   try{
@@ -12916,13 +12918,13 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
       remoteServerReachable = true;
       setSyncStatus('pending', 'Synchronisation differee (serveur joignable)');
       console.warn('Requete serveur refusee pendant la sauvegarde', err);
-      return requireRemoteConfirmation ? false : true;
+      return false;
     }
 
     remoteServerReachable = false;
     setSyncStatus('error', 'Serveur indisponible - reconnexion automatique');
     console.warn('Impossible de sauvegarder sur le serveur', err);
-    return (preserveQueuedRequest || requireRemoteConfirmation) ? false : true;
+    return false;
   }
 }
 
@@ -17354,7 +17356,7 @@ async function exportFactureProcesVerbalExcel(){
 }
 
 async function exportSelectedAudienceFactureExcel(){
-  const selectedRows = getAudienceRows({ ignoreSearch: true, ignoreColor: true })
+  const selectedRows = getAllFilteredAudienceRowsForPrintSelection()
     .filter(row=>isAudienceSelectedForPrint(row?.ci, row?.di, row?.procKey));
   if(!selectedRows.length){
     return alert('Cochez les dossiers a exporter en facture.');
@@ -18135,7 +18137,7 @@ function syncAudienceColorUndoAvailability(){
 
 function syncAudienceColorActionAvailability(){
   const buttons = audienceColorButtons.length ? audienceColorButtons : Array.from(document.querySelectorAll('.color-btn[data-color]'));
-  const hasSelection = audiencePrintSelection.size > 0;
+  const hasSelection = getSelectedAudienceRowsCount() > 0;
   if(!hasSelection && selectedAudienceColor !== 'all'){
     setSelectedAudienceColor('all', false);
   }
@@ -20779,22 +20781,23 @@ function setupEvents(){
     renderAudience();
   });
   $('filterAudienceProcedure')?.addEventListener('change', (e)=>{
-    setAudienceProcedureFilter(e.target.value, { syncUi: false, clearSelection: false });
+    setAudienceProcedureFilter(e.target.value, { syncUi: false, clearSelection: true });
     renderAudience();
   });
   $('filterAudienceTribunal')?.addEventListener('change', (e)=>{
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: false });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: true });
   });
   $('filterAudienceTribunal')?.addEventListener('keydown', (e)=>{
     if(e.key !== 'Enter') return;
     e.preventDefault();
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: false });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: true, clearSelection: true });
   });
   $('filterAudienceTribunal')?.addEventListener('search', (e)=>{
-    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: false, clearSelection: false });
+    applyAudienceTribunalFilterFromInput(e.target.value, { allowApproximate: false, clearSelection: true });
   });
   $('filterAudienceDate')?.addEventListener('change', (e)=>{
     filterAudienceDate = String(e.target?.value || '').trim();
+    clearAudiencePrintSelection({ immediate: true });
     renderAudience();
   });
   $('filterAudienceRefDossier')?.addEventListener('input', debounce((e)=>{
@@ -21085,6 +21088,12 @@ async function login(){
       }else if(remoteAuth.reason === 'unavailable'){
         remoteLoginState = 'unavailable';
       }
+    }
+
+    if(SERVER_REQUIRED_MODE && remoteLoginState !== 'ok'){
+      clearRemoteAuthSession();
+      showLoginError('Serveur indisponible. Connexion au serveur obligatoire.');
+      return;
     }
 
     USERS = ensureManagerUser(Array.isArray(USERS) ? USERS : []);
@@ -28205,7 +28214,7 @@ function isAudienceSelectedForPrint(ci, di, procKey){
 }
 
 function getSelectedAudienceRowsCount(){
-  const sourceRows = getFilteredAudienceRows(getAudienceRows({ ignoreSearch: true, ignoreColor: true }));
+  const sourceRows = getAllAudienceRowsForStoredPrintSelection();
   return countSelectedAudienceRows(sourceRows);
 }
 
@@ -28245,7 +28254,7 @@ function pruneAudiencePrintSelection(rows = null){
 }
 
 function updateAudienceCheckedCount(){
-  const count = audiencePrintSelection.size;
+  const count = getSelectedAudienceRowsCount();
   const node = $('audienceCheckedCountValue');
   if(node) node.textContent = String(count);
   syncAudienceColorActionAvailability();
@@ -28937,7 +28946,7 @@ function getAudienceExportRowTribunalFilterKey(row){
 }
 
 function getSelectedAudienceRowsForExport(){
-  const rows = getAudienceRows({ ignoreSearch: true, ignoreColor: true });
+  const rows = getAllFilteredAudienceRowsForPrintSelection();
   const tribunalExportKey = getAudienceExportTribunalFilterKey();
   if(
     rows === audienceSelectedExportRowsCacheInput
@@ -30853,7 +30862,7 @@ function applyAudienceFieldToProcedure(p, field, value){
   }
 }
 
-const AUDIENCE_GROUP_SHARED_FIELDS = new Set(['dateAudience', 'dateDepot', 'tribunal', 'juge', 'sort']);
+const AUDIENCE_GROUP_SHARED_FIELDS = new Set();
 
 function shouldShareAudienceFieldAcrossGroup(field){
   return AUDIENCE_GROUP_SHARED_FIELDS.has(String(field || '').trim());
@@ -30904,6 +30913,7 @@ function updateAudienceDraft(key, field, value){
   markAudienceRowsCacheDirty();
   if(!audienceDraft[key]) audienceDraft[key] = {};
   audienceDraft[key][field] = value;
+  audienceDirtyDraftKeys.add(key);
   const groupedRows = shouldShareAudienceFieldAcrossGroup(field)
     ? getAudienceRowsSharingDraftKey(key)
     : [];
@@ -31288,6 +31298,7 @@ function saveAudienceDraftEntry(key, options = {}){
     if(clearDraft && Object.prototype.hasOwnProperty.call(audienceDraft, safeKey)){
       delete audienceDraft[safeKey];
     }
+    audienceDirtyDraftKeys.delete(safeKey);
     persistStateSliceNow('audienceDraft', audienceDraft, { source: 'audience-draft' }).catch(()=>{});
     return false;
   }
@@ -31412,6 +31423,7 @@ function saveAudienceDraftEntry(key, options = {}){
   if(clearDraft && Object.prototype.hasOwnProperty.call(audienceDraft, safeKey)){
     delete audienceDraft[safeKey];
   }
+  audienceDirtyDraftKeys.delete(safeKey);
   if(audienceAutoSaveTimer){
     clearTimeout(audienceAutoSaveTimer);
     audienceAutoSaveTimer = null;
@@ -31650,6 +31662,7 @@ function saveAllAudience(options = {}){
 
   if(clearDraft){
     audienceDraft = {};
+    audienceDirtyDraftKeys.clear();
   }
   if(audienceAutoSaveTimer){
     clearTimeout(audienceAutoSaveTimer);
@@ -31678,9 +31691,13 @@ function saveAllAudience(options = {}){
   return true;
 }
 
-function collectAudienceDraftDossierPersistEntries(){
+function collectAudienceDraftDossierPersistEntries(keys = null){
   const entries = new Map();
-  Object.keys(audienceDraft || {}).forEach((key)=>{
+  const sourceKeys = keys instanceof Set
+    ? [...keys]
+    : (Array.isArray(keys) ? keys : Object.keys(audienceDraft || {}));
+  sourceKeys.forEach((key)=>{
+    if(!audienceDraft || !Object.prototype.hasOwnProperty.call(audienceDraft, key)) return;
     const { ci, di } = parseAudienceDraftKey(key);
     const client = AppState.clients?.[ci];
     const dossier = client?.dossiers?.[di];
@@ -31695,7 +31712,8 @@ function collectAudienceDraftDossierPersistEntries(){
 }
 
 function persistAudienceDraftDossiersNow(){
-  const entries = collectAudienceDraftDossierPersistEntries();
+  const dirtyKeys = new Set(audienceDirtyDraftKeys);
+  const entries = collectAudienceDraftDossierPersistEntries(dirtyKeys);
   entries.forEach((entry)=>{
     persistDossierReferenceNow(entry.clientId, entry.dossier, {
       source: 'audience-autosave'
@@ -31703,12 +31721,12 @@ function persistAudienceDraftDossiersNow(){
       console.warn('Impossible de sauvegarder automatiquement la modification audience', err);
     });
   });
+  dirtyKeys.forEach(key=>audienceDirtyDraftKeys.delete(key));
   return entries.length;
 }
 
 function shouldAutoPersistAudienceDraftDossiers(){
-  const draftEntries = Object.entries(audienceDraft || {});
-  return draftEntries.length > 0;
+  return audienceDirtyDraftKeys.size > 0;
 }
 
 function queueAudienceAutoSave(){

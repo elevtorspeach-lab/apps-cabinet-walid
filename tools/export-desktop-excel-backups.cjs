@@ -320,6 +320,25 @@ function assertWorkbookRows(rows, kind) {
   return nonEmptyRows;
 }
 
+function assertBackupCoverage(counts, result) {
+  const clientsRows = Number(result?.clientsMeta?.rows || 0);
+  const diligenceRows = Number(result?.diligenceMeta?.rows || 0);
+  const clientsBytes = Number(result?.clientsMeta?.bytes || 0);
+  const diligenceBytes = Number(result?.diligenceMeta?.bytes || 0);
+
+  if (counts.dossiers >= 10 && clientsRows < counts.dossiers) {
+    throw new Error(`Refusing to email incomplete Clients Excel backup: ${clientsRows} rows for ${counts.dossiers} dossiers.`);
+  }
+
+  if (counts.procedureDetails >= 10 && diligenceRows < Math.min(100, counts.procedureDetails)) {
+    throw new Error(`Refusing to email incomplete Diligence Excel backup: ${diligenceRows} rows for ${counts.procedureDetails} procedure details.`);
+  }
+
+  if (counts.dossiers >= 100 && (clientsBytes < 100000 || diligenceBytes < 100000)) {
+    throw new Error(`Refusing to email suspiciously small Excel backups: clients=${clientsBytes} bytes, diligence=${diligenceBytes} bytes, dossiers=${counts.dossiers}.`);
+  }
+}
+
 function buildClientsWorkbook(XLSX, state) {
   const rows = buildClientsRows(state);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
@@ -546,6 +565,7 @@ async function main() {
   const state = await loadState();
   const counts = assertExportableState(state);
   const result = await replaceOutputFiles(XLSX, state);
+  assertBackupCoverage(counts, result);
   console.log(`Excel backups written:
 ${result.clientsPath} (${result.clientsMeta.rows} rows, ${result.clientsMeta.bytes} bytes)
 ${result.diligencePath} (${result.diligenceMeta.rows} rows, ${result.diligenceMeta.bytes} bytes)

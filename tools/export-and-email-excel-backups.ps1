@@ -18,6 +18,22 @@ if ($env:EXCEL_BACKUP_OUTPUT_DIR) {
 $ClientsPath = Join-Path $OutputDir "Sauvegarde Excel Clients.xlsx"
 $DiligencePath = Join-Path $OutputDir "Sauvegarde Excel Diligence.xlsx"
 $MinimumAttachmentBytes = 10000
+$MaxExportAttempts = 3
+$ExportRetryDelaySeconds = 20
+
+if ($env:EXCEL_BACKUP_MAX_ATTEMPTS) {
+  $parsedAttempts = 0
+  if ([int]::TryParse($env:EXCEL_BACKUP_MAX_ATTEMPTS, [ref]$parsedAttempts) -and $parsedAttempts -gt 0) {
+    $MaxExportAttempts = $parsedAttempts
+  }
+}
+
+if ($env:EXCEL_BACKUP_RETRY_DELAY_SECONDS) {
+  $parsedDelay = 0
+  if ([int]::TryParse($env:EXCEL_BACKUP_RETRY_DELAY_SECONDS, [ref]$parsedDelay) -and $parsedDelay -ge 0) {
+    $ExportRetryDelaySeconds = $parsedDelay
+  }
+}
 
 function Import-EnvFile {
   param([string]$Path)
@@ -68,9 +84,34 @@ if (-not (Test-Path -LiteralPath $ExportScriptPath)) {
 }
 
 $env:EXCEL_BACKUP_OUTPUT_DIR = $OutputDir
-& $NodePath $ExportScriptPath
-if ($LASTEXITCODE -ne 0) {
-  throw "Excel backup export failed with exit code $LASTEXITCODE"
+$exportSucceeded = $false
+$lastExportError = ""
+
+for ($attempt = 1; $attempt -le $MaxExportAttempts; $attempt++) {
+  try {
+    Write-Host "Excel backup export attempt $attempt/$MaxExportAttempts..."
+    & $NodePath $ExportScriptPath
+    if ($LASTEXITCODE -ne 0) {
+      throw "Excel backup export failed with exit code $LASTEXITCODE"
+    }
+
+    [void](Assert-ExcelAttachment -Path $ClientsPath -Label "Clients")
+    [void](Assert-ExcelAttachment -Path $DiligencePath -Label "Diligence")
+    $exportSucceeded = $true
+    break
+  } catch {
+    $lastExportError = $_.Exception.Message
+    if ($attempt -lt $MaxExportAttempts) {
+      Write-Warning "Excel backup export attempt $attempt failed: $lastExportError. Retrying in $ExportRetryDelaySeconds seconds..."
+      if ($ExportRetryDelaySeconds -gt 0) {
+        Start-Sleep -Seconds $ExportRetryDelaySeconds
+      }
+    }
+  }
+}
+
+if (-not $exportSucceeded) {
+  throw "Excel backup export failed after $MaxExportAttempts attempt(s): $lastExportError"
 }
 
 if ($SkipEmail) {

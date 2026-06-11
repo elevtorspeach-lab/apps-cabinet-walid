@@ -8,7 +8,7 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
-const LEGACY_ASSET_VERSION = '20260604-audience-facture-export-1'
+const LEGACY_ASSET_VERSION = '20260611-audience-ref-keeps-selection-count'
 const LEGACY_SCRIPTS = [
   `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,
   `/legacy/audience-ui-helpers.js?v=${LEGACY_ASSET_VERSION}`,
