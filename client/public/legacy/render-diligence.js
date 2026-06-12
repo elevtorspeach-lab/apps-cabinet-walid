@@ -118,7 +118,7 @@ function shouldShowDiligenceNantissementMedColumns(rows){
 function getDiligenceColCount(){
   if(diligenceVirtualCompactProcedureMode === 'scitf') return 17;
   if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 12;
-  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 26;
+  if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 24;
   if(diligenceVirtualShowCommandementColumns){
     const cmdMode = getDiligenceCommandementHeaderMode(diligenceVirtualRows);
     if(cmdMode !== 'default') return 24;
@@ -228,18 +228,13 @@ function buildDiligenceHeadHtml(){
       <th>Client</th>
       <th>R&eacute;f&eacute;rence client</th>
       <th>Lot du</th>
-      <th>Gestionnaire</th>
       <th>D&eacute;biteur FR</th>
-      <th>D&eacute;biteur AR</th>
-      <th>CIN/RC</th>
       <th>Adresse</th>
       <th>Ville</th>
       <th>Montant</th>
       <th>RIB</th>
       <th>Banque / STE FR</th>
-      <th>Banque / STE AR</th>
       <th>Adresse Banque</th>
-      <th>Avocat</th>
       <th>D&eacute;p&ocirc;t</th>
       <th>Ref dossier</th>
       <th>Observation</th>
@@ -251,6 +246,9 @@ function buildDiligenceHeadHtml(){
       <th>Bo&icirc;te</th>
       <th>Statut</th>
       <th>Tribunal</th>
+      <th>Avocat</th>
+      <th>Gestionnaire</th>
+      <th>CIN/RC</th>
     `;
   }
   if(diligenceVirtualShowCommandementColumns){
@@ -572,11 +570,11 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   if(diligenceVirtualCompactProcedureMode === 'saisiearret' && isSaisieArretProcedure){
     const cinRcValue = row.details?.cinRc || row.details?.cin || row.dossier?.cin || row.dossier?.cautionCin || '';
     const debiteurEpValue = row.details?.debiteurEp || row.dossier?.debiteur || '';
-    const debiteurApValue = row.details?.debiteurAp || '';
     const adresseValue = row.details?.adresse || row.dossier?.adresse || '';
     const montantValue = row.details?.montant || row.dossier?.montant || '';
     const banqueFrValue = row.details?.banqueFr || row.details?.banque || '';
     const adresseBrancheValue = row.details?.adresseBranche || row.details?.adresseBanque || '';
+    const sortOrdTone = normalizeDiligenceOrdonnance(ordValue) === 'ok' ? 'ok' : 'att';
     return `
       <tr ${rowAttrs}>
         <td>
@@ -591,22 +589,17 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         </td>
         <td>${escapeHtml(refClientValue || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'gestionnaire', row.dossier?.gestionnaire || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurAp', debiteurApValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'cinRc', cinRcValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', adresseValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', montantValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'rib', row.details?.rib || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueFr', banqueFrValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueAr', row.details?.banqueAr || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'adresseBranche', adresseBrancheValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'avocat', row.details?.avocat || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'depotLe', row.details?.depotLe || row.details?.dateDepot || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', getDiligenceReferenceDossierValue(row))}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
+        <td class="diligence-saisie-arret-observation-cell">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+        <td class="diligence-saisie-arret-sort-ord-cell diligence-saisie-arret-sort-ord-cell--${sortOrdTone}">${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', ordValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', row.details?.executionNo || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sortPle', row.details?.sortPle || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifBanque', row.details?.notifBanque || '')}</td>
@@ -614,6 +607,9 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'statut', row.dossier?.statut || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'avocat', row.details?.avocat || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'gestionnaire', row.dossier?.gestionnaire || row.details?.gestionnaire || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'cinRc', cinRcValue)}</td>
       </tr>
     `;
   }

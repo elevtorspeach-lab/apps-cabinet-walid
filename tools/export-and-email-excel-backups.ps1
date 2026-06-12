@@ -17,6 +17,7 @@ if ($env:EXCEL_BACKUP_OUTPUT_DIR) {
 }
 $ClientsPath = Join-Path $OutputDir "Sauvegarde Excel Clients.xlsx"
 $DiligencePath = Join-Path $OutputDir "Sauvegarde Excel Diligence.xlsx"
+$DiligenceSaisieArretPath = Join-Path $OutputDir "Sauvegarde Excel Diligence Saisie Arret.xlsx"
 $MinimumAttachmentBytes = 10000
 $MaxExportAttempts = 3
 $ExportRetryDelaySeconds = 20
@@ -97,6 +98,7 @@ for ($attempt = 1; $attempt -le $MaxExportAttempts; $attempt++) {
 
     [void](Assert-ExcelAttachment -Path $ClientsPath -Label "Clients")
     [void](Assert-ExcelAttachment -Path $DiligencePath -Label "Diligence")
+    [void](Assert-ExcelAttachment -Path $DiligenceSaisieArretPath -Label "Diligence saisie arret")
     $exportSucceeded = $true
     break
   } catch {
@@ -146,6 +148,7 @@ if (-not $password) {
 $attachments = [string[]]@(
   (Assert-ExcelAttachment -Path $ClientsPath -Label "Clients")
   (Assert-ExcelAttachment -Path $DiligencePath -Label "Diligence")
+  (Assert-ExcelAttachment -Path $DiligenceSaisieArretPath -Label "Diligence saisie arret")
 )
 
 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
@@ -159,7 +162,7 @@ try {
   $message.From = $from
   $message.To.Add($to)
   $message.Subject = "Sauvegarde Excel Cabinet Walid - $stamp"
-  $message.Body = "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients et Diligence generees automatiquement le $stamp.`n`nCabinet Walid"
+  $message.Body = "Bonjour,`n`nVeuillez trouver ci-joint les sauvegardes Excel Clients, Diligence, et Diligence Saisie Arret generees automatiquement le $stamp.`n`nLe fichier Diligence Saisie Arret exclut les dossiers crees depuis creation dossier diligence.`n`nCabinet Walid"
   foreach ($attachment in $attachments) {
     [void]$message.Attachments.Add((New-Object System.Net.Mail.Attachment($attachment)))
   }

@@ -10,6 +10,7 @@ const outputDir = process.env.EXCEL_BACKUP_OUTPUT_DIR
   : path.join(os.homedir(), 'Desktop', 'Sauvegarde Cabinet Excel');
 const clientsFilename = 'Sauvegarde Excel Clients.xlsx';
 const diligenceFilename = 'Sauvegarde Excel Diligence.xlsx';
+const diligenceSaisieArretFilename = 'Sauvegarde Excel Diligence Saisie Arret.xlsx';
 
 function loadXlsx() {
   const sourcePath = path.join(repoRoot, 'client', 'public', 'vendor', 'libs', 'xlsx.full.min.js');
@@ -138,6 +139,13 @@ function isDiligenceProcedure(procedure) {
   return ['ASS', 'SFDC', 'S/bien', 'Injonction', 'Commandement', 'Nantissement', 'SAISIE ARRET'].includes(base);
 }
 
+function isDiligenceSaisieArretManualCreationDossier(dossier) {
+  if (!dossier || typeof dossier !== 'object') return false;
+  const source = clean(dossier.creationSource || dossier.source).toLowerCase();
+  return source === 'diligence-saisie-arret'
+    || (dossier.isDiligenceManualEntry === true && dossier.isDiligenceOnly === true);
+}
+
 function normalizeAttOk(value) {
   const raw = clean(value).toLowerCase();
   if (!raw) return '';
@@ -209,6 +217,40 @@ function getDiligenceRowCells(row) {
     commandement ? clean(details.expert) : (assNb ? clean(details.sortNotif) : clean(details.huissier)),
     commandement ? clean(details.sort) : (assNb ? clean(details.avisCurateur) : (['SFDC', 'Injonction'].includes(base) ? clean(details.sort) : normalizeDiligenceSort(details.sort))),
     clean(details.dateExecution),
+    clean(details.tribunal)
+  ];
+}
+
+function getDiligenceSaisieArretRowCells(row) {
+  const details = row.details || {};
+  const dossier = row.dossier || {};
+  const cinRcValue = clean(details.cinRc || details.cin || dossier.cin || dossier.cautionCin || dossier.cautionRc);
+  return [
+    clean(row.clientName),
+    clean(dossier.referenceClient),
+    clean(details.lotDu),
+    clean(dossier.gestionnaire),
+    clean(details.debiteurEp || dossier.debiteur),
+    clean(details.debiteurAp),
+    cinRcValue,
+    clean(details.adresse || dossier.adresse),
+    clean(dossier.ville || details.ville),
+    clean(details.montant || dossier.montant),
+    clean(details.rib),
+    clean(details.banqueFr || details.banque),
+    clean(details.banqueAr),
+    clean(details.adresseBranche || details.adresseBanque),
+    clean(details.avocat),
+    clean(details.depotLe || details.dateDepot),
+    clean(details.referenceClient),
+    clean(details.observation),
+    getOrdonnanceLabel(details),
+    clean(details.executionNo),
+    clean(details.sortPle),
+    clean(details.notifBanque),
+    clean(details.notifDebiteur),
+    clean(dossier.boiteNo),
+    clean(dossier.statut),
     clean(details.tribunal)
   ];
 }
@@ -384,6 +426,34 @@ function buildDiligenceRows(state) {
   return rows;
 }
 
+function buildDiligenceSaisieArretRows(state) {
+  const headers = [
+    'Client', 'Référence client', 'Lot du', 'Gestionnaire', 'Débiteur FR', 'Débiteur AR',
+    'CIN/RC', 'Adresse', 'Ville', 'Montant', 'RIB', 'Banque / STE FR', 'Banque / STE AR',
+    'Adresse Banque', 'Avocat', 'Dépôt', 'Ref dossier', 'Observation', 'Sort ORD',
+    'Execution N°', 'Sort plie', 'Notif banque', 'Notif débiteur', 'Boîte', 'Statut', 'Tribunal'
+  ];
+  const rows = [headers];
+  const clients = Array.isArray(state.clients) ? state.clients : [];
+  clients.forEach((client) => {
+    (Array.isArray(client.dossiers) ? client.dossiers : []).forEach((dossier) => {
+      if (isDiligenceSaisieArretManualCreationDossier(dossier)) return;
+      const detailsByProc = dossier.procedureDetails && typeof dossier.procedureDetails === 'object' ? dossier.procedureDetails : {};
+      normalizeProcedures(dossier).forEach((procedure) => {
+        if (getProcedureBaseName(procedure) !== 'SAISIE ARRET') return;
+        const row = {
+          procedure,
+          clientName: client.name,
+          dossier,
+          details: detailsByProc[procedure] || {},
+        };
+        rows.push(getDiligenceSaisieArretRowCells(row));
+      });
+    });
+  });
+  return rows;
+}
+
 function buildDiligenceWorkbook(XLSX, state) {
   const rows = buildDiligenceRows(state);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
@@ -470,6 +540,11 @@ function isDiligenceHeader(values) {
     && String(values[1] || '').toLowerCase().includes('reference');
 }
 
+function isDiligenceSaisieArretHeader(values) {
+  return String(values[0] || '').toLowerCase() === 'client'
+    && String(values[1] || '').toLowerCase().includes('référence');
+}
+
 async function writeStyledWorkbookFile(rows, filePath, kind) {
   const nonEmptyRows = assertWorkbookRows(rows, kind);
   const ExcelJS = loadExcelJs();
@@ -497,9 +572,13 @@ async function writeStyledWorkbookFile(rows, filePath, kind) {
     fitToHeight: 0
   };
 
-  const widths = kind === 'diligence'
-    ? [20, 24, 30, 16, 24, 22, 16, 18, 20, 22, 28, 22, 20, 24, 24, 24, 18, 32]
-    : [22, 16, 14, 28, 18, 24, 14, 18, 16, 34, 16, 22, 22, 22];
+  const isDiligenceKind = kind === 'diligence' || kind === 'diligence-saisie-arret';
+  const isDiligenceSaisieArretKind = kind === 'diligence-saisie-arret';
+  const widths = isDiligenceSaisieArretKind
+    ? [24, 22, 16, 18, 28, 24, 18, 34, 16, 18, 24, 24, 24, 34, 22, 16, 22, 28, 16, 18, 18, 18, 18, 14, 16, 28]
+    : (isDiligenceKind
+      ? [20, 24, 30, 16, 24, 22, 16, 18, 20, 22, 28, 22, 20, 24, 24, 24, 18, 32]
+      : [22, 16, 14, 28, 18, 24, 14, 18, 16, 34, 16, 22, 22, 22]);
   widths.forEach((width, index) => {
     worksheet.getColumn(index + 1).width = width;
   });
@@ -519,7 +598,11 @@ async function writeStyledWorkbookFile(rows, filePath, kind) {
       styleSectionRow(row, lastCol);
       return;
     }
-    if ((kind === 'clients' && isClientsHeader(values)) || (kind === 'diligence' && isDiligenceHeader(values))) {
+    if (
+      (kind === 'clients' && isClientsHeader(values))
+      || (kind === 'diligence' && isDiligenceHeader(values))
+      || (isDiligenceSaisieArretKind && isDiligenceSaisieArretHeader(values))
+    ) {
       if (!firstHeaderRow) firstHeaderRow = rowNumber;
       styleHeaderRow(row, lastCol);
       return;
@@ -529,7 +612,7 @@ async function writeStyledWorkbookFile(rows, filePath, kind) {
     }
   });
 
-  if (kind === 'diligence' && firstHeaderRow) {
+  if (isDiligenceKind && firstHeaderRow) {
     worksheet.autoFilter = {
       from: { row: firstHeaderRow, column: 1 },
       to: { row: firstHeaderRow, column: lastCol }
@@ -549,15 +632,18 @@ async function replaceOutputFiles(XLSX, state) {
   await fsp.mkdir(outputDir, { recursive: true });
   const clientsPath = path.join(outputDir, clientsFilename);
   const diligencePath = path.join(outputDir, diligenceFilename);
+  const diligenceSaisieArretPath = path.join(outputDir, diligenceSaisieArretFilename);
   await Promise.all([
     fsp.rm(clientsPath, { force: true }),
-    fsp.rm(diligencePath, { force: true })
+    fsp.rm(diligencePath, { force: true }),
+    fsp.rm(diligenceSaisieArretPath, { force: true })
   ]);
-  const [clientsMeta, diligenceMeta] = await Promise.all([
+  const [clientsMeta, diligenceMeta, diligenceSaisieArretMeta] = await Promise.all([
     writeStyledWorkbookFile(buildClientsRows(state), clientsPath, 'clients'),
-    writeStyledWorkbookFile(buildDiligenceRows(state), diligencePath, 'diligence')
+    writeStyledWorkbookFile(buildDiligenceRows(state), diligencePath, 'diligence'),
+    writeStyledWorkbookFile(buildDiligenceSaisieArretRows(state), diligenceSaisieArretPath, 'diligence-saisie-arret')
   ]);
-  return { clientsPath, diligencePath, clientsMeta, diligenceMeta };
+  return { clientsPath, diligencePath, diligenceSaisieArretPath, clientsMeta, diligenceMeta, diligenceSaisieArretMeta };
 }
 
 async function main() {
@@ -569,6 +655,7 @@ async function main() {
   console.log(`Excel backups written:
 ${result.clientsPath} (${result.clientsMeta.rows} rows, ${result.clientsMeta.bytes} bytes)
 ${result.diligencePath} (${result.diligenceMeta.rows} rows, ${result.diligenceMeta.bytes} bytes)
+${result.diligenceSaisieArretPath} (${result.diligenceSaisieArretMeta.rows} rows, ${result.diligenceSaisieArretMeta.bytes} bytes)
 Source state: ${counts.clients} clients, ${counts.dossiers} dossiers, ${counts.procedureDetails} procedure details`);
 }
 

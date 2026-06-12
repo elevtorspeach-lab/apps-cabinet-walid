@@ -21,7 +21,7 @@ function RecycleSection() {
               <th>Action</th>
               <th>Utilisateur</th>
               <th>Détails</th>
-              <th>Restore</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="recycleBody"></tbody>

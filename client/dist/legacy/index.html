@@ -375,6 +375,10 @@
             <button id="addDiligenceSaisieArretBtn" class="btn-success" type="button" style="display:none;">
               <i class="fa-solid fa-plus"></i> Ajouter saisie arrêt
             </button>
+            <button id="importDiligenceSaisieArretBtn" class="btn-primary btn-saisie-arret-import" type="button" style="display:none;">
+              <i class="fa-solid fa-file-import"></i> Importer Saisie Arrêt
+            </button>
+            <input type="file" id="diligenceSaisieArretImportInput" accept=".xlsx,.xls" style="display:none;">
             <button id="deleteDiligenceSaisieArretBtn" class="btn-danger" type="button" style="display:none;" disabled>
               <i class="fa-solid fa-trash"></i> Supprimer cochés
             </button>
@@ -1092,7 +1096,7 @@
               <th>Action</th>
               <th>Utilisateur</th>
               <th>Détails</th>
-              <th>Restore</th>
+            <th>Actions</th>
             </tr>
           </thead>
           <tbody id="recycleBody"></tbody>

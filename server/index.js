@@ -1638,6 +1638,17 @@ function mergeJsonArrayEntries(currentEntries, incomingEntries) {
   return next;
 }
 
+function getRecyclePatchEntrySignature(entry) {
+  if (!entry || typeof entry !== 'object') return '';
+  return JSON.stringify({
+    type: String(entry.type || '').trim() || 'unknown',
+    at: String(entry.at || '').trim(),
+    by: String(entry.by || '').trim() || '-',
+    byRole: String(entry.byRole || '').trim() || '',
+    payload: entry.payload && typeof entry.payload === 'object' ? entry.payload : {}
+  });
+}
+
 function applyRecyclePatch(currentState, body) {
   const state = currentState && typeof currentState === 'object' ? currentState : {};
   const action = String(body?.action || '').trim().toLowerCase();
@@ -1651,9 +1662,26 @@ function applyRecyclePatch(currentState, body) {
   );
   const archiveEntries = sanitizePatchArray(body?.archiveEntries).map((entry) => deepCloneJson(entry));
   const currentRecycleBin = Array.isArray(state.recycleBin) ? state.recycleBin : [];
-  const nextRecycleBin = entryIds.size
-    ? currentRecycleBin.filter((entry) => !entryIds.has(String(entry?.id || '').trim()))
-    : currentRecycleBin;
+  const archiveSignatureCounts = new Map();
+  archiveEntries.forEach((entry) => {
+    const signature = getRecyclePatchEntrySignature(entry);
+    if (!signature) return;
+    archiveSignatureCounts.set(signature, (archiveSignatureCounts.get(signature) || 0) + 1);
+  });
+  const nextRecycleBin = currentRecycleBin.filter((entry) => {
+    const id = String(entry?.id || '').trim();
+    if (id && entryIds.has(id)) return false;
+    if (archiveSignatureCounts.size) {
+      const signature = getRecyclePatchEntrySignature(entry);
+      const count = archiveSignatureCounts.get(signature) || 0;
+      if (count > 0) {
+        if (count === 1) archiveSignatureCounts.delete(signature);
+        else archiveSignatureCounts.set(signature, count - 1);
+        return false;
+      }
+    }
+    return true;
+  });
   const nextRecycleArchive = mergeJsonArrayEntries(state.recycleArchive, archiveEntries).slice(-8000);
   return normalizeStoredState({
     ...state,

@@ -8511,7 +8511,7 @@ function normalizeImportHistoryEntries(rawEntries){
         || /diligence/i.test(fileName);
       const category = type === 'audience'
         ? 'audience'
-        : (String(entry.category || '').trim() === 'diligence' || diligenceHint ? 'diligence' : 'global');
+        : (String(entry.category || '').trim() === 'diligence' || /^dil_/i.test(id) ? 'diligence' : 'global');
       const fileDataUrl = String(entry.fileDataUrl || '').trim();
       const createdAt = String(entry.createdAt || '').trim() || new Date().toISOString();
       const createdClientIds = Array.isArray(entry.createdClientIds)
@@ -9750,6 +9750,8 @@ function normalizeRecycleArchiveEntries(rawEntries){
 
 function importHistoryEntryLooksLikeDiligence(entry){
   if(String(entry?.category || '').trim() === 'diligence') return true;
+  if(/^dil_/i.test(String(entry?.id || '').trim())) return true;
+  return false;
   if(String(entry?.type || '').trim() !== 'global') return false;
   const batchId = String(entry?.id || '').trim();
   if(!batchId) return false;
@@ -9772,7 +9774,7 @@ function buildDiligenceImportHistoryEntriesFromDossiers(){
   (Array.isArray(AppState.clients) ? AppState.clients : []).forEach(client=>{
     const clientId = Number(client?.id);
     (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
-      const batchId = String(dossier?.importDiligenceBatchId || dossier?.importGlobalBatchId || '').trim();
+      const batchId = String(dossier?.importDiligenceBatchId || '').trim();
       if(!batchId) return;
       const dossierUid = ensureDossierImportUid(dossier);
       if(!batches.has(batchId)){
@@ -9814,6 +9816,8 @@ function getImportHistoryEntriesByType(type){
   const isDiligenceHistoryEntry = (entry)=>{
     if(!entry || typeof entry !== 'object') return false;
     const id = String(entry.id || '').trim();
+    return String(entry.category || '').trim() === 'diligence'
+      || /^dil_/i.test(id);
     const fileName = String(entry.fileName || '').trim();
     return String(entry.category || '').trim() === 'diligence'
       || /^dil_/i.test(id)
@@ -9906,9 +9910,6 @@ function collectRelevantImportHistoryEntries({ clientId = null, dossiers = [] } 
     if(globalBatchId) globalBatchIds.add(globalBatchId);
     const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
     if(diligenceBatchId) diligenceBatchIds.add(diligenceBatchId);
-    if(globalBatchId && normalizeProcedures(dossier).some(proc=>['SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Nantissement MED', 'Commandement', 'Nantissement'].includes(getDiligenceProcedureFilterValue(proc)))){
-      diligenceBatchIds.add(globalBatchId);
-    }
     const orphanAudienceBatchId = String(dossier?.importAudienceBatchId || '').trim();
     if(orphanAudienceBatchId) audienceBatchIds.add(orphanAudienceBatchId);
     const details = dossier?.procedureDetails && typeof dossier.procedureDetails === 'object'
@@ -9957,9 +9958,6 @@ function syncImportHistoryWithCurrentState(){
       pushBatchValue(globalDossierUidsByBatch, globalBatchId, dossierUid);
       const diligenceBatchId = String(dossier?.importDiligenceBatchId || '').trim();
       pushBatchValue(diligenceDossierUidsByBatch, diligenceBatchId, dossierUid);
-      if(globalBatchId && normalizeProcedures(dossier).some(proc=>['SFDC', 'SAISIE ARR\u00caT', 'S/bien', 'Injonction', 'Nantissement MED', 'Commandement', 'Nantissement'].includes(getDiligenceProcedureFilterValue(proc)))){
-        pushBatchValue(diligenceDossierUidsByBatch, globalBatchId, dossierUid);
-      }
 
       const orphanAudienceBatchId = String(dossier?.importAudienceBatchId || '').trim();
       pushBatchValue(audienceOrphanDossierUidsByBatch, orphanAudienceBatchId, dossierUid);
@@ -10842,17 +10840,43 @@ async function clearRecycleBinToBackup(){
     `Vider la corbeille (${items.length} element(s)) ?\nLes elements seront gardes dans le backup interne.`,
     { confirmationWord: 'SUPPRIMER' }
   )) return;
-  pushRecycleArchiveEntries(items);
-  AppState.recycleBin = [];
   const saved = await persistRecycleClearNow(items, { source: 'recycle-clear', requireRemoteConfirmation: true });
   if(!saved){
     remoteRefreshPending = true;
     await refreshRemoteState({ force: true }).catch((err)=>{
       console.warn('Actualisation apres vidage corbeille impossible', err);
     });
+    alert('Suppression serveur non confirmee. Corbeille gardee.');
+    renderRecycleBin();
+    return;
   }
+  pushRecycleArchiveEntries(items);
+  AppState.recycleBin = [];
   renderRecycleBin();
   alert('Corbeille vidée. Backup interne conservé.');
+}
+
+async function deleteRecycleItem(index){
+  if(!canEmptyRecycleBin()) return alert('Suppression non autorisee');
+  const idx = Number(index);
+  const items = Array.isArray(AppState.recycleBin) ? AppState.recycleBin : [];
+  if(!Number.isInteger(idx) || idx < 0 || idx >= items.length) return alert('Element corbeille introuvable');
+  const entry = items[idx];
+  const detail = getRecycleEntryDetails(entry);
+  if(!window.confirm(`Supprimer definitivement cet element de la corbeille ?\n${detail}`)) return;
+  const saved = await persistRecycleClearNow([entry], { source: 'recycle-delete-one', requireRemoteConfirmation: true });
+  if(!saved){
+    remoteRefreshPending = true;
+    await refreshRemoteState({ force: true }).catch((err)=>{
+      console.warn('Actualisation apres suppression corbeille impossible', err);
+    });
+    alert('Suppression serveur non confirmee. Element garde dans la corbeille.');
+    renderRecycleBin();
+    return;
+  }
+  pushRecycleArchiveEntries([entry]);
+  AppState.recycleBin.splice(idx, 1);
+  renderRecycleBin();
 }
 
 function renderRecycleBin(options = {}){
@@ -10898,12 +10922,17 @@ function renderRecycleBin(options = {}){
         </td>
         <td data-label="Utilisateur">${escapeHtml(getRecycleEntryActorLabel(entry))}</td>
         <td data-label="Détails">${escapeHtml(getRecycleEntryDetails(entry))}</td>
-        <td data-label="Restore">
+        <td data-label="Actions">
           ${canRestore ? `
             <button type="button" class="btn-primary" data-action="restore" data-index="${row.originalIndex}">
               <i class="fa-solid fa-rotate-left"></i>
             </button>
           ` : '-'}
+          ${canClear ? `
+            <button type="button" class="btn-danger" data-action="delete-one" data-index="${row.originalIndex}" title="Supprimer cet element">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          ` : ''}
         </td>
       </tr>
     `;
@@ -19801,6 +19830,261 @@ async function handleDiligenceImportFile(file){
   renderDiligence();
 }
 
+function handleDiligenceSaisieArretLineImport(){
+  if(!isDiligenceSaisieArretProcedure(filterDiligenceProcedure)){
+    alert('Choisissez d abord la procedure SAISIE ARRET.');
+    return;
+  }
+  const input = $('diligenceSaisieArretImportInput');
+  if(!input){
+    alert('Import Saisie Arret indisponible: champ fichier introuvable.');
+    return;
+  }
+  input.value = '';
+  input.click();
+}
+
+const DILIGENCE_SAISIE_ARRET_LINE_IMPORT_COLUMNS = {
+  clientName: ['client'],
+  referenceClient: ['reference client', 'ref client'],
+  lotDu: ['lot du', 'lot'],
+  debiteurFr: ['debiteur fr', 'debiteur', 'nom'],
+  adresse: ['adresse', 'adress', 'adresse complete'],
+  ville: ['ville', 'city', 'commune'],
+  montant: ['montant'],
+  rib: ['rib'],
+  banqueFr: ['banque ste fr', 'banque fr', 'banque'],
+  adresseBanque: ['adresse banque', 'adresse branche', 'adresse bancaire'],
+  depot: ['depot', 'date depot', 'date affectation'],
+  refDossier: ['ref dossier', 'reference dossier'],
+  observation: ['observation', 'observations', 'obs', 'remarque'],
+  sortOrd: ['sort ord', 'sord ord', 'sort ordonnance', 'ordonnance'],
+  executionNo: ['execution n', 'execution no', 'execution', 'execution numero', 'execution num'],
+  sortPle: ['sort plie', 'sort pli', 'plie', 'pli'],
+  notifBanque: ['notif banque', 'notification banque'],
+  notifDebiteur: ['notif debiteur', 'notification debiteur'],
+  boiteNo: ['boite', 'box', 'boite n', 'boite no'],
+  statut: ['statut', 'status', 'etat', 'statut dossier', 'etat dossier'],
+  tribunal: ['tribunal', 'trib', 'tr'],
+  avocat: ['avocat'],
+  gestionnaire: ['gestionnaire', 'manager', 'responsable'],
+  cinRc: ['cin rc', 'cin', 'cni', 'rc', 'cin rc debiteur']
+};
+
+function getSaisieArretLineImportColumnIndex(map, key){
+  return getColIndex(map, DILIGENCE_SAISIE_ARRET_LINE_IMPORT_COLUMNS[key] || []);
+}
+
+function findSaisieArretLineImportHeader(rows){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const targetKeys = Object.keys(DILIGENCE_SAISIE_ARRET_LINE_IMPORT_COLUMNS);
+  for(let rowIndex = 0; rowIndex < Math.min(sourceRows.length, 30); rowIndex += 1){
+    const map = buildHeaderMap(sourceRows[rowIndex] || []);
+    const hitCount = targetKeys.reduce((count, key)=>count + (getSaisieArretLineImportColumnIndex(map, key) !== -1 ? 1 : 0), 0);
+    if(hitCount >= 3) return { rowIndex, map };
+  }
+  return null;
+}
+
+function getSaisieArretImportCell(row, map, key, options = {}){
+  const idx = getSaisieArretLineImportColumnIndex(map, key);
+  if(idx === -1) return '';
+  const value = row?.[idx];
+  if(options.date === true){
+    return parseExcelDateValue(value) || String(value || '').trim();
+  }
+  return String(value ?? '').trim();
+}
+
+function buildDiligenceSaisieArretImportedDossier(rowData, batchId){
+  const nowIso = new Date().toISOString();
+  const normalizedStatus = normalizeImportedDossierStatus(rowData.statut || '');
+  const debiteur = String(rowData.debiteurFr || '').trim();
+  return {
+    importUid: createImportTrackingId('dossier'),
+    importGlobalBatchId: '',
+    importAudienceBatchId: '',
+    importDiligenceBatchId: batchId,
+    factureInvoices: [],
+    isDiligenceImportLineEntry: true,
+    isDiligenceOnly: true,
+    creationSource: 'diligence-saisie-arret-line-import',
+    hideFromSuivi: true,
+    createdAt: nowIso,
+    suiviUpdatedAt: nowIso,
+    debiteur,
+    cin: rowData.cinRc || '',
+    cinNonDebiteur: '',
+    adversaire: '',
+    nRef: '',
+    boiteNo: rowData.boiteNo || '',
+    referenceClient: rowData.referenceClient || '',
+    dateAffectation: rowData.depot || '',
+    gestionnaire: rowData.gestionnaire || '',
+    sanlamAdversaires: {},
+    procedure: 'SAISIE ARRÊT',
+    procedureList: ['SAISIE ARRÊT'],
+    procedureDetails: {
+      'SAISIE ARRÊT': {
+        lotDu: rowData.lotDu || '',
+        debiteurEp: debiteur,
+        adresse: rowData.adresse || '',
+        ville: rowData.ville || '',
+        montant: rowData.montant || '',
+        rib: rowData.rib || '',
+        banqueFr: rowData.banqueFr || '',
+        adresseBranche: rowData.adresseBanque || '',
+        depotLe: rowData.depot || '',
+        dateDepot: rowData.depot || '',
+        referenceClient: rowData.refDossier || '',
+        observation: rowData.observation || '',
+        attOrdOrOrdOk: rowData.sortOrd || '',
+        executionNo: rowData.executionNo || '',
+        sortPle: rowData.sortPle || '',
+        notifBanque: rowData.notifBanque || '',
+        notifDebiteur: rowData.notifDebiteur || '',
+        tribunal: rowData.tribunal || '',
+        avocat: rowData.avocat || '',
+        cinRc: rowData.cinRc || ''
+      }
+    },
+    ville: rowData.ville || '',
+    adresse: rowData.adresse || '',
+    montant: rowData.montant || '',
+    montantByProcedure: [],
+    ww: '',
+    marque: '',
+    type: '',
+    caution: '',
+    cautionAdresse: '',
+    cautionVille: '',
+    cautionCin: '',
+    cautionRc: '',
+    efNumber: '',
+    conservation: '',
+    metrage: '',
+    note: '',
+    avancement: '',
+    statut: normalizedStatus.statut || 'En cours',
+    statutDetails: normalizedStatus.detail || '',
+    files: [],
+    history: []
+  };
+}
+
+function parseDiligenceSaisieArretLineImportRows(rows){
+  const header = findSaisieArretLineImportHeader(rows);
+  if(!header) return { importedRows: [], headerFound: false };
+  const importedRows = [];
+  for(let rowIndex = header.rowIndex + 1; rowIndex < rows.length; rowIndex += 1){
+    const row = rows[rowIndex] || [];
+    const values = Object.keys(DILIGENCE_SAISIE_ARRET_LINE_IMPORT_COLUMNS).map(key=>getSaisieArretImportCell(row, header.map, key));
+    if(!values.some(value=>String(value || '').trim())) continue;
+    importedRows.push({
+      rowNumber: rowIndex + 1,
+      clientName: getSaisieArretImportCell(row, header.map, 'clientName') || 'VIDE',
+      referenceClient: getSaisieArretImportCell(row, header.map, 'referenceClient') || 'VIDE',
+      lotDu: getSaisieArretImportCell(row, header.map, 'lotDu'),
+      debiteurFr: getSaisieArretImportCell(row, header.map, 'debiteurFr'),
+      adresse: getSaisieArretImportCell(row, header.map, 'adresse'),
+      ville: getSaisieArretImportCell(row, header.map, 'ville'),
+      montant: getSaisieArretImportCell(row, header.map, 'montant'),
+      rib: getSaisieArretImportCell(row, header.map, 'rib'),
+      banqueFr: getSaisieArretImportCell(row, header.map, 'banqueFr'),
+      adresseBanque: getSaisieArretImportCell(row, header.map, 'adresseBanque'),
+      depot: getSaisieArretImportCell(row, header.map, 'depot', { date: true }),
+      refDossier: getSaisieArretImportCell(row, header.map, 'refDossier'),
+      observation: getSaisieArretImportCell(row, header.map, 'observation'),
+      sortOrd: getSaisieArretImportCell(row, header.map, 'sortOrd'),
+      executionNo: getSaisieArretImportCell(row, header.map, 'executionNo'),
+      sortPle: getSaisieArretImportCell(row, header.map, 'sortPle'),
+      notifBanque: getSaisieArretImportCell(row, header.map, 'notifBanque'),
+      notifDebiteur: getSaisieArretImportCell(row, header.map, 'notifDebiteur'),
+      boiteNo: getSaisieArretImportCell(row, header.map, 'boiteNo'),
+      statut: getSaisieArretImportCell(row, header.map, 'statut'),
+      tribunal: getSaisieArretImportCell(row, header.map, 'tribunal'),
+      avocat: getSaisieArretImportCell(row, header.map, 'avocat'),
+      gestionnaire: getSaisieArretImportCell(row, header.map, 'gestionnaire'),
+      cinRc: getSaisieArretImportCell(row, header.map, 'cinRc')
+    });
+  }
+  return { importedRows, headerFound: true };
+}
+
+async function handleDiligenceSaisieArretLineImportFile(file){
+  if(importInProgress) return;
+  if(!file) return;
+  if(!canImportData()){
+    alert('Accès refusé');
+    return;
+  }
+  if(!isDiligenceSaisieArretProcedure(filterDiligenceProcedure)){
+    alert('Choisissez d abord la procedure SAISIE ARRET.');
+    return;
+  }
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: false });
+  if(!excelReady) return;
+  importInProgress = true;
+  beginHeavyUiOperation();
+  try{
+    openImportProgressModal('Importer Saisie Arret');
+    updateImportProgress('Lecture du fichier...', 0, 3);
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    if(!sheetName) throw new Error('Le fichier Excel ne contient aucune feuille.');
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true, dateNF: 'dd/mm/yyyy' });
+    updateImportProgress('Préparation des lignes...', 1, 3);
+    const parsed = parseDiligenceSaisieArretLineImportRows(rows);
+    if(!parsed.headerFound) throw new Error('En-tetes Saisie Arret introuvables.');
+    if(!parsed.importedRows.length) throw new Error('Aucune ligne Saisie Arret a importer.');
+    const batchId = createImportTrackingId('dil_sa');
+    const clientMap = new Map();
+    (Array.isArray(AppState.clients) ? AppState.clients : []).forEach(client=>{
+      const key = String(client?.name || '').trim().toLowerCase();
+      if(key && !clientMap.has(key)) clientMap.set(key, client);
+    });
+    const maxClientId = (Array.isArray(AppState.clients) ? AppState.clients : [])
+      .reduce((max, client)=>Math.max(max, Number(client?.id) || 0), 0);
+    let nextClientId = maxClientId + 1;
+    let createdClients = 0;
+    parsed.importedRows.forEach(rowData=>{
+      const clientName = String(rowData.clientName || '').trim() || 'VIDE';
+      const key = clientName.toLowerCase();
+      let client = clientMap.get(key);
+      if(!client){
+        client = { id: nextClientId++, name: clientName, dossiers: [] };
+        AppState.clients.push(client);
+        clientMap.set(key, client);
+        grantCurrentViewerAccessToClient(client.id);
+        createdClients += 1;
+      }
+      if(!Array.isArray(client.dossiers)) client.dossiers = [];
+      client.dossiers.push(buildDiligenceSaisieArretImportedDossier(rowData, batchId));
+    });
+    updateImportProgress('Sauvegarde...', 2, 3);
+    handleDossierDataChange({ audience: false, rerenderLinked: true });
+    clearDiligencePrintSelection({ immediate: true });
+    filterDiligenceProcedure = 'SAISIE ARRÊT';
+    resetDiligenceAuxFilters();
+    paginationState.diligence = 1;
+    await persistAppStateNow(null, { source: 'diligence-saisie-arret-line-import' });
+    showView('diligence', { force: true });
+    renderDiligence({ force: true });
+    updateImportProgress('Terminé.', 3, 3);
+    alert(`Import Saisie Arret terminé.\nLignes importées: ${parsed.importedRows.length}\nClients créés: ${createdClients}`);
+  }catch(err){
+    console.error(err);
+    const details = String(err?.message || '').trim();
+    alert(`Erreur import Saisie Arret.${details ? `\nDétail: ${details}` : ''}`);
+  }finally{
+    closeImportProgressModal(false);
+    importInProgress = false;
+    endHeavyUiOperation();
+  }
+}
+
 async function exportBackupExcelImportable(){
   if(!canExportData()){
     alert('Accès refusé');
@@ -20643,11 +20927,18 @@ function setupEvents(){
   $('diligenceSearchInput')?.addEventListener('input', renderDiligenceDebounced);
   $('exportDiligenceBtn')?.addEventListener('click', exportDiligenceXLS);
   $('addDiligenceSaisieArretBtn')?.addEventListener('click', addDiligenceSaisieArretDossier);
+  $('importDiligenceSaisieArretBtn')?.addEventListener('click', handleDiligenceSaisieArretLineImport);
   $('deleteDiligenceSaisieArretBtn')?.addEventListener('click', deleteCheckedDiligenceSaisieArretDossiers);
   $('importDiligenceBtn')?.addEventListener('click', handleDiligenceExcelImport);
   $('diligenceImportInput')?.addEventListener('change', (e)=> {
     if(e.target.files?.[0]){
       handleDiligenceImportFile(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
+  $('diligenceSaisieArretImportInput')?.addEventListener('change', (e)=> {
+    if(e.target.files?.[0]){
+      handleDiligenceSaisieArretLineImportFile(e.target.files[0]);
       e.target.value = '';
     }
   });
@@ -20741,11 +21032,17 @@ function setupEvents(){
   $('restoreAllRecycleBtn')?.addEventListener('click', restoreAllRecycleItems);
   $('clearRecycleBinBtn')?.addEventListener('click', clearRecycleBinToBackup);
   $('recycleBody')?.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button[data-action="restore"]');
+    const btn = e.target.closest('button[data-action]');
     if(!btn) return;
     const idx = Number(btn.dataset.index);
     if(!Number.isFinite(idx)) return;
-    restoreRecycleItem(idx);
+    if(btn.dataset.action === 'restore'){
+      restoreRecycleItem(idx);
+      return;
+    }
+    if(btn.dataset.action === 'delete-one'){
+      deleteRecycleItem(idx);
+    }
   });
   $('filterAudienceColor')?.addEventListener('change', async (e)=>{
     const previousColor = normalizeAudienceFilterColorValue(filterAudienceColor);
@@ -25156,10 +25453,16 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       return escapeHtml(status || '-');
     }
     if(isOrdonnanceField){
+      const ordonnanceToneClass = isDiligenceSaisieArretProcedure(row?.procedure)
+        ? ` diligence-saisie-arret-sort-ord-select--${status === 'ok' ? 'ok' : 'att'}`
+        : '';
+      const ordonnanceToneChange = isDiligenceSaisieArretProcedure(row?.procedure)
+        ? 'applyDiligenceSaisieArretSortOrdTone(this);'
+        : '';
       return `
       <select
-        class="diligence-inline-select${autoSizeClass}"${autoSizeAttrs}${autoSizeStyle}
-        onchange="${onSizeChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+        class="diligence-inline-select${autoSizeClass}${ordonnanceToneClass}"${autoSizeAttrs}${autoSizeStyle}
+        onchange="${onSizeChange}${ordonnanceToneChange}updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         ${isSbienOrdonnanceField ? '' : `<option value="" ${status === '' ? 'selected' : ''}>-</option>`}
         <option value="att" ${status === 'att' ? 'selected' : ''}>ATT ORD</option>
         <option value="ok" ${status === 'ok' ? 'selected' : ''}>ORD OK</option>
@@ -25795,6 +26098,18 @@ function updateDiligenceFieldEncoded(clientId, dossierIndex, procKeyEncoded, fie
   updateDiligenceField(clientId, dossierIndex, decodeURIComponent(String(procKeyEncoded)), field, value);
 }
 
+function applyDiligenceSaisieArretSortOrdTone(selectEl){
+  if(!selectEl) return;
+  const isOk = normalizeDiligenceOrdonnance(selectEl.value) === 'ok';
+  selectEl.classList.toggle('diligence-saisie-arret-sort-ord-select--att', !isOk);
+  selectEl.classList.toggle('diligence-saisie-arret-sort-ord-select--ok', isOk);
+  const cell = selectEl.closest?.('.diligence-saisie-arret-sort-ord-cell');
+  if(cell){
+    cell.classList.toggle('diligence-saisie-arret-sort-ord-cell--att', !isOk);
+    cell.classList.toggle('diligence-saisie-arret-sort-ord-cell--ok', isOk);
+  }
+}
+
 function extractYearFromReferenceDiligence(ref) {
   if (!ref) return 9999;
   const str = String(ref).trim();
@@ -26153,18 +26468,13 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Client', width: 24, getValue: (row)=>row?.clientName || '' },
       { header: 'Reference client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
       { header: 'Lot du', width: 18, getValue: (row)=>row?.details?.lotDu || '' },
-      { header: 'Gestionnaire', width: 22, getValue: (row)=>row?.dossier?.gestionnaire || '' },
       { header: 'Debiteur FR', width: 28, getValue: (row)=>row?.details?.debiteurEp || row?.dossier?.debiteur || '' },
-      { header: 'Debiteur AR', width: 28, getValue: (row)=>row?.details?.debiteurAp || '' },
-      { header: 'CIN/RC', width: 18, getValue: (row)=>row?.details?.cinRc || row?.details?.cin || row?.dossier?.cin || row?.dossier?.cautionCin || '' },
       { header: 'Adresse', width: 34, getValue: (row)=>row?.details?.adresse || row?.dossier?.adresse || '' },
       { header: 'Ville', width: 18, getValue: (row)=>row?.dossier?.ville || row?.details?.ville || '' },
       { header: 'Montant', width: 18, getValue: (row)=>row?.details?.montant || row?.dossier?.montant || '' },
       { header: 'RIB', width: 26, getValue: (row)=>row?.details?.rib || '' },
       { header: 'Banque / STE FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
-      { header: 'Banque / STE AR', width: 24, getValue: (row)=>row?.details?.banqueAr || '' },
       { header: 'Adresse Banque', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
-      { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
       { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
       { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
       { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
@@ -26173,8 +26483,12 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || 'att plie' },
       { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
+      { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' },
+      { header: 'Statut', width: 20, getValue: (row)=>row?.dossier?.statut || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
-      { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+      { header: 'Avocat', width: 24, getValue: (row)=>row?.details?.avocat || '' },
+      { header: 'Gestionnaire', width: 22, getValue: (row)=>row?.dossier?.gestionnaire || row?.details?.gestionnaire || '' },
+      { header: 'CIN/RC', width: 18, getValue: (row)=>row?.details?.cinRc || row?.details?.cin || row?.dossier?.cin || row?.dossier?.cautionCin || '' }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
     return {
@@ -32009,32 +32323,29 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
   }
   if(b === 'saisie arrêt' || b === 'saisie arret'){
     return `
-      <input type="text" data-field="dateDepot" placeholder="Date affectation">
       <input type="text" data-field="lotDu" placeholder="Lot du">
-      <input type="text" data-field="banque" placeholder="Banque">
-      <input type="text" data-field="banqueFr" placeholder="Banque / STE FR">
-      <input type="text" data-field="banqueAr" placeholder="Banque / STE AR">
-      <input type="text" data-field="adresseBanque" placeholder="Adresse banque">
-      <input type="text" data-field="rib" placeholder="RIB">
-      <input type="text" data-field="depotLe" placeholder="Depot le">
-      <input type="text" data-field="referenceClient" placeholder="Reference dossier" autocomplete="off">
       <input type="text" data-field="debiteurEp" placeholder="Débiteur FR">
-      <input type="text" data-field="debiteurAp" placeholder="Débiteur AR">
-      <input type="text" data-field="cinRc" placeholder="CIN / RC">
       <input type="text" data-field="adresse" placeholder="Adresse">
       <input type="text" data-field="ville" placeholder="Ville">
       <input type="text" data-field="montant" placeholder="Montant">
-      <input type="text" data-field="avocat" placeholder="Avocat">
+      <input type="text" data-field="rib" placeholder="RIB">
+      <input type="text" data-field="banqueFr" placeholder="Banque / STE FR">
+      <input type="text" data-field="adresseBanque" placeholder="Adresse Banque">
+      <input type="text" data-field="depotLe" placeholder="Dépôt">
+      <input type="text" data-field="referenceClient" placeholder="Ref dossier" autocomplete="off">
       <input type="text" data-field="observation" placeholder="Observation">
-      <input type="text" data-field="attOrdOrOrdOk" placeholder="att ord / ord ok">
-      <input type="text" data-field="executionNo" placeholder="Execution N">
+      <input type="text" data-field="attOrdOrOrdOk" placeholder="Sort ORD">
+      <input type="text" data-field="executionNo" placeholder="Execution N°">
       <select data-field="sortPle">
         <option value="att plie" selected>att plie</option>
         <option value="plie ok">plie ok</option>
       </select>
       <input type="text" data-field="notifBanque" placeholder="Notif banque">
-      <input type="text" data-field="notifDebiteur" placeholder="Notif debiteur">
+      <input type="text" data-field="notifDebiteur" placeholder="Notif débiteur">
       ${tribunalFieldHtml}
+      <input type="text" data-field="avocat" placeholder="Avocat">
+      <input type="text" data-field="gestionnaire" placeholder="Gestionnaire">
+      <input type="text" data-field="cinRc" placeholder="CIN/RC">
     `;
   }
   if(b === 'sfdc' || b === 's/bien'){
@@ -32710,6 +33021,7 @@ function syncDiligenceSaisieArretFilterVisibility(){
   const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
   const delegationContainer = $('diligenceDelegationFilterContainer') || $('diligenceDelegationFilter')?.closest?.('.audience-color-filter');
   const addBtn = $('addDiligenceSaisieArretBtn');
+  const importBtn = $('importDiligenceSaisieArretBtn');
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
   const isSciTf = isDiligenceSciTfProcedure(filterDiligenceProcedure);
   const hideSort = show || isSciTf;
@@ -32717,6 +33029,7 @@ function syncDiligenceSaisieArretFilterVisibility(){
   if(lotDuContainer) lotDuContainer.style.display = show ? 'inline-block' : 'none';
   if(observationContainer) observationContainer.style.display = show ? 'inline-block' : 'none';
   if(addBtn) addBtn.style.display = show && canEditData() ? '' : 'none';
+  if(importBtn) importBtn.style.display = show && canImportData() ? '' : 'none';
   if(hideSort){
     filterDiligenceSort = 'all';
     const sortSelect = $('diligenceSortFilter');
