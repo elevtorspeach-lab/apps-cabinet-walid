@@ -36,6 +36,7 @@ const FIXED_TEAM_USER_PASSWORDS = new Map(
 const PASSWORD_HASH_ITERATIONS = 120000;
 const PASSWORD_MIN_LENGTH = 1;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const TEAM_PRESENCE_ONLINE_WINDOW_MS = 45 * 1000;
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -386,6 +387,7 @@ function createAuthSession(user) {
     canManageTeam: canUserManageTeam(user),
     clientIds,
     issuedAt: Date.now(),
+    lastSeenAt: Date.now(),
     expiresAt: Date.now() + AUTH_SESSION_TTL_MS
   };
   authSessions.set(token, session);
@@ -562,6 +564,7 @@ function requireApiAuth(req, res, next) {
     return res.status(401).json({ ok: false, code: 'AUTH_REQUIRED', message: 'Authentication required.' });
   }
   session.expiresAt = Date.now() + AUTH_SESSION_TTL_MS;
+  session.lastSeenAt = Date.now();
   req.authSession = session;
   next();
 }
@@ -2586,6 +2589,35 @@ app.post('/api/auth/login', async (req, res) => {
       canManageTeam: canUserManageTeam(user),
       requirePasswordChange: false
     }
+  });
+});
+
+app.post('/api/auth/presence', requireApiAuth, (req, res) => {
+  res.json({ ok: true, serverTime: Date.now() });
+});
+
+app.post('/api/auth/logout', requireApiAuth, (req, res) => {
+  authSessions.delete(req.authSession.token);
+  res.json({ ok: true });
+});
+
+app.get('/api/team/presence', requireApiAuth, (req, res) => {
+  if (!canSessionManageTeam(req.authSession)) {
+    return sendJsonError(res, 403, 'FORBIDDEN', 'Team management access required.');
+  }
+  const now = Date.now();
+  const onlineByUsername = {};
+  for (const session of authSessions.values()) {
+    const username = String(session?.username || '').trim().toLowerCase();
+    const lastSeenAt = Number(session?.lastSeenAt || session?.issuedAt || 0);
+    if (!username || !lastSeenAt || (now - lastSeenAt) > TEAM_PRESENCE_ONLINE_WINDOW_MS) continue;
+    onlineByUsername[username] = Math.max(Number(onlineByUsername[username] || 0), lastSeenAt);
+  }
+  res.json({
+    ok: true,
+    onlineByUsername,
+    onlineWindowMs: TEAM_PRESENCE_ONLINE_WINDOW_MS,
+    serverTime: now
   });
 });
 

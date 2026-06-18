@@ -65,6 +65,7 @@ function EquipeSection() {
                 <th>Droit</th>
                 <th>Clients autorisés</th>
                 <th>Sécurité</th>
+                <th>Statut</th>
                 <th>Actions</th>
               </tr>
             </thead>

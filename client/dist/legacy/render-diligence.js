@@ -10,6 +10,7 @@ function getDiligenceFilterStateKey(query){
     filterDiligenceOrdonnance,
     filterDiligenceTribunal,
     normalizeDiligenceSearchQuery(filterDiligenceLotDu || ''),
+    typeof getDiligenceLotDuFilterValuesKey === 'function' ? getDiligenceLotDuFilterValuesKey() : '',
     normalizeDiligenceSearchQuery(filterDiligenceObservation || ''),
     typeof getDiligenceObservationFilterValuesKey === 'function' ? getDiligenceObservationFilterValuesKey() : '',
     typeof filterDiligenceSortSci === 'undefined' ? 'all' : filterDiligenceSortSci,
@@ -71,6 +72,28 @@ function renderDiligenceRowsHtml(rows){
 function maybeApplyDiligenceAutoSizing(root = document){
   if(isVeryLargeLiveSyncMode()) return;
   applyDiligenceAutoSizing(root);
+}
+
+function syncDiligenceVisualColumnStyles(){
+  const headRow = $('diligenceHeadRow');
+  const body = $('diligenceBody');
+  if(!headRow || !body) return;
+  const headers = Array.from(headRow.children);
+  const normalizeHeader = (value)=>String(value || '').trim().toLowerCase();
+  const villeIndex = headers.findIndex((header)=>normalizeHeader(header.textContent) === 'ville');
+  const observationIndex = headers.findIndex((header)=>normalizeHeader(header.textContent) === 'observation');
+  body.querySelectorAll('tr').forEach((row)=>{
+    const cells = Array.from(row.children);
+    cells.forEach((cell)=>{
+      cell.classList.remove('diligence-visual-ville-cell', 'diligence-visual-observation-cell');
+    });
+    if(villeIndex >= 0 && cells[villeIndex]){
+      cells[villeIndex].classList.add('diligence-visual-ville-cell');
+    }
+    if(observationIndex >= 0 && cells[observationIndex]){
+      cells[observationIndex].classList.add('diligence-visual-observation-cell');
+    }
+  });
 }
 
 function shouldShowDiligenceAssColumns(rows){
@@ -185,7 +208,7 @@ function buildDiligenceHeadHtml(){
       <th>Observation</th>
       <th>Date d&eacute;p&ocirc;t</th>
       <th>R&eacute;f&eacute;rence dossier</th>
-      <th>&Eacute;tat ordonnance</th>
+      <th>Sort ORD</th>
       <th>Sort SCI</th>
       <th>Tribunal</th>
       <th>Adresse</th>
@@ -293,7 +316,7 @@ function buildDiligenceHeadHtml(){
       <th>R&eacute;f&eacute;rence dossier</th>
       <th>Juge</th>
       <th>Sort</th>
-      <th>Ordonnance</th>
+      <th>Sort ORD</th>
       <th>Notification N&deg;</th>
       <th>Plie</th>
       <th>Sort notification</th>
@@ -336,7 +359,7 @@ function buildDiligenceHeadHtml(){
     <th>Date dépôt</th>
     <th>Référence dossier</th>
     ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
-    <th>Ordonnance</th>
+    <th>${diligenceVirtualShowAssColumns || compactMode === 'injonction' || compactMode === 'sbien' || compactMode === 'sfdc' ? 'Sort ORD' : 'Ordonnance'}</th>
     ${showSharedNotificationColumns ? `<th>Notification N°</th>${diligenceVirtualShowAssColumns ? '<th>Plie</th>' : ''}<th>Sort notification</th><th>Observation</th>` : ''}
     ${showAssFollowupColumns ? '<th>Lettre Rec</th><th>Curateur N°</th><th>ORD</th><th>Notif curateur</th><th>Sort notif</th><th>Avis curateur</th><th>PV Police</th>' : ''}
     ${showCurateurNotifieSortColumn ? '<th>Sort notif</th>' : ''}
@@ -471,7 +494,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
           <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', row.details?.pvPlice || '')}</td>
           <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
           <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-          <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
+          <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
           <td>${renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue)}</td>
           <td>${renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue)}</td>
           <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', row.details?.sort || '')}</td>
@@ -501,7 +524,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'curateurSortNotif', row.details?.curateurSortNotif || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'avisCurateur', row.details?.avisCurateur || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'pvPlice', row.details?.pvPlice || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
+        <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
       </tr>
     `;
@@ -562,7 +585,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         ${nbFollowupCells}
         <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
+        <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'refExpertise', row.details?.refExpertise || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'ord', row.details?.ord || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'paiement', row.details?.paiement || '')}</td>
@@ -599,7 +622,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', adresseValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
+        <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', montantValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'rib', row.details?.rib || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueFr', banqueFrValue)}</td>
@@ -630,7 +653,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     if(cmdExpanded){
       const certifCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', row.details?.certificatNonAppelStatus || '')}</td>`;
       const execCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', row.details?.executionNo || '')}</td>`;
-      const villeCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>`;
+      const villeCell = `<td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>`;
       const delCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'delegation', row.details?.delegation || '')}</td>`;
       const huissierCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'huissier', row.details?.huissier || '')}</td>`;
       const avisCell = `<td>${renderDiligenceEditableCell(row, procEncoded, 'avisRejetDossier', row.details?.avisRejetDossier || '')}</td>`;
@@ -713,7 +736,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
   const standardCells = `
     ${(showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue))}</td>` : (showSharedNotificationColumns && !isAssLikeProcedure ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue))}</td>` : '')}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue))}</td>`}
-    ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>`}
+    ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td class="diligence-ville-cell">${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>` : '') : `<td class="diligence-ville-cell">${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>`}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue))}</td>`}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>`}
     ${(avisHeader || isNantissementCurateurNotifieLayoutValue)
@@ -778,6 +801,7 @@ function renderDiligenceVirtualWindow(force = false){
     : '';
   const rowsHtml = renderDiligenceRowsHtml(rows.slice(start, end));
   body.innerHTML = `${topSpacer}${rowsHtml}${bottomSpacer}`;
+  syncDiligenceVisualColumnStyles();
   maybeApplyDiligenceAutoSizing(body);
 }
 
@@ -841,6 +865,9 @@ function renderDiligence(options = {}){
   syncDiligenceTribunalFilter(auxFilterRows);
   if(typeof syncDiligenceObservationFilterOptions === 'function'){
     syncDiligenceObservationFilterOptions(auxFilterRows);
+  }
+  if(typeof syncDiligenceLotDuFilterOptions === 'function'){
+    syncDiligenceLotDuFilterOptions(auxFilterRows);
   }
   const finalizeDiligenceRender = (rows)=>{
     try{
@@ -922,6 +949,7 @@ function renderDiligence(options = {}){
           ].join('::'),
           { trustRenderKey: true }
         );
+        syncDiligenceVisualColumnStyles();
         maybeApplyDiligenceAutoSizing(body);
       }
       renderPagination('diligence', pageData);
@@ -970,6 +998,12 @@ function renderDiligence(options = {}){
       const lotDuQuery = normalizeDiligenceSearchQuery(filterDiligenceLotDu || '');
       const observationQuery = normalizeDiligenceSearchQuery(filterDiligenceObservation || '');
       if(lotDuQuery && !normalizeDiligenceSearchQuery(row?.details?.lotDu || '').includes(lotDuQuery)) return false;
+      if(
+        (isDiligenceSciTfProcedure(row?.procedure) || isDiligenceSaisieArretProcedure(row?.procedure))
+        && typeof filterDiligenceLotDuValues !== 'undefined'
+        && filterDiligenceLotDuValues.size
+        && !filterDiligenceLotDuValues.has(getDiligenceRowLotDuFilterValue(row))
+      ) return false;
       if(
         typeof filterDiligenceSortSci !== 'undefined'
         && isDiligenceSciTfProcedure(row?.procedure)

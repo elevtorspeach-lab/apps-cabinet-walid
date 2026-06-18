@@ -15,8 +15,37 @@ function DiligenceSection() {
               <input type="text" id="diligenceSearchInput" placeholder="Filtrer (client / débiteur / réf dossier / notification / exécution / huissier / tribunal)..." />
             </div>
             <div className="audience-color-filter" id="diligenceLotDuFilterContainer" style={{ display: 'none' }}>
-              <label htmlFor="diligenceLotDuFilter">Lot du</label>
+              <label htmlFor="diligenceLotDuFilterButton">Lot du</label>
               <input type="text" id="diligenceLotDuFilter" list="diligenceLotDuOptions" placeholder="" autoComplete="off" />
+              <div id="diligenceLotDuFilterMenu" className="diligence-observation-filter-menu" style={{ display: 'none', position: 'relative' }}>
+                <button id="diligenceLotDuFilterButton" className="btn-primary" type="button" style={{ minWidth: 140 }}>
+                  Toutes
+                </button>
+                <div
+                  id="diligenceLotDuFilterPanel"
+                  style={{
+                    display: 'none',
+                    position: 'absolute',
+                    zIndex: 50,
+                    top: '100%',
+                    left: 0,
+                    minWidth: 220,
+                    maxHeight: 260,
+                    overflow: 'auto',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    boxShadow: '0 12px 28px rgba(15,23,42,.18)',
+                    padding: 8,
+                  }}
+                >
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 2px' }}>
+                    <input type="checkbox" id="diligenceLotDuSelectAll" defaultChecked />
+                    <span>(Selectionner tout)</span>
+                  </label>
+                  <div id="diligenceLotDuFilterOptions"></div>
+                </div>
+              </div>
             </div>
             <div className="audience-color-filter" id="diligenceObservationFilterContainer" style={{ display: 'none' }}>
               <label htmlFor="diligenceObservationFilterButton">Observation</label>
