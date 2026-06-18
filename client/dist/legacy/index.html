@@ -7,6 +7,15 @@
   <link rel="icon" type="image/svg+xml" href="client/public/favicon.svg"/>
   <link rel="stylesheet" href="vendor/local-icons.css"/>
   <link rel="stylesheet" href="style.css"/>
+  <style>
+    .diligence-sci-tf-observation-cell,
+    .diligence-sci-tf-observation-cell input,
+    .diligence-sci-tf-observation-cell textarea,
+    .diligence-sci-tf-observation-cell select{
+      color:#1d4ed8 !important;
+      font-weight:600;
+    }
+  </style>
 </head>
 <body>
 
@@ -342,6 +351,41 @@
               <select id="diligenceProcedureFilter">
                 <option value="all">Toutes</option>
               </select>
+            </div>
+            <div class="audience-color-filter" id="diligenceSortSciFilterContainer" style="display: none;">
+              <label for="diligenceSortSciFilter">Sort SCI</label>
+              <select id="diligenceSortSciFilter">
+                <option value="all">Tous</option>
+                <option value="-">-</option>
+                <option value="ATT ENREGISTREMENT">ATT ENREGISTREMENT</option>
+                <option value="CERTIFICAT A RETIRER">CERTIFICAT A RETIRER</option>
+                <option value="SCI ENREGISTRÉE">SCI ENREGISTRÃ‰E</option>
+                <option value="PAS ENREGISTRER">PAS ENREGISTRER</option>
+              </select>
+            </div>
+            <div class="audience-color-filter" id="diligenceObservationFilterContainer" style="display: none;">
+              <label for="diligenceObservationFilterButton">Observation</label>
+              <input type="text" id="diligenceObservationFilter" placeholder="Observation" style="display:none;">
+              <div class="diligence-observation-filter-menu" style="position:relative;">
+                <button id="diligenceObservationFilterButton" class="btn-primary" type="button" style="min-width:140px;">
+                  Toutes
+                </button>
+                <div id="diligenceObservationFilterPanel" style="display:none;position:absolute;z-index:50;top:100%;left:0;min-width:220px;max-height:260px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:8px;">
+                  <input type="text" id="diligenceObservationOptionSearch" placeholder="Rechercher" autocomplete="off" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:4px;">
+                  <label style="display:flex;gap:8px;align-items:center;padding:4px 2px;">
+                    <input type="checkbox" id="diligenceObservationSelectAll" checked>
+                    <span>(Selectionner tout)</span>
+                  </label>
+                  <div id="diligenceObservationFilterOptions"></div>
+                </div>
+              </div>
+            </div>
+            <div class="audience-color-filter" id="diligenceSciTfObservationBulkContainer" style="display: none;">
+              <label for="diligenceSciTfObservationBulkInput">Observation</label>
+              <input type="text" id="diligenceSciTfObservationBulkInput" placeholder="Observation">
+              <button id="diligenceSciTfObservationBulkBtn" class="btn-primary" type="button">
+                <i class="fa-solid fa-check"></i> Appliquer
+              </button>
             </div>
             <div class="audience-color-filter" id="diligenceMiseAPrixFilterContainer" style="display: none;">
               <label for="diligenceMiseAPrixFilter">Mise à prix</label>

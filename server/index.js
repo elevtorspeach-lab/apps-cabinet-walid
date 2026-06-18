@@ -63,13 +63,17 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  // Dynamic CORS to allow any IP for multi-user access
-  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  if (!origin) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (isAllowedCorsOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return isAllowedCorsOrigin(origin) ? res.sendStatus(200) : res.sendStatus(403);
   }
   next();
 });
@@ -120,6 +124,40 @@ function buildAllowedOrigins() {
 
 const ALLOWED_ORIGINS = buildAllowedOrigins();
 
+function isPrivateNetworkHostname(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  if (!host) return false;
+  if (host === 'localhost' || host === '::1') return true;
+  if (host.startsWith('127.')) return true;
+
+  const parts = host.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  const [first, second] = parts;
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+    || (first === 169 && second === 254)
+    || (first === 100 && second >= 64 && second <= 127);
+}
+
+function isAllowedCorsOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.has('*') || ALLOWED_ORIGINS.has(origin)) return true;
+
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    const expectedPorts = new Set([String(PORT), String(HTTPS_PORT)]);
+    return expectedPorts.has(port) && isPrivateNetworkHostname(parsed.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
 function normalizeLoginPassword(value) {
   return String(value || '')
     .trim()
@@ -158,13 +196,18 @@ function getAuthUsersFromState(state) {
 }
 
 function ensureManagerUser(users) {
+  const sourceUsers = (Array.isArray(users) ? users : [])
+    .filter((user) => user && typeof user === 'object');
+  if (!sourceUsers.length) {
+    return buildBootstrapUsers();
+  }
   const existingUsers = new Map(
-    (Array.isArray(users) ? users : [])
-      .filter((user) => user && typeof user === 'object')
+    sourceUsers
       .map((user) => [String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username]) => username)
   );
-  const seedUsers = buildBootstrapUsers();
+  const seedUsers = buildBootstrapUsers()
+    .filter((user) => String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME);
   const fixedUsernames = new Set(seedUsers.map((user) => String(user?.username || '').trim().toLowerCase()).filter(Boolean));
   const mergedFixedUsers = seedUsers.map((seedUser) => {
     const existingUser = existingUsers.get(String(seedUser.username || '').trim().toLowerCase());
@@ -213,8 +256,7 @@ function ensureManagerUser(users) {
   });
   let nextId = mergedFixedUsers.reduce((max, user) => Math.max(max, Number(user?.id) || 0), 0) + 1;
   const usedIds = new Set(mergedFixedUsers.map((user) => Number(user?.id)).filter((id) => Number.isFinite(id)));
-  const extraUsers = (Array.isArray(users) ? users : [])
-    .filter((user) => user && typeof user === 'object')
+  const extraUsers = sourceUsers
     .map((user) => ({ ...user }))
     .filter((user) => {
       const username = String(user?.username || '').trim().toLowerCase();
@@ -2663,6 +2705,77 @@ app.post('/api/team/users/upsert', requireApiAuth, async (req, res) => {
   }
 });
 
+app.post('/api/team/users/delete', requireApiAuth, async (req, res) => {
+  try {
+    if (!canSessionManageTeam(req.authSession)) {
+      return sendJsonError(res, 403, 'FORBIDDEN', 'Team management access required.');
+    }
+    await ensureDataFile();
+    const body = getRequestBodyObject(req);
+    const requestedId = Number(body?.id);
+    if (!Number.isFinite(requestedId)) {
+      return sendJsonError(res, 400, 'INVALID_USER_ID', 'Invalid user id.');
+    }
+
+    const state = await readState();
+    const users = ensureManagerUser(Array.isArray(state?.users) ? state.users : []);
+    const userIndex = users.findIndex((user) => Number(user?.id) === requestedId);
+    if (userIndex === -1) {
+      return sendJsonError(res, 404, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    const targetUser = users[userIndex];
+    const targetUsername = String(targetUser?.username || '').trim();
+    if (targetUsername.toLowerCase() === DEFAULT_MANAGER_USERNAME) {
+      return sendJsonError(res, 400, 'DEFAULT_MANAGER_DELETE_FORBIDDEN', 'Impossible de supprimer le compte manager par defaut.');
+    }
+    if (Number(req.authSession?.userId) === Number(targetUser?.id)) {
+      return sendJsonError(res, 400, 'CURRENT_USER_DELETE_FORBIDDEN', 'Impossible de supprimer l utilisateur connecte.');
+    }
+    const managerCount = users.filter((user) => normalizeTeamRole(user?.role) === 'manager').length;
+    if (normalizeTeamRole(targetUser?.role) === 'manager' && managerCount <= 1) {
+      return sendJsonError(res, 400, 'LAST_MANAGER_DELETE_FORBIDDEN', 'Impossible de supprimer le dernier manager.');
+    }
+    const teamManagerCount = users.filter(canUserManageTeam).length;
+    if (canUserManageTeam(targetUser) && teamManagerCount <= 1) {
+      return sendJsonError(res, 400, 'LAST_TEAM_MANAGER_DELETE_FORBIDDEN', 'Impossible de supprimer le dernier gestionnaire avec droit equipe.');
+    }
+
+    const before = getServerTeamUserSnapshot(state, targetUser);
+    const details = [
+      `Compte supprime: ${targetUsername || '-'}`,
+      `Role: ${getServerRoleLabel(before?.role)}`,
+      `Droit: ${before?.permission || '-'}`
+    ];
+    if (before?.clients && before.clients !== '-') details.push(`Clients: ${before.clients}`);
+
+    const nextUsers = users.filter((user) => Number(user?.id) !== requestedId);
+    const nextTeamHistory = appendServerTeamHistory(state, {
+      action: 'delete',
+      target: targetUsername || '-',
+      actor: String(req.authSession?.username || '-').trim() || '-',
+      actorRole: String(req.authSession?.role || '').trim(),
+      summary: `Suppression du compte ${targetUsername || '-'}`,
+      details
+    });
+    const refreshed = await writeState({
+      ...state,
+      users: nextUsers,
+      teamHistory: nextTeamHistory
+    }, { previousState: state });
+    refreshAuthSessionsFromUsers(refreshed?.users);
+    return res.json({
+      ok: true,
+      deletedUserId: requestedId,
+      version: Number(refreshed?.version || 0),
+      updatedAt: String(refreshed?.updatedAt || ''),
+      teamHistory: Array.isArray(refreshed?.teamHistory) ? refreshed.teamHistory : nextTeamHistory
+    });
+  } catch (err) {
+    return sendJsonError(res, 500, 'TEAM_USER_DELETE_FAILED', 'Team user delete failed.', err);
+  }
+});
+
 app.use('/api/state', requireApiAuth);
 app.use('/api/state', (req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
@@ -3353,6 +3466,13 @@ app.get('/api/state/stream', async (req, res) => {
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(WEB_DIR, 'index.html'));
+});
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  if (path.extname(req.path)) return next();
+  if (!req.accepts('html')) return next();
+  return res.sendFile(path.join(WEB_DIR, 'index.html'));
 });
 
 ensureDataFile()

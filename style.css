@@ -3406,6 +3406,94 @@ tr.color-yellow-purple{border-left:6px solid #6d28d9;background:linear-gradient(
   padding:8px 10px;
 }
 
+.diligence-sci-tf-observation-cell,
+.diligence-sci-tf-observation-cell input,
+.diligence-sci-tf-observation-cell textarea,
+.diligence-sci-tf-observation-cell select{
+  color:#1d4ed8;
+  font-weight:600;
+}
+
+#diligenceSection .diligence-sci-tf-observation-cell{
+  background:#eef2ff;
+  box-shadow:inset 3px 0 0 #818cf8;
+}
+
+#diligenceSection .diligence-sci-tf-observation-cell .diligence-inline-input{
+  border-color:#a5b4fc;
+  background:#f8f7ff;
+  color:#172554;
+  font-weight:600;
+}
+
+#diligenceSection tbody tr:hover .diligence-sci-tf-observation-cell{
+  background:#e0e7ff;
+}
+
+#diligenceSection tbody tr:hover .diligence-sci-tf-observation-cell .diligence-inline-input{
+  background:#f5f3ff;
+}
+
+#diligenceSection .diligence-injonction-observation-cell{
+  background:#eef2ff;
+  box-shadow:inset 3px 0 0 #818cf8;
+}
+
+#diligenceSection .diligence-injonction-observation-cell .diligence-inline-input{
+  border-color:#a5b4fc;
+  background:#f8f7ff;
+  color:#172554;
+  font-weight:600;
+}
+
+#diligenceSection tbody tr:hover .diligence-injonction-observation-cell{
+  background:#e0e7ff;
+}
+
+#diligenceSection tbody tr:hover .diligence-injonction-observation-cell .diligence-inline-input{
+  background:#f5f3ff;
+}
+
+#diligenceSection .diligence-ass-observation-cell{
+  background:#eef2ff;
+  box-shadow:inset 3px 0 0 #818cf8;
+}
+
+#diligenceSection .diligence-ass-observation-cell .diligence-inline-input{
+  border-color:#a5b4fc;
+  background:#f8f7ff;
+  color:#172554;
+  font-weight:600;
+}
+
+#diligenceSection tbody tr:hover .diligence-ass-observation-cell{
+  background:#e0e7ff;
+}
+
+#diligenceSection tbody tr:hover .diligence-ass-observation-cell .diligence-inline-input{
+  background:#f5f3ff;
+}
+
+#diligenceSection .diligence-nantissement-observation-cell{
+  background:#eef2ff;
+  box-shadow:inset 3px 0 0 #818cf8;
+}
+
+#diligenceSection .diligence-nantissement-observation-cell .diligence-inline-input{
+  border-color:#a5b4fc;
+  background:#f8f7ff;
+  color:#172554;
+  font-weight:600;
+}
+
+#diligenceSection tbody tr:hover .diligence-nantissement-observation-cell{
+  background:#e0e7ff;
+}
+
+#diligenceSection tbody tr:hover .diligence-nantissement-observation-cell .diligence-inline-input{
+  background:#f5f3ff;
+}
+
 #diligenceSection .diligence-count{
   margin:4px 0 8px;
   font-weight:600;

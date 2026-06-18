@@ -456,7 +456,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const jugementAddValue = getAudienceRowJugementAddStatus(row);
   return `
     <tr class="color-${rowColor}${isPrintChecked ? ' audience-row-selected' : ''}" data-client-id="${row.ci}" data-dossier-index="${row.di}" data-proc-key="${escapeAttr(String(procKey || ''))}">
-      <td data-label="SÃ©lection">
+      <td data-label="Sélection">
         <input type="checkbox" class="audience-print-check"
           data-ci="${row.ci}"
           data-di="${row.di}"
@@ -465,19 +465,19 @@ function renderAudienceRowHtml(row, duplicateKeySet){
           onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
-      <td data-label="RÃ©fÃ©rence Client" class="${refClientCellClass}">
+      <td data-label="Référence Client" class="${refClientCellClass}">
         ${canFixRefClient
           ? `<input class="${(isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch-input' : ''}" value="${escapeAttr(refClientInputDisplay)}" oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refClient',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refClient',this,event)">`
           : renderAudienceReferenceClientDisplay(refClientDisplayMerged)
         }
         ${refClientErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refClientErrorMessage)}</div>` : ''}
       </td>
-      <td data-label="DÃ©biteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(getAudienceDebiteurDisplay(row)) || '-')}</td>
-      <td data-label="RÃ©fÃ©rence dossier">
+      <td data-label="Débiteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(getAudienceDebiteurDisplay(row)) || '-')}</td>
+      <td data-label="Référence dossier">
         <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
         ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
       </td>
-      <td data-label="Date dâ€™audience">
+      <td data-label="Date d’audience">
         <div class="audience-date-field">
           <input class="${audienceDateInvalid ? 'date-input-invalid' : ''}" value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="handleAudienceDateInputFromEncoded('${keyEncoded}','dateAudience',this)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateAudience',this,event)" aria-invalid="${audienceDateInvalid ? 'true' : 'false'}">
           <div class="date-inline-error" ${audienceDateInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
@@ -487,14 +487,14 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       <td data-label="Sort"><input value="${escapeAttr(draft.sort || p.sort || '')}" list="${AUDIENCE_FIELD_DATALISTS.sort}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','sort',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','sort',this,event)"></td>
       <td data-label="Jugement N&deg;"><input value="${escapeAttr(draft.jugementNo || p.jugementNo || '')}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','jugementNo',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','jugementNo',this,event)"></td>
       <td data-label="Tribunal"><input value="${escapeAttr(tribunalValue)}" list="${AUDIENCE_FIELD_DATALISTS.tribunal}" autocomplete="off" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','tribunal',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','tribunal',this,event)"></td>
-      <td data-label="Date dÃ©pÃ´t">
+      <td data-label="Date dépôt">
         <div class="audience-date-field">
           <input class="${dateDepotInvalid ? 'date-input-invalid' : ''}" value="${escapeAttr(dateDepotValue)}" ${canEdit ? '' : 'readonly'} oninput="handleAudienceDateInputFromEncoded('${keyEncoded}','dateDepot',this)" onblur="normalizeAudienceDateDepotDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateDepot',this,event)" aria-invalid="${dateDepotInvalid ? 'true' : 'false'}">
           <div class="date-inline-error" ${dateDepotInvalid ? '' : 'hidden'}>Format invalide (jj/mm/aaaa)</div>
         </div>
       </td>
       <td data-label="Statut">${renderAudienceStatusEditor(row, keyEncoded, canEdit)}</td>
-      <td data-label="ProcÃ©dure">${escapeHtml(procKey || '-')}</td>
+      <td data-label="Procédure">${escapeHtml(procKey || '-')}</td>
       <td data-label="Jugement ADD">
         <div class="audience-jugement-add">
           <button type="button" class="audience-jugement-btn is-ok${jugementAddValue === 'ok' ? ' is-active' : ''}" ${canEdit ? `onclick="setAudienceJugementAddFromEncoded('${keyEncoded}','ok')"` : 'disabled'}>OK</button>

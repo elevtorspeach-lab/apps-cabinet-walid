@@ -19,8 +19,37 @@ function DiligenceSection() {
               <input type="text" id="diligenceLotDuFilter" list="diligenceLotDuOptions" placeholder="" autoComplete="off" />
             </div>
             <div className="audience-color-filter" id="diligenceObservationFilterContainer" style={{ display: 'none' }}>
-              <label htmlFor="diligenceObservationFilter">Observation</label>
-              <input type="text" id="diligenceObservationFilter" list="diligenceObservationOptions" placeholder="" autoComplete="off" />
+              <label htmlFor="diligenceObservationFilterButton">Observation</label>
+              <input type="text" id="diligenceObservationFilter" placeholder="Observation" style={{ display: 'none' }} />
+              <div className="diligence-observation-filter-menu" style={{ position: 'relative' }}>
+                <button id="diligenceObservationFilterButton" className="btn-primary" type="button" style={{ minWidth: 140 }}>
+                  Toutes
+                </button>
+                <div
+                  id="diligenceObservationFilterPanel"
+                  style={{
+                    display: 'none',
+                    position: 'absolute',
+                    zIndex: 50,
+                    top: '100%',
+                    left: 0,
+                    minWidth: 220,
+                    maxHeight: 260,
+                    overflow: 'auto',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    boxShadow: '0 12px 28px rgba(15,23,42,.18)',
+                    padding: 8,
+                  }}
+                >
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 2px' }}>
+                    <input type="checkbox" id="diligenceObservationSelectAll" defaultChecked />
+                    <span>(Selectionner tout)</span>
+                  </label>
+                  <div id="diligenceObservationFilterOptions"></div>
+                </div>
+              </div>
             </div>
             <div className="audience-color-filter" id="diligenceSortFilterContainer">
               <label htmlFor="diligenceSortFilter">Sort</label>
@@ -45,6 +74,24 @@ function DiligenceSection() {
               <select id="diligenceProcedureFilter">
                 <option value="all">Toutes</option>
               </select>
+            </div>
+            <div className="audience-color-filter" id="diligenceSortSciFilterContainer" style={{ display: 'none' }}>
+              <label htmlFor="diligenceSortSciFilter">Sort SCI</label>
+              <select id="diligenceSortSciFilter">
+                <option value="all">Tous</option>
+                <option value="-">-</option>
+                <option value="ATT ENREGISTREMENT">ATT ENREGISTREMENT</option>
+                <option value="CERTIFICAT A RETIRER">CERTIFICAT A RETIRER</option>
+                <option value="SCI ENREGISTRÉE">SCI ENREGISTRÃ‰E</option>
+                <option value="PAS ENREGISTRER">PAS ENREGISTRER</option>
+              </select>
+            </div>
+            <div className="audience-color-filter" id="diligenceSciTfObservationBulkContainer" style={{ display: 'none' }}>
+              <label htmlFor="diligenceSciTfObservationBulkInput">Observation</label>
+              <input type="text" id="diligenceSciTfObservationBulkInput" placeholder="Observation" />
+              <button id="diligenceSciTfObservationBulkBtn" className="btn-primary" type="button">
+                <i className="fa-solid fa-check"></i> Appliquer
+              </button>
             </div>
             <div className="audience-color-filter" id="diligenceMiseAPrixFilterContainer" style={{ display: 'none' }}>
               <label htmlFor="diligenceMiseAPrixFilter">Mise à prix</label>

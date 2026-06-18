@@ -143,6 +143,8 @@ let filterDiligenceTribunal = 'all';
 let filterDiligenceMiseAPrix = 'all';
 let filterDiligenceLotDu = '';
 let filterDiligenceObservation = '';
+let filterDiligenceObservationValues = new Set();
+let filterDiligenceSortSci = 'all';
 let diligenceTribunalAliasMap = new Map();
 let diligenceTribunalLabelMap = new Map();
 let filterDiligenceCheckedFirst = false;
@@ -8385,6 +8387,7 @@ function findDuplicateClientReference(referenceValue, options = {}){
         continue;
       }
       const dossier = dossiers[index];
+      if(isDiligenceOnlyDossier(dossier)) continue;
       if(normalizeReferenceValue(dossier?.referenceClient || '') !== normalizedReference) continue;
       return {
         clientId,
@@ -11500,13 +11503,16 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 }
 
 function ensureManagerUser(users){
+  const sourceUsers = (Array.isArray(users) ? users : [])
+    .filter((user)=>user && typeof user === 'object');
+  if(!sourceUsers.length) return buildSeedUsers();
   const existingUsers = new Map(
-    (Array.isArray(users) ? users : [])
-      .filter(Boolean)
+    sourceUsers
       .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username])=>username)
   );
-  const seedUsers = buildSeedUsers();
+  const seedUsers = buildSeedUsers()
+    .filter((user)=>String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME);
   const fixedUsernames = new Set(seedUsers.map((user)=>String(user?.username || '').trim().toLowerCase()).filter(Boolean));
   const mergedFixedUsers = seedUsers.map((seedUser)=>{
     const existingUser = existingUsers.get(String(seedUser.username || '').trim().toLowerCase());
@@ -11550,8 +11556,7 @@ function ensureManagerUser(users){
   });
   let nextId = mergedFixedUsers.reduce((max, user)=>Math.max(max, Number(user?.id) || 0), 0) + 1;
   const usedIds = new Set(mergedFixedUsers.map((user)=>Number(user?.id)).filter((id)=>Number.isFinite(id)));
-  const extraUsers = (Array.isArray(users) ? users : [])
-    .filter((user)=>user && typeof user === 'object')
+  const extraUsers = sourceUsers
     .map((user)=>({ ...user }))
     .filter((user)=>{
       const username = String(user?.username || '').trim().toLowerCase();
@@ -13811,7 +13816,7 @@ function parseExcelData(rows, sheet = null){
     refRestitution: ['reference dossier restitution', 'réference dossier restitution', 'référence dossier restitution', 'ref dossier restitution'],
     refSfdc: ['reference dossier sfdc', 'réference dossier sfdc', 'référence dossier sfdc', 'ref dossier sfdc'],
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
-    refDossier: ['ref dossier', 'reference dossier', 'rÃ©ference dossier', 'rÃ©fÃ©rence dossier', 'réference dossier', 'référence dossier'],
+    refDossier: ['ref dossier', 'reference dossier', 'réference dossier', 'référence dossier', 'réference dossier', 'référence dossier'],
     refExpertise: ['ref expertise', 'reference expertise', 'reference dossier expertise', 'ref dossier expertise', 'ref expertise dossier'],
     juge: ['juge'],
     ord: ['ord', 'ordre', 'sort ord', 'ordonnance'],
@@ -13833,17 +13838,17 @@ function parseExcelData(rows, sheet = null){
     pubAuJournal: ['pub au journal', 'publication journal'],
     plieCmd: ['plie cmd', 'pli commandement'],
     lotDu: ['lot du', 'lot'],
-    debiteurEp: ['debiteur fr', 'dÃ©biteur fr', 'debiteur ep', 'dÃ©biteur ep'],
-    debiteurAp: ['debiteur ar', 'dÃ©biteur ar', 'debiteur ap', 'dÃ©biteur ap'],
-    cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc dÃ©biteur'],
+    debiteurEp: ['debiteur fr', 'débiteur fr', 'debiteur ep', 'débiteur ep'],
+    debiteurAp: ['debiteur ar', 'débiteur ar', 'debiteur ap', 'débiteur ap'],
+    cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc débiteur'],
     rib: ['rib'],
     banqueFr: ['banque fr', 'banque/ste fr', 'banque ste fr', 'banque / ste fr', 'banque'],
     banqueAr: ['banque ar', 'banque/ste ar', 'banque ste ar', 'banque / ste ar'],
     adresseBranche: ['adresse banque', 'adresse branche', 'adresse bancaire'],
     avocat: ['avocat'],
-    sortPle: ['sort plie', 'sort pliÃ©', 'sort pli', 'plie', 'pliÃ©'],
+    sortPle: ['sort plie', 'sort plié', 'sort pli', 'plie', 'plié'],
     notifBanque: ['notif banque', 'notification banque'],
-    notifDebiteur: ['notif debiteur', 'notif dÃ©biteur', 'notification debiteur', 'notification dÃ©biteur'],
+    notifDebiteur: ['notif debiteur', 'notif débiteur', 'notification debiteur', 'notification débiteur'],
     notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
     notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
     executionNo: [
@@ -13878,7 +13883,8 @@ function parseExcelData(rows, sheet = null){
     certificatNonAppelStatus: ['certificat non appel', 'statut certificat non appel'],
     sort: ['sort'],
     sortExecution: ['sort execution', 'sort exécution', 'sort exec', 'sort exéc'],
-    sortOrd: ['sort ord', 'sord ord', 'sort ordonnance', 'ordonnance', 'statut ordonnance'],
+    sortOrd: ['sort ord', 'sord ord', 'sort ordonnance', 'ordonnance', 'statut ordonnance', 'etat ordonnance', 'état ordonnance'],
+    sortSci: ['sort sci', 'sort sci tf', 'sci sort'],
     observation: ['observation', 'observations', 'obs', 'remarque', 'remarques'],
     tribunal: ['tribunal', 'trib', 'tr'],
     statut: ['statut', 'status', 'etat', 'état', 'statut dossier', 'etat dossier', 'état dossier', 'solde', 'soldé', 'soldée']
@@ -13891,10 +13897,10 @@ function parseExcelData(rows, sheet = null){
   dossierHeaderKeys.sanlamDateAccident = ['date accident', 'date d accident', 'date du sinistre'];
   dossierHeaderKeys.sanlamCinConducteur = ['cin conducteur', 'cni conducteur', 'cin du conducteur', 'cni du conducteur'];
   dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
-  dossierHeaderKeys.cinNonDebiteur = ['cin non debiteur', 'cin non dÃ©biteur', 'cni non debiteur', 'cni non dÃ©biteur', 'cin'];
-  dossierHeaderKeys.efNumber = [...new Set([...(dossierHeaderKeys.efNumber || []), 'tf n', 'tf nÂ°', 'tf no', 'tf numero', 'tf numÃ©ro', 'tf'])];
+  dossierHeaderKeys.cinNonDebiteur = ['cin non debiteur', 'cin non débiteur', 'cni non debiteur', 'cni non débiteur', 'cin'];
+  dossierHeaderKeys.efNumber = [...new Set([...(dossierHeaderKeys.efNumber || []), 'tf n', 'tf n°', 'tf no', 'tf numero', 'tf numéro', 'tf'])];
 
-  dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'dÃ©biteur fr', 'débiteur fr', 'debiteur ep', 'dÃ©biteur ep', 'débiteur ep'])];
+  dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'débiteur fr', 'débiteur fr', 'debiteur ep', 'débiteur ep', 'débiteur ep'])];
 
   const audienceHeaderKeys = {
     adversaire: ['adversaire'],
@@ -14199,6 +14205,7 @@ function parseExcelData(rows, sheet = null){
       certificatNonAppelStatus: getColIndex(dossierColMap, dossierHeaderKeys.certificatNonAppelStatus),
       sortExecution: getColIndex(dossierColMap, dossierHeaderKeys.sortExecution),
       sort: getColIndex(dossierColMap, dossierHeaderKeys.sort),
+      sortSci: getColIndex(dossierColMap, dossierHeaderKeys.sortSci),
       sortOrd: getColIndex(dossierColMap, dossierHeaderKeys.sortOrd),
       tribunal: getColIndex(dossierColMap, dossierHeaderKeys.tribunal),
       statut: getColIndex(dossierColMap, dossierHeaderKeys.statut)
@@ -14315,6 +14322,7 @@ function parseExcelData(rows, sheet = null){
         ? String(row[idx.sortExecution] || '').trim()
         : (idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '');
       const sort = idx.sort !== -1 ? String(row[idx.sort] || '').trim() : '';
+      const sortSci = idx.sortSci !== -1 ? String(row[idx.sortSci] || '').trim() : '';
       const sortOrd = idx.sortOrd !== -1 ? String(row[idx.sortOrd] || '').trim() : '';
       const statutRaw = idx.statut !== -1 ? String(row[idx.statut] || '').trim() : '';
       const isEmptyDossierRow = !refClient && !debiteur && !adversaire && !sanlamNRef && !clientName && !procedureText && !type && !montant && !dateAffectation;
@@ -14354,6 +14362,7 @@ function parseExcelData(rows, sheet = null){
         || banqueAr
         || adresseBranche
         || avocat
+        || sortSci
         || observation
         || sortPle
         || notifBanque
@@ -14515,6 +14524,7 @@ function parseExcelData(rows, sheet = null){
         dateDepot,
         sortExecution,
         sort,
+        sortSci,
         sortOrd,
         tribunal,
         statutRaw
@@ -17882,7 +17892,7 @@ async function exportImportErrorsExcelRobust(){
         if(normalized.includes('hors global') || normalized.includes('hors dossier global')) return { type: 'Hors global', fill: 'FFFFEDD5', font: 'FF9A3412', accent: 'FFEA580C' };
         if(problemType === 'Matching / introuvable') return { type: problemType, fill: 'FFFEE2E2', font: 'FF991B1B', accent: 'FFDC2626' };
         if(problemType === 'Date audience invalide') return { type: problemType, fill: 'FFFEF3C7', font: 'FF92400E', accent: 'FFD97706' };
-        if(problemType === 'ProcÃ©dure' || problemType === 'Procedure') return { type: 'Procedure', fill: 'FFEDE9FE', font: 'FF6D28D9', accent: 'FF7C3AED' };
+        if(problemType === 'Procédure' || problemType === 'Procedure') return { type: 'Procedure', fill: 'FFEDE9FE', font: 'FF6D28D9', accent: 'FF7C3AED' };
         if(problemType === 'Ref client') return { type: problemType, fill: 'FFDCFCE7', font: 'FF166534', accent: 'FF16A34A' };
         if(problemType === 'Ref dossier') return { type: problemType, fill: 'FFE0F2FE', font: 'FF075985', accent: 'FF0284C7' };
         if(problemType === 'Doublon') return { type: problemType, fill: 'FFFCE7F3', font: 'FF9D174D', accent: 'FFDB2777' };
@@ -17994,7 +18004,7 @@ async function exportImportErrorsExcelRobust(){
         ['Hors global', 'Orange fort', 'Audience sans dossier global parent'],
         ['Matching / introuvable', 'Rouge', 'Ref dossier ou liaison introuvable'],
         ['Date audience invalide', 'Jaune', 'Date a corriger dans le fichier'],
-        ['ProcÃ©dure', 'Violet', 'Valeur procedure a verifier'],
+        ['Procédure', 'Violet', 'Valeur procedure a verifier'],
         ['Ref client', 'Vert', 'Ref client incoherente ou absente'],
         ['Ref dossier', 'Bleu', 'Reference dossier a nettoyer'],
         ['Doublon', 'Rose', 'Ligne potentiellement deja importee']
@@ -18964,7 +18974,9 @@ async function applyExcelImport(payload, options = {}){
       && procedures[0] === 'Injonction';
     const isSaisieArretDiligenceRow = diligenceMode
       && procedures.some(proc=>getDiligenceProcedureFilterValue(proc) === 'SAISIE ARRÊT');
-    const forceCreateDiligenceRow = isSaisieArretDiligenceRow;
+    const isSciTfDiligenceRow = diligenceMode
+      && procedures.some(proc=>getDiligenceProcedureFilterValue(proc) === 'SCI TF');
+    const forceCreateDiligenceRow = isSaisieArretDiligenceRow || isSciTfDiligenceRow;
     if(!procedures.length){
       skippedDossiersCount += 1;
       addSkippedImportIssue(`${rowNumberLabel}: dossier ignoré (aucune procédure valide) - Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${dossierContext}`);
@@ -19030,7 +19042,7 @@ async function applyExcelImport(payload, options = {}){
     if(forceCreateDiligenceRow){
       dossier.isDiligenceOnly = true;
       dossier.isDiligenceManualEntry = false;
-      dossier.creationSource = 'diligence-saisie-arret-import';
+      dossier.creationSource = isSciTfDiligenceRow ? 'diligence-sci-tf-line-import' : 'diligence-saisie-arret-import';
       dossier.hideFromSuivi = true;
     }
 
@@ -19238,7 +19250,12 @@ async function applyExcelImport(payload, options = {}){
         details.attOrdOrOrdOk = importedOrdonnanceStatus === 'ok' ? 'ord ok' : 'att ord';
       }
       if(baseProc === 'SCI TF'){
-        applyDiligenceImportValue(details, 'sortSci', String(row.sort || row.sortExecution || '').trim());
+        applyDiligenceImportValue(details, 'lotDu', String(row.lotDu || '').trim());
+        applyDiligenceImportValue(details, 'efNumber', String(row.efNumber || '').trim());
+        applyDiligenceImportValue(details, 'conservation', String(row.conservation || '').trim());
+        applyDiligenceImportValue(details, 'adresse', String(row.adresse || '').trim());
+        applyDiligenceImportValue(details, 'avocat', String(row.avocat || '').trim());
+        applyDiligenceImportValue(details, 'sortSci', normalizeDiligenceSortSciValue(row.sortSci || row.sort || row.sortExecution || ''));
         return;
       }
       if(String(row.sortExecution || '').trim()){
@@ -20891,6 +20908,49 @@ function setupEvents(){
     filterDiligenceObservation = String(e.target?.value || '').trim();
     paginationState.diligence = 1;
     renderDiligenceDebounced();
+  });
+  ensureDiligenceSciTfObservationStyle();
+  ensureDiligenceObservationOptionSearchInput();
+  $('diligenceObservationFilterButton')?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const panel = $('diligenceObservationFilterPanel');
+    if(panel){
+      const willOpen = panel.style.display === 'none' || !panel.style.display;
+      panel.style.display = willOpen ? 'block' : 'none';
+      if(willOpen) setTimeout(()=>$('diligenceObservationOptionSearch')?.focus(), 0);
+    }
+  });
+  $('diligenceObservationOptionSearch')?.addEventListener('input', ()=>{
+    syncDiligenceObservationFilterOptions(getDiligenceRowsScopedForAuxFilters(getDiligenceRows()));
+  });
+  $('diligenceObservationSelectAll')?.addEventListener('change', ()=>{
+    filterDiligenceObservationValues = new Set();
+    paginationState.diligence = 1;
+    closeDiligenceObservationFilterPanel();
+    renderDiligence();
+  });
+  $('diligenceObservationFilterOptions')?.addEventListener('change', (e)=>{
+    const input = e.target;
+    if(!input || !input.classList?.contains('diligence-observation-option')) return;
+    const value = String(input.value || '').trim();
+    const next = new Set(filterDiligenceObservationValues);
+    if(input.checked) next.add(value);
+    else next.delete(value);
+    filterDiligenceObservationValues = next;
+    paginationState.diligence = 1;
+    renderDiligence();
+  });
+  $('diligenceSortSciFilter')?.addEventListener('change', (e)=>{
+    const rawValue = String(e.target?.value || 'all');
+    filterDiligenceSortSci = rawValue === 'all' ? 'all' : (normalizeDiligenceSortSciValue(rawValue) || 'all');
+    paginationState.diligence = 1;
+    renderDiligence();
+  });
+  $('diligenceSciTfObservationBulkBtn')?.addEventListener('click', applyDiligenceSciTfObservationToCheckedRows);
+  document.addEventListener('click', (e)=>{
+    const menu = e.target?.closest?.('.diligence-observation-filter-menu');
+    if(menu) return;
+    closeDiligenceObservationFilterPanel();
   });
   $('diligenceSortFilter')?.addEventListener('change', (e)=>{
     const nextValue = applyDiligenceFilterSelectionToCheckedRows('sort', e.target?.value);
@@ -23566,6 +23626,7 @@ function editDossier(clientId, index){
   if(!canEditClient(client)) return alert('Accès refusé');
   const d = client.dossiers[index];
   if(!d) return;
+  if(isDiligenceOnlyDossier(d)) return;
   editingDossier = { clientId, index };
   editingOriginalProcedures = normalizeProcedures(d);
   showView('creation');
@@ -24656,6 +24717,15 @@ function isDiligenceSciTfProcedure(procedure){
   return getDiligenceProcedureFilterValue(procedure) === 'SCI TF';
 }
 
+function isDiligenceSciTfFilterSelected(){
+  if(isDiligenceSciTfProcedure(filterDiligenceProcedure)) return true;
+  const select = $('diligenceProcedureFilter');
+  if(!select) return false;
+  const selectedOption = select.options?.[select.selectedIndex];
+  return isDiligenceSciTfProcedure(select.value)
+    || isDiligenceSciTfProcedure(selectedOption?.textContent || '');
+}
+
 function isCasablancaTpiTribunal(tribunal){
   const raw = String(tribunal || '').trim().toLowerCase();
   if(!raw) return false;
@@ -24884,6 +24954,116 @@ function getDiligenceRowsScopedForAuxFilters(rows){
   return list.filter(row=>matchesDiligenceProcedureFilter(row, filterDiligenceProcedure));
 }
 
+function getDiligenceObservationFilterValuesKey(){
+  return [...filterDiligenceObservationValues].sort((a, b)=>a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true })).join('\u001f');
+}
+
+function getDiligenceObservationFilterLabel(value){
+  return String(value || '').trim() || '(vide)';
+}
+
+function getDiligenceRowObservationFilterValue(row){
+  return String(row?.details?.observation || '').trim();
+}
+
+function ensureDiligenceSciTfObservationStyle(){
+  if(document.getElementById('diligenceSciTfObservationStyle')) return;
+  const style = document.createElement('style');
+  style.id = 'diligenceSciTfObservationStyle';
+  style.textContent = `
+    .diligence-sci-tf-observation-cell,
+    .diligence-sci-tf-observation-cell input,
+    .diligence-sci-tf-observation-cell textarea,
+    .diligence-sci-tf-observation-cell select{
+      color:#1d4ed8 !important;
+      font-weight:600;
+    }
+    #diligenceSection .diligence-sci-tf-observation-cell{
+      background:#eef2ff !important;
+      box-shadow:inset 3px 0 0 #818cf8 !important;
+    }
+    #diligenceSection .diligence-sci-tf-observation-cell .diligence-inline-input{
+      border-color:#a5b4fc !important;
+      background:#f8f7ff !important;
+      color:#172554 !important;
+      font-weight:600 !important;
+    }
+    #diligenceSection tbody tr:hover .diligence-sci-tf-observation-cell{
+      background:#e0e7ff !important;
+    }
+    #diligenceSection tbody tr:hover .diligence-sci-tf-observation-cell .diligence-inline-input{
+      background:#f5f3ff !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function ensureDiligenceObservationOptionSearchInput(){
+  const panel = $('diligenceObservationFilterPanel');
+  if(!panel || $('diligenceObservationOptionSearch')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'diligenceObservationOptionSearch';
+  input.placeholder = 'Rechercher';
+  input.autocomplete = 'off';
+  input.style.cssText = 'width:100%;box-sizing:border-box;margin:0 0 8px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:4px;';
+  panel.insertBefore(input, panel.firstChild);
+  input.addEventListener('input', ()=>{
+    syncDiligenceObservationFilterOptions(getDiligenceRowsScopedForAuxFilters(getDiligenceRows()));
+  });
+}
+
+function closeDiligenceObservationFilterPanel(){
+  const panel = $('diligenceObservationFilterPanel');
+  if(panel) panel.style.display = 'none';
+}
+
+function updateDiligenceObservationFilterButtonLabel(optionCount = 0){
+  const button = $('diligenceObservationFilterButton');
+  if(!button) return;
+  const selectedCount = filterDiligenceObservationValues.size;
+  if(!selectedCount){
+    button.textContent = 'Toutes';
+    return;
+  }
+  if(selectedCount === 1){
+    button.textContent = getDiligenceObservationFilterLabel([...filterDiligenceObservationValues][0]);
+    return;
+  }
+  button.textContent = `${selectedCount}/${optionCount || selectedCount}`;
+}
+
+function syncDiligenceObservationFilterOptions(rows){
+  ensureDiligenceObservationOptionSearchInput();
+  const optionsBox = $('diligenceObservationFilterOptions');
+  const selectAll = $('diligenceObservationSelectAll');
+  const searchInput = $('diligenceObservationOptionSearch');
+  if(!optionsBox) return;
+  const values = [...new Set((Array.isArray(rows) ? rows : [])
+    .filter(row=>isDiligenceSciTfProcedure(row?.procedure) || isDiligenceSaisieArretProcedure(row?.procedure))
+    .map(getDiligenceRowObservationFilterValue))]
+    .sort((a, b)=>getDiligenceObservationFilterLabel(a).localeCompare(getDiligenceObservationFilterLabel(b), 'fr', { sensitivity: 'base', numeric: true }));
+  const optionQuery = normalizeDiligenceSearchQuery(searchInput?.value || '');
+  const visibleValues = optionQuery
+    ? values.filter(value=>normalizeDiligenceSearchQuery(getDiligenceObservationFilterLabel(value)).includes(optionQuery))
+    : values;
+  filterDiligenceObservationValues = new Set([...filterDiligenceObservationValues].filter(value=>values.includes(value)));
+  optionsBox.innerHTML = visibleValues.map((value, index)=>{
+    const id = `diligenceObservationOption_${index}`;
+    return `
+      <label for="${id}" style="display:flex;gap:8px;align-items:center;padding:4px 2px;white-space:nowrap;">
+        <input type="checkbox" id="${id}" class="diligence-observation-option" value="${escapeAttr(value)}" ${filterDiligenceObservationValues.has(value) ? 'checked' : ''}>
+        <span>${escapeHtml(getDiligenceObservationFilterLabel(value))}</span>
+      </label>
+    `;
+  }).join('') || `<div style="padding:4px 2px;color:#64748b;">${values.length ? 'Aucun resultat' : 'Aucune observation'}</div>`;
+  if(selectAll){
+    selectAll.checked = filterDiligenceObservationValues.size === 0;
+    selectAll.indeterminate = filterDiligenceObservationValues.size > 0 && filterDiligenceObservationValues.size < values.length;
+  }
+  updateDiligenceObservationFilterButtonLabel(values.length);
+}
+
 function resetDiligenceAuxFilters(){
   filterDiligenceSort = 'all';
   filterDiligenceDelegation = 'all';
@@ -24891,8 +25071,12 @@ function resetDiligenceAuxFilters(){
   filterDiligenceTribunal = 'all';
   filterDiligenceLotDu = '';
   filterDiligenceObservation = '';
+  filterDiligenceObservationValues = new Set();
+  filterDiligenceSortSci = 'all';
   const sortSelect = $('diligenceSortFilter');
   if(sortSelect) sortSelect.value = 'all';
+  const sortSciSelect = $('diligenceSortSciFilter');
+  if(sortSciSelect) sortSciSelect.value = 'all';
   const delegationSelect = $('diligenceDelegationFilter');
   if(delegationSelect) delegationSelect.value = 'all';
   const ordonnanceSelect = $('diligenceOrdonnanceFilter');
@@ -24903,6 +25087,10 @@ function resetDiligenceAuxFilters(){
   if(lotDuInput) lotDuInput.value = '';
   const observationInput = $('diligenceObservationFilter');
   if(observationInput) observationInput.value = '';
+  const observationOptionSearch = $('diligenceObservationOptionSearch');
+  if(observationOptionSearch) observationOptionSearch.value = '';
+  closeDiligenceObservationFilterPanel();
+  updateDiligenceObservationFilterButtonLabel();
 }
 
 function syncDiligenceProcedureFilter(rows){
@@ -25064,6 +25252,31 @@ function getDiligenceOrdonnanceLabelFromDetails(details){
   if(status === 'ok') return 'ORD OK';
   if(status === 'att') return 'ATT ORD';
   return '';
+}
+
+function normalizeDiligenceSortSciValue(value){
+  const raw = String(value ?? '').trim();
+  if(!raw) return '';
+  const normalized = normalizeLooseText(raw)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if(normalized === '-') return '-';
+  if(normalized.includes('att') && (normalized.includes('enregistrement') || normalized.includes('enregistrer') || normalized.includes('enregister'))){
+    return 'ATT ENREGISTREMENT';
+  }
+  if(normalized.includes('certificat') && normalized.includes('retirer')){
+    return 'CERTIFICAT A RETIRER';
+  }
+  if(normalized.includes('sci') && (normalized.includes('enregistree') || normalized.includes('enregistrer') || normalized.includes('enregister'))){
+    return 'SCI ENREGISTRÉE';
+  }
+  if(normalized.includes('pas') && (normalized.includes('enregistrer') || normalized.includes('enregister') || normalized.includes('enregistree'))){
+    return 'PAS ENREGISTRER';
+  }
+  return raw;
 }
 
 function getDiligenceOrdonnanceSearchValues(value, notificationNo = ''){
@@ -25538,7 +25751,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     `;
   }
   if(field === 'sortSci'){
-    const val = String(value || '').trim();
+    const val = normalizeDiligenceSortSciValue(value);
     if(!row?.canEdit){
       return escapeHtml(val || '-');
     }
@@ -25547,9 +25760,11 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
         class="diligence-inline-select"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         <option value="" ${val === '' ? 'selected' : ''}>Sort SCI</option>
-        <option value="att enregistrer" ${val === 'att enregistrer' ? 'selected' : ''}>ATT ENREGISTRER</option>
-        <option value="sci enregistrer" ${val === 'sci enregistrer' ? 'selected' : ''}>SCI ENREGISTRER</option>
-        <option value="pas enregistrer" ${val === 'pas enregistrer' ? 'selected' : ''}>PAS ENREGISTRER</option>
+        <option value="-" ${val === '-' ? 'selected' : ''}>-</option>
+        <option value="ATT ENREGISTREMENT" ${val === 'ATT ENREGISTREMENT' ? 'selected' : ''}>ATT ENREGISTREMENT</option>
+        <option value="CERTIFICAT A RETIRER" ${val === 'CERTIFICAT A RETIRER' ? 'selected' : ''}>CERTIFICAT A RETIRER</option>
+        <option value="SCI ENREGISTRÉE" ${val === 'SCI ENREGISTRÉE' ? 'selected' : ''}>SCI ENREGISTRÉE</option>
+        <option value="PAS ENREGISTRER" ${val === 'PAS ENREGISTRER' ? 'selected' : ''}>PAS ENREGISTRER</option>
       </select>
     `;
   }
@@ -25821,7 +26036,9 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
     || field === 'gestionnaire'
     || field === 'cinNonDebiteur'
     || field === 'debiteur'
+    || field === 'caution'
     || field === 'montant'
+    || field === 'type'
     || (field === 'efNumber' && !isDiligenceSciTfProcedure(proc))
     || (field === 'conservation' && !isDiligenceSciTfProcedure(proc))
     || field === 'statut';
@@ -25834,8 +26051,10 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
     nextValue = isDiligenceExecutionProcedure(proc) && !isDiligenceFreeTextExecutionSortProcedure(proc)
       ? normalizeDiligenceSort(value)
       : String(value ?? '').trim();
-  }else if(field === 'notificationSort' || field === 'sortSci'){
+  }else if(field === 'notificationSort'){
     nextValue = String(value ?? '').trim();
+  }else if(field === 'sortSci'){
+    nextValue = normalizeDiligenceSortSciValue(value);
   }else if(field === 'paiement'){
     nextValue = String(value ?? '').trim() === 'payer' ? 'payer' : 'att';
   }else if(field === 'lettreRec'){
@@ -26017,6 +26236,40 @@ async function deleteCheckedDiligenceSaisieArretDossiers(){
   refreshPrimaryViews({ includeRecycle: true, force: true, showView: 'diligence' });
 }
 
+function syncDiligenceSciTfObservationBulkVisibility(){
+  const container = $('diligenceSciTfObservationBulkContainer');
+  if(!container) return;
+  container.style.display = isDiligenceSciTfFilterSelected() && canEditData() ? '' : 'none';
+}
+
+function applyDiligenceSciTfObservationToCheckedRows(){
+  if(!canEditData()) return alert('Modification non autorisee');
+  const input = $('diligenceSciTfObservationBulkInput');
+  const value = String(input?.value || '').trim();
+  if(!value) return alert('Saisissez une observation.');
+  const rows = getCheckedDiligenceRowsForBatchUpdate().filter(row=>isDiligenceSciTfProcedure(row?.procedure));
+  if(!rows.length) return alert('Selectionnez au moins un dossier SCI TF.');
+  let changed = false;
+  const changedDossiers = new Map();
+  rows.forEach(row=>{
+    const result = applyDiligenceFieldValue(row.clientId, row.dossierIndex, row.procedure, 'observation', value);
+    if(!result.changed) return;
+    changed = true;
+    const dossier = result.dossier && typeof result.dossier === 'object' ? result.dossier : null;
+    if(!dossier) return;
+    const changeKey = `${Number(result.clientId) || 0}::${getDossierHistoryObjectId(dossier)}`;
+    changedDossiers.set(changeKey, { clientId: result.clientId, dossier });
+  });
+  if(!changed) return;
+  if(input) input.value = '';
+  clearDiligencePrintSelection({ immediate: true });
+  handleDossierDataChange({ audience: false, rerenderLinked: true });
+  [...changedDossiers.values()].forEach(entry=>{
+    persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'diligence-sci-tf-observation-batch' }).catch(()=>{});
+  });
+  renderDiligence({ force: true });
+}
+
 function shouldBatchUpdateCheckedDiligenceRows(clientId, dossierIndex, procKey, field){
   if(!DILIGENCE_BATCH_UPDATE_FIELDS.has(String(field || '').trim())) return false;
   if(!diligencePrintSelection.size) return false;
@@ -26134,6 +26387,7 @@ function getFilteredDiligenceRows(allRows){
   const q = normalizeDiligenceSearchQuery($('diligenceSearchInput')?.value || '');
   const lotDuQuery = normalizeDiligenceSearchQuery(filterDiligenceLotDu);
   const observationQuery = normalizeDiligenceSearchQuery(filterDiligenceObservation);
+  const observationValuesKey = getDiligenceObservationFilterValuesKey();
   const executionOnlyQuery = isDiligenceExecutionOnlyQuery(q);
   const restrictAssAttOrdToAudience = shouldRestrictDiligenceAssAttOrdToAudience();
   const audienceAssAttOrdKeySet = restrictAssAttOrdToAudience ? getDiligenceAudienceAssAttOrdKeySet() : null;
@@ -26148,6 +26402,8 @@ function getFilteredDiligenceRows(allRows){
     filterDiligenceMiseAPrix,
     lotDuQuery,
     observationQuery,
+    observationValuesKey,
+    filterDiligenceSortSci,
     restrictAssAttOrdToAudience ? `audience-green-only:${audienceAssAttOrdKeySet?.size || 0}` : 'all-ass-att-ord'
   ].join('||');
   if(allRows === diligenceFilteredRowsCacheInput && filterKey === diligenceFilteredRowsCacheKey){
@@ -26168,6 +26424,16 @@ function getFilteredDiligenceRows(allRows){
     if(restrictAssAttOrdToAudience && isDiligenceAssProcedure(row?.procedure) && !audienceAssAttOrdKeySet?.has(makeDiligencePrintKey(row?.clientId, row?.dossierIndex, row?.procedure))) return false;
     if(filterDiligenceTribunal !== 'all' && resolveDiligenceTribunalFilterKey(row.tribunalFilterKey || row.tribunal) !== filterDiligenceTribunal) return false;
     if(lotDuQuery && !normalizeDiligenceSearchQuery(row?.details?.lotDu || '').includes(lotDuQuery)) return false;
+    if(
+      isDiligenceSciTfProcedure(row?.procedure)
+      && filterDiligenceSortSci !== 'all'
+      && normalizeDiligenceSortSciValue(row?.details?.sortSci || '') !== filterDiligenceSortSci
+    ) return false;
+    if(
+      (isDiligenceSciTfProcedure(row?.procedure) || isDiligenceSaisieArretProcedure(row?.procedure))
+      && filterDiligenceObservationValues.size
+      && !filterDiligenceObservationValues.has(getDiligenceRowObservationFilterValue(row))
+    ) return false;
     if(observationQuery && !normalizeDiligenceSearchQuery(row?.details?.observation || '').includes(observationQuery)) return false;
     if(filterDiligenceMiseAPrix === 'vide'){
       const miseAPrixVal = String(row?.details?.miseAPrix || '').trim();
@@ -26441,8 +26707,7 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Réf client', width: 26, getValue: (row)=>row?.dossier?.referenceClient || '' },
       { header: 'CIN', width: 20, getValue: (row)=>row?.dossier?.cinNonDebiteur || '' },
       { header: 'Débiteur', width: 30, getValue: (row)=>row?.dossier?.debiteur || '' },
-      { header: 'Adresse', width: 34, getValue: (row)=>row?.dossier?.adresse || '' },
-      { header: 'Montant', width: 18, getValue: (row)=>row?.dossier?.montant || '' },
+      { header: 'NOM CAUTION', width: 28, getValue: (row)=>row?.dossier?.caution || '' },
       { header: 'TF N°', width: 18, getValue: (row)=>row?.details?.efNumber || row?.dossier?.efNumber || '' },
       { header: 'Conservation', width: 24, getValue: (row)=>row?.details?.conservation || row?.dossier?.conservation || '' },
       { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
@@ -26451,8 +26716,12 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'État ordonnance', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
       { header: 'Sort SCI', width: 22, getValue: (row)=>row?.details?.sortSci || '' },
       { header: 'Tribunal', width: 34, getValue: (row)=>getDiligenceTribunalCellValue(row) },
+      { header: 'Adresse', width: 34, getValue: (row)=>row?.details?.adresse || row?.dossier?.adresse || '' },
+      { header: 'Montant', width: 18, getValue: (row)=>row?.dossier?.montant || '' },
       { header: 'Statut', width: 20, getValue: (row)=>row?.dossier?.statut || '' },
-      { header: 'Boîte', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' }
+      { header: 'Boîte', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' },
+      { header: 'AVOCAT', width: 24, getValue: (row)=>row?.details?.avocat || '' },
+      { header: 'TYPE', width: 16, getValue: (row)=>row?.dossier?.type || '' }
     ];
     const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
     return {
@@ -27312,7 +27581,7 @@ async function saveTeamUser(){
       renderEquipe({ force: true });
       renderTeamHistory({ force: true });
       resetTeamForm();
-      alert(isEditing ? 'Compte mis ÃƒÆ’Ã‚Â  jour avec succÃƒÆ’Ã‚Â¨s.' : 'Compte crÃƒÆ’Ã‚Â©ÃƒÆ’Ã‚Â© avec succÃƒÆ’Ã‚Â¨s.');
+      alert(isEditing ? 'Compte mis à jour avec succès.' : 'Compte créé avec succès.');
       return;
     }
   }catch(err){
@@ -27381,7 +27650,7 @@ async function saveTeamUser(){
   renderEquipe();
   renderTeamHistory({ force: true });
   resetTeamForm();
-  alert(isEditing ? 'Compte mis Ã  jour avec succÃ¨s.' : 'Compte crÃ©Ã© avec succÃ¨s.');
+  alert(isEditing ? 'Compte mis à jour avec succès.' : 'Compte créé avec succès.');
 }
 
 function editTeamUser(userId){
@@ -27403,7 +27672,7 @@ function editTeamUser(userId){
   if($('teamSaveBtn')) $('teamSaveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Mettre à jour';
 }
 
-function deleteTeamUser(userId){
+async function deleteTeamUser(userId){
   if(!canManageTeam()) return;
   const user = USERS.find(u=>u.id === userId);
   if(!user) return;
@@ -27423,6 +27692,35 @@ function deleteTeamUser(userId){
   }
   const previousUsersSnapshot = JSON.parse(JSON.stringify(USERS));
   const previousTeamHistorySnapshot = JSON.parse(JSON.stringify(AppState.teamHistory || []));
+  try{
+    await resolveApiBase();
+    const response = await fetchWithTimeout(`${API_BASE}/team/users/delete`, {
+      method: 'POST',
+      headers: buildRemoteAuthHeaders({
+        'Content-Type': 'application/json'
+      }),
+      body: JSON.stringify({ id: userId })
+    }, 10000);
+    if(response.ok){
+      const payload = await response.json().catch(()=>null);
+      if(payload && typeof payload === 'object'){
+        updateRemoteStateMetadata(payload);
+      }
+      USERS = ensureManagerUser(USERS.filter(u=>u.id !== userId));
+      if(Array.isArray(payload?.teamHistory)){
+        AppState.teamHistory = normalizeTeamHistoryEntries(payload.teamHistory);
+      }
+      syncCurrentUserFromUsers();
+      renderEquipe({ force: true });
+      renderTeamHistory({ force: true });
+      if(editingTeamUserId === userId) resetTeamForm();
+      return;
+    }
+    const payload = await response.json().catch(()=>null);
+    if(payload?.message) return alert(payload.message);
+  }catch(err){
+    console.warn('Team user delete API indisponible, fallback local', err);
+  }
   USERS = USERS.filter(u=>u.id !== userId);
   recordTeamUserHistory('delete', user, null);
   persistAppStateNow().catch((err)=>{
@@ -28134,7 +28432,7 @@ function isAudienceProcedure(procName){
   if(isAudienceSaisieArretProcedure(raw)) return false;
   const value = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   if(!value) return true;
-  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement';
+  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement' && value !== 'scitf' && value !== 'nantissementmed';
 }
 
 function getAudienceProcedureFilterKey(procName){
@@ -30645,11 +30943,11 @@ function buildSuiviRowsFromAudienceExportRows(audienceRows){
 }
 
 async function exportAudienceRegularXLS(options = {}){
-  if(!canExportData()) return alert('AccÃ¨s refusÃ©');
+  if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     const exportRows = getAudienceRowsForRegularExport();
     if(!exportRows.length){
-      alert("Aucune ligne d'audience Ã  exporter.");
+      alert("Aucune ligne d'audience à exporter.");
       return;
     }
     const suiviRows = buildSuiviRowsFromAudienceExportRows(exportRows);
@@ -30712,7 +31010,7 @@ function sanitizeAudienceExportSheetName(value, usedNames){
 async function exportAudienceWorkbookByTribunal(dataset, options = {}){
   const directExportHandlePromise = primeDirectExportDirectoryAccess();
   if(false)
-    alert('Export XLSX indisponible: librairie Excel non chargÃ©e.');
+    alert('Export XLSX indisponible: librairie Excel non chargée.');
   const headers = sanitizeExcelExportRow(dataset.headers);
   const subtitle = stripExcelBidiControlChars(dataset.subtitle || '');
   const editionDateText = formatDateDDMMYYYY(new Date());
@@ -30915,7 +31213,7 @@ async function exportAudienceXLS(options = {}){
 }
 
 async function exportAudienceDiligenceXLS(options = {}){
-  if(!canExportData()) return alert('AccÃ¨s refusÃ©');
+  if(!canExportData()) return alert('Accès refusé');
   return runWithHeavyUiOperation(async ()=>{
     const dataset = await buildAudienceDiligenceExportDatasetAsync();
     if(!dataset.rows.length){
@@ -32131,6 +32429,10 @@ function applyProcedureFieldValues(container, values){
       fieldEl.value = normalizeDiligenceAttOk(values[key]) === 'ok' ? 'ok' : 'att';
       return;
     }
+    if(fieldEl.tagName === 'SELECT' && key === 'sortSci'){
+      fieldEl.value = normalizeDiligenceSortSciValue(values[key]);
+      return;
+    }
     fieldEl.value = values[key];
   });
 }
@@ -32387,7 +32689,7 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
           <option value="att ord" selected>att ord</option>
           <option value="ord ok">ord ok</option>
         </select>
-        <input type="text" data-field="notifCurateurNo" placeholder="Notif NÂ°">
+        <input type="text" data-field="notifCurateurNo" placeholder="Notif N°">
         <input type="text" data-field="curateurSortNotif" placeholder="Sort notif">
         <input type="text" data-field="tribunal" list="${PROCEDURE_TRIBUNAL_DATALIST_ID}" placeholder="Tribunal" autocomplete="off">
       </div>
@@ -32432,9 +32734,11 @@ function buildProcedureCardFieldsHtml(procName, baseProc, tribunalFieldHtml, add
       </select>
       <select data-field="sortSci">
         <option value="">Sort SCI</option>
-        <option value="att enregistrer">ATT ENREGISTRER</option>
-        <option value="sci enregistrer">SCI ENREGISTRER</option>
-        <option value="pas enregistrer">PAS ENREGISTRER</option>
+        <option value="-">-</option>
+        <option value="ATT ENREGISTREMENT">ATT ENREGISTREMENT</option>
+        <option value="CERTIFICAT A RETIRER">CERTIFICAT A RETIRER</option>
+        <option value="SCI ENREGISTRÉE">SCI ENREGISTRÉE</option>
+        <option value="PAS ENREGISTRER">PAS ENREGISTRER</option>
       </select>
       ${tribunalFieldHtml}
     `;
@@ -33017,19 +33321,35 @@ function syncDiligenceMiseAPrixFilterVisibility(){
 
 function syncDiligenceSaisieArretFilterVisibility(){
   const lotDuContainer = $('diligenceLotDuFilterContainer');
+  const sortSciContainer = $('diligenceSortSciFilterContainer');
   const observationContainer = $('diligenceObservationFilterContainer');
+  const observationInput = $('diligenceObservationFilter');
+  const observationMenu = document.querySelector('#diligenceObservationFilterContainer .diligence-observation-filter-menu');
+  const sciTfObservationBulkContainer = $('diligenceSciTfObservationBulkContainer');
   const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
   const delegationContainer = $('diligenceDelegationFilterContainer') || $('diligenceDelegationFilter')?.closest?.('.audience-color-filter');
   const addBtn = $('addDiligenceSaisieArretBtn');
   const importBtn = $('importDiligenceSaisieArretBtn');
+  const normalImportBtn = $('importDiligenceBtn');
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
-  const isSciTf = isDiligenceSciTfProcedure(filterDiligenceProcedure);
+  const isSciTf = isDiligenceSciTfFilterSelected();
   const hideSort = show || isSciTf;
   const useDelegationFilter = shouldUseDiligenceDelegationFilter(filterDiligenceProcedure) || show;
-  if(lotDuContainer) lotDuContainer.style.display = show ? 'inline-block' : 'none';
-  if(observationContainer) observationContainer.style.display = show ? 'inline-block' : 'none';
+  if(lotDuContainer) lotDuContainer.style.display = show ? '' : 'none';
+  if(sortSciContainer) sortSciContainer.style.display = isSciTf ? '' : 'none';
+  if(observationContainer) observationContainer.style.display = (show || isSciTf) ? '' : 'none';
+  if(observationInput) observationInput.style.display = 'none';
+  if(observationMenu) observationMenu.style.display = (show || isSciTf) ? 'block' : 'none';
+  if(sciTfObservationBulkContainer) sciTfObservationBulkContainer.style.display = isSciTf && canEditData() ? '' : 'none';
+  if(!isSciTf){
+    filterDiligenceSortSci = 'all';
+    const sortSciSelect = $('diligenceSortSciFilter');
+    if(sortSciSelect) sortSciSelect.value = 'all';
+  }
+  if(!show && !isSciTf) closeDiligenceObservationFilterPanel();
   if(addBtn) addBtn.style.display = show && canEditData() ? '' : 'none';
   if(importBtn) importBtn.style.display = show && canImportData() ? '' : 'none';
+  if(normalImportBtn) normalImportBtn.style.display = show ? 'none' : '';
   if(hideSort){
     filterDiligenceSort = 'all';
     const sortSelect = $('diligenceSortFilter');
@@ -33040,9 +33360,10 @@ function syncDiligenceSaisieArretFilterVisibility(){
     const delegationSelect = $('diligenceDelegationFilter');
     if(delegationSelect) delegationSelect.value = 'all';
   }
-  if(sortContainer) sortContainer.style.display = hideSort ? 'none' : 'inline-block';
-  if(delegationContainer) delegationContainer.style.display = useDelegationFilter ? 'inline-block' : 'none';
+  if(sortContainer) sortContainer.style.display = hideSort ? 'none' : '';
+  if(delegationContainer) delegationContainer.style.display = useDelegationFilter ? '' : 'none';
   syncDiligenceSaisieArretDeleteButton();
+  syncDiligenceSciTfObservationBulkVisibility();
 }
 
 // Final override: keep audience date validation inline and non-blocking.

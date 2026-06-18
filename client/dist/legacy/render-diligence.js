@@ -11,6 +11,8 @@ function getDiligenceFilterStateKey(query){
     filterDiligenceTribunal,
     normalizeDiligenceSearchQuery(filterDiligenceLotDu || ''),
     normalizeDiligenceSearchQuery(filterDiligenceObservation || ''),
+    typeof getDiligenceObservationFilterValuesKey === 'function' ? getDiligenceObservationFilterValuesKey() : '',
+    typeof filterDiligenceSortSci === 'undefined' ? 'all' : filterDiligenceSortSci,
     filterDiligenceCheckedFirst ? 'checked-first' : 'default'
   ].join('||');
 }
@@ -116,7 +118,7 @@ function shouldShowDiligenceNantissementMedColumns(rows){
 }
 
 function getDiligenceColCount(){
-  if(diligenceVirtualCompactProcedureMode === 'scitf') return 17;
+  if(diligenceVirtualCompactProcedureMode === 'scitf') return 20;
   if(diligenceVirtualCompactProcedureMode === 'nantissementmed') return 12;
   if(diligenceVirtualCompactProcedureMode === 'saisiearret') return 24;
   if(diligenceVirtualShowCommandementColumns){
@@ -177,8 +179,7 @@ function buildDiligenceHeadHtml(){
       <th>R&eacute;f client</th>
       <th>CIN</th>
       <th>D&eacute;biteur</th>
-      <th>Adresse</th>
-      <th>Montant</th>
+      <th>NOM CAUTION</th>
       <th>TF N&deg;</th>
       <th>Conservation</th>
       <th>Observation</th>
@@ -187,8 +188,12 @@ function buildDiligenceHeadHtml(){
       <th>&Eacute;tat ordonnance</th>
       <th>Sort SCI</th>
       <th>Tribunal</th>
+      <th>Adresse</th>
+      <th>Montant</th>
       <th>Statut</th>
       <th>Bo&icirc;te</th>
+      <th>AVOCAT</th>
+      <th>TYPE</th>
     `;
   }
   if(diligenceVirtualCompactProcedureMode === 'nantissementmed'){
@@ -429,18 +434,21 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${escapeHtml(row.dossier?.referenceClient || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'cinNonDebiteur', row.dossier?.cinNonDebiteur || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteur', row.dossier?.debiteur || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', row.details?.adresse || row.dossier?.adresse || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', row.dossier?.montant || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'caution', row.dossier?.caution || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'efNumber', row.details?.efNumber || row.dossier?.efNumber || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'conservation', row.details?.conservation || row.dossier?.conservation || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+        <td class="diligence-sci-tf-observation-cell">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'dateDepot', row.details?.dateDepot || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', row.details?.referenceClient || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'attOrdOrOrdOk', row.details?.attOrdOrOrdOk || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sortSci', row.details?.sortSci || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', row.details?.adresse || row.dossier?.adresse || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', row.dossier?.montant || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'statut', row.dossier?.statut || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'avocat', row.details?.avocat || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'type', row.dossier?.type || '')}</td>
       </tr>
     `;
   }
@@ -550,7 +558,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, notificationNoField, notificationNoValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'plie', row.details?.plie || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, notificationSortField, notificationSortValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+        <td class="diligence-nantissement-observation-cell">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
         ${nbFollowupCells}
         <td>${renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue)}</td>
@@ -683,7 +691,7 @@ function renderDiligenceRowHtml(row, showPlieColumn){
       <td>${renderDiligenceEditableCell(row, procEncoded, notificationNoField, notificationNoValue)}</td>
       ${showPlieColumn ? `<td>${isAssLikeProcedure ? renderDiligenceEditableCell(row, procEncoded, 'plie', row.details?.plie || '') : ''}</td>` : ''}
       <td>${renderDiligenceEditableCell(row, procEncoded, notificationSortField, notificationSortValue)}</td>
-      <td>${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
+      <td class="${showCompactInjonctionColumns ? 'diligence-injonction-observation-cell' : (isDiligenceAssProcedure(row?.procedure) ? 'diligence-ass-observation-cell' : (isDiligenceNantissementProcedure(row?.procedure) ? 'diligence-nantissement-observation-cell' : ''))}">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
     `
     : '';
   const curateurStandaloneCells = `
@@ -831,6 +839,9 @@ function renderDiligence(options = {}){
   syncDiligenceDelegationFilter(auxFilterRows);
   syncDiligenceOrdonnanceFilter(auxFilterRows);
   syncDiligenceTribunalFilter(auxFilterRows);
+  if(typeof syncDiligenceObservationFilterOptions === 'function'){
+    syncDiligenceObservationFilterOptions(auxFilterRows);
+  }
   const finalizeDiligenceRender = (rows)=>{
     try{
       const sortedByYearRows = [...rows].sort((a, b) => {
@@ -959,6 +970,18 @@ function renderDiligence(options = {}){
       const lotDuQuery = normalizeDiligenceSearchQuery(filterDiligenceLotDu || '');
       const observationQuery = normalizeDiligenceSearchQuery(filterDiligenceObservation || '');
       if(lotDuQuery && !normalizeDiligenceSearchQuery(row?.details?.lotDu || '').includes(lotDuQuery)) return false;
+      if(
+        typeof filterDiligenceSortSci !== 'undefined'
+        && isDiligenceSciTfProcedure(row?.procedure)
+        && filterDiligenceSortSci !== 'all'
+        && normalizeDiligenceSortSciValue(row?.details?.sortSci || '') !== filterDiligenceSortSci
+      ) return false;
+      if(
+        typeof filterDiligenceObservationValues !== 'undefined'
+        && isDiligenceSciTfProcedure(row?.procedure)
+        && filterDiligenceObservationValues.size
+        && !filterDiligenceObservationValues.has(getDiligenceRowObservationFilterValue(row))
+      ) return false;
       if(observationQuery && !normalizeDiligenceSearchQuery(row?.details?.observation || '').includes(observationQuery)) return false;
       return true;
     });

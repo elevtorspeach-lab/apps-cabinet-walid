@@ -7174,7 +7174,7 @@ function parseProcedureToken(token){
   if(compact === 'sfdc') return 'SFDC';
   if(compact === 'sbien') return 'S/bien';
   if(compact === 'inj' || compact === 'injonction') return 'Injonction';
-  if(compact === 'saisiearret' || compact === 'saisiearrt' || compact === 'saisiarret' || compact === 'saisiarrt' || compact === 'sesiearret' || compact === 'sesiearrt' || compact === 'sa') return 'SAISIE ARRÃŠT';
+  if(compact === 'saisiearret' || compact === 'saisiearrt' || compact === 'saisiarret' || compact === 'saisiarrt' || compact === 'sesiearret' || compact === 'sesiearrt' || compact === 'sa') return 'SAISIE ARRÊT';
   return raw;
 }
 
@@ -10123,13 +10123,16 @@ async function exportSalleAudiences(salleEncoded, dayEncoded){
 }
 
 function ensureManagerUser(users){
+  const sourceUsers = (Array.isArray(users) ? users : [])
+    .filter((user)=>user && typeof user === 'object');
+  if(!sourceUsers.length) return buildSeedUsers();
   const allowedUsers = new Map(
-    (Array.isArray(users) ? users : [])
-      .filter(Boolean)
+    sourceUsers
       .map((user)=>[String(user?.username || '').trim().toLowerCase(), user])
       .filter(([username])=>username)
   );
-  const seedUsers = buildSeedUsers();
+  const seedUsers = buildSeedUsers()
+    .filter((user)=>String(user?.username || '').trim().toLowerCase() === DEFAULT_MANAGER_USERNAME);
   const fixedUsernames = new Set(seedUsers.map((user)=>String(user?.username || '').trim().toLowerCase()).filter(Boolean));
   const mergedFixedUsers = seedUsers.map((seedUser)=>{
     const existingUser = allowedUsers.get(String(seedUser.username || '').trim().toLowerCase());
@@ -10171,8 +10174,7 @@ function ensureManagerUser(users){
   });
   let nextId = mergedFixedUsers.reduce((max, user)=>Math.max(max, Number(user?.id) || 0), 0) + 1;
   const usedIds = new Set(mergedFixedUsers.map((user)=>Number(user?.id)).filter((id)=>Number.isFinite(id)));
-  const extraUsers = (Array.isArray(users) ? users : [])
-    .filter((user)=>user && typeof user === 'object')
+  const extraUsers = sourceUsers
     .map((user)=>({ ...user }))
     .filter((user)=>{
       const username = String(user?.username || '').trim().toLowerCase();
@@ -11538,7 +11540,7 @@ async function persistRemoteRequestNow(pathname, body, options = {}){
     try{
       await refreshServerConnectionStatus({ force: true });
     }catch(err){
-      console.warn('VÃ©rification serveur impossible avant sauvegarde distante', err);
+      console.warn('Vérification serveur impossible avant sauvegarde distante', err);
     }
   }
   if(!remoteServerReachable){
@@ -11769,7 +11771,7 @@ async function flushSyncQueueNow(){
     try{
       await refreshServerConnectionStatus({ force: true });
     }catch(err){
-      console.warn('VÃ©rification serveur impossible avant reprise de la file sync', err);
+      console.warn('Vérification serveur impossible avant reprise de la file sync', err);
     }
     if(!remoteServerReachable) return;
   }
@@ -12554,7 +12556,7 @@ function parseExcelData(rows, sheet = null){
     refRestitution: ['reference dossier restitution', 'réference dossier restitution', 'référence dossier restitution', 'ref dossier restitution'],
     refSfdc: ['reference dossier sfdc', 'réference dossier sfdc', 'référence dossier sfdc', 'ref dossier sfdc'],
     refInjonction: ['reference dossier inj', 'réference dossier inj', 'référence dossier inj', 'ref dossier inj', 'reference dossier injonction', 'réference dossier injonction', 'référence dossier injonction', 'ref dossier injonction'],
-    refDossier: ['ref dossier', 'reference dossier', 'rÃ©ference dossier', 'rÃ©fÃ©rence dossier', 'réference dossier', 'référence dossier'],
+    refDossier: ['ref dossier', 'reference dossier', 'réference dossier', 'référence dossier', 'réference dossier', 'référence dossier'],
     refExpertise: ['ref expertise', 'reference expertise', 'reference dossier expertise', 'ref dossier expertise', 'ref expertise dossier'],
     juge: ['juge'],
     ord: ['ord', 'ordre', 'sort ord', 'ordonnance'],
@@ -12576,17 +12578,17 @@ function parseExcelData(rows, sheet = null){
     pubAuJournal: ['pub au journal', 'publication journal'],
     plieCmd: ['plie cmd', 'pli commandement'],
     lotDu: ['lot du', 'lot'],
-    debiteurEp: ['debiteur fr', 'dÃ©biteur fr', 'debiteur ep', 'dÃ©biteur ep'],
-    debiteurAp: ['debiteur ar', 'dÃ©biteur ar', 'debiteur ap', 'dÃ©biteur ap'],
-    cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc dÃ©biteur'],
+    debiteurEp: ['debiteur fr', 'débiteur fr', 'debiteur ep', 'débiteur ep'],
+    debiteurAp: ['debiteur ar', 'débiteur ar', 'debiteur ap', 'débiteur ap'],
+    cinRc: ['cin/rc', 'cin rc', 'cin', 'cni', 'rc debiteur', 'rc débiteur'],
     rib: ['rib'],
     banqueFr: ['banque fr', 'banque'],
     banqueAr: ['banque ar'],
     adresseBranche: ['adresse banque', 'adresse branche', 'adresse bancaire'],
     avocat: ['avocat'],
-    sortPle: ['sort plie', 'sort pliÃ©', 'sort pli', 'plie', 'pliÃ©'],
+    sortPle: ['sort plie', 'sort plié', 'sort pli', 'plie', 'plié'],
     notifBanque: ['notif banque', 'notification banque'],
-    notifDebiteur: ['notif debiteur', 'notif dÃ©biteur', 'notification debiteur', 'notification dÃ©biteur'],
+    notifDebiteur: ['notif debiteur', 'notif débiteur', 'notification debiteur', 'notification débiteur'],
     notificationSort: ['sort notification', 'sort notif', 'notification sort', 'sort de notification', 'sort nottifiation', 'sort notifiation'],
     notificationNo: ['notification', 'notification n', 'notification n°', 'notificat', 'notification no', 'notification numero', 'num notification', 'numéro notification'],
     executionNo: [
@@ -12624,7 +12626,7 @@ function parseExcelData(rows, sheet = null){
     statut: ['statut', 'status', 'etat', 'état', 'statut dossier', 'etat dossier', 'état dossier', 'solde', 'soldé', 'soldée']
   };
   dossierHeaderKeys.adversaire = ['adversaire', 'nom adversaire', 'partie adverse', 'adverse party'];
-  dossierHeaderKeys.refClient = [...new Set([...(dossierHeaderKeys.refClient || []), 'reference dossier sanlam', 'rÃ©fÃ©rence dossier sanlam', 'ref dossier sanlam'])];
+  dossierHeaderKeys.refClient = [...new Set([...(dossierHeaderKeys.refClient || []), 'reference dossier sanlam', 'référence dossier sanlam', 'ref dossier sanlam'])];
   dossierHeaderKeys.immatriculation = [...new Set([...(dossierHeaderKeys.immatriculation || []), 'ww'])];
   dossierHeaderKeys.sanlamPolice = ['police n', 'police n°', 'police no', 'police numero', 'police numéro'];
   dossierHeaderKeys.sanlamSinistre = ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numéro'];
@@ -12632,18 +12634,18 @@ function parseExcelData(rows, sheet = null){
   dossierHeaderKeys.sanlamCinConducteur = ['cin conducteur', 'cni conducteur', 'cin du conducteur', 'cni du conducteur'];
   dossierHeaderKeys.sanlamSouscripteur = ['souscripteur', 'nom souscripteur'];
 
-  dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'dÃ©biteur fr', 'débiteur fr', 'debiteur ep', 'dÃ©biteur ep', 'débiteur ep'])];
+  dossierHeaderKeys.debiteur = [...new Set([...(dossierHeaderKeys.debiteur || []), 'nom', 'debiteur fr', 'débiteur fr', 'débiteur fr', 'debiteur ep', 'débiteur ep', 'débiteur ep'])];
 
   const audienceHeaderKeys = {
     adversaire: ['adversaire'],
-    sanlamSinistre: ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numÃ©ro'],
+    sanlamSinistre: ['sinistre n', 'sinistre n°', 'sinistre no', 'sinistre numero', 'sinistre numéro'],
     refClient: ['ref client', 'refclient', 'reference client', 'réference client', 'référence client'],
     debiteur: ['debiteur', 'débiteur'],
     refDossier: [
       'ref dossier',
       'reference dossier',
       'reference dossier sanlam',
-      'rÃ©fÃ©rence dossier sanlam',
+      'référence dossier sanlam',
       'ref dossier sanlam',
       'référence dossier',
       'ref dossier assignation',
@@ -14162,10 +14164,10 @@ function buildImportIssueSummarySheet(sheet, rows, summaryText = '', title = '')
 
 async function exportImportErrorsExcel(){
   if(!latestExcelImportResult || !Array.isArray(latestExcelImportResult.issues) || !latestExcelImportResult.issues.length){
-    alert("Aucune erreur d'import Ã  exporter.");
+    alert("Aucune erreur d'import à exporter.");
     return;
   }
-  if(!canImportData()) return alert('AccÃ¨s refusÃ©');
+  if(!canImportData()) return alert('Accès refusé');
   const exportBtn = $('exportImportErrorsBtn');
   if(exportBtn){
     exportBtn.disabled = true;
@@ -14177,7 +14179,7 @@ async function exportImportErrorsExcel(){
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Cabinet Walid Araqi';
     workbook.created = new Date();
-    const summarySheet = workbook.addWorksheet('RÃ©sumÃ©', { views: [{ state: 'frozen', ySplit: 4 }] });
+    const summarySheet = workbook.addWorksheet('Résumé', { views: [{ state: 'frozen', ySplit: 4 }] });
     const issueSheet = workbook.addWorksheet('Erreurs import', { views: [{ state: 'frozen', ySplit: 1 }] });
     const safeSummary = String(latestExcelImportResult.summary || '').trim();
     const summaryLines = safeSummary ? safeSummary.split(/\r?\n/).map((line)=>String(line || '').trim()).filter(Boolean) : ['Import Excel'];
@@ -14187,7 +14189,7 @@ async function exportImportErrorsExcel(){
     summarySheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1D4ED8' } };
     summarySheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
     summarySheet.mergeCells('A2:H2');
-    summarySheet.getCell('A2').value = `GÃ©nÃ©rÃ© le ${formatDateTimeDisplay(new Date())}`;
+    summarySheet.getCell('A2').value = `Généré le ${formatDateTimeDisplay(new Date())}`;
     summarySheet.getCell('A2').font = { italic: true, color: { argb: '334155' } };
     summaryLines.forEach((line, index)=>{
       const rowNumber = 4 + index;
@@ -14198,7 +14200,7 @@ async function exportImportErrorsExcel(){
       row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index === 0 ? 'DBEAFE' : 'F8FAFC' } };
     });
     summarySheet.columns = [{ width: 24 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }];
-    const headers = ['SÃ©vÃ©ritÃ©', 'Ligne', 'Source', 'Zone', 'RÃ©f dossier', 'RÃ©f client', 'DÃ©biteur', 'ProcÃ©dure', 'Tribunal', 'Date audience', 'Sort', 'Date dÃ©pÃ´t', 'Statut', 'Message', 'Contexte'];
+    const headers = ['Sévérité', 'Ligne', 'Source', 'Zone', 'Réf dossier', 'Réf client', 'Débiteur', 'Procédure', 'Tribunal', 'Date audience', 'Sort', 'Date dépôt', 'Statut', 'Message', 'Contexte'];
     const headerRow = issueSheet.addRow(headers);
     headerRow.height = 24;
     headerRow.eachCell((cell)=>{
@@ -14244,7 +14246,7 @@ async function exportImportErrorsExcel(){
     await saveBlobDirectOrDownload(blob, `${baseName}_${stamp}.xlsx`, { openAfterExport: false });
   }catch(err){
     console.error(err);
-    alert("Export des erreurs impossible. RÃ©essayez.");
+    alert("Export des erreurs impossible. Réessayez.");
   }finally{
     setImportResultExportState(latestExcelImportResult);
   }
@@ -14764,7 +14766,7 @@ async function applyExcelImport(payload, options = {}){
   const importWarningRows = [];
   const importInfoRows = [];
   const importIssueEntries = [];
-  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'SAISIE ARRÃŠT', 'Sanlam']);
+  const knownProcedureSet = new Set(['ASS', 'Restitution', 'Commandement', 'Nantissement', 'Redressement', 'Vérification de créance', 'Liquidation judiciaire', 'SFDC', 'S/bien', 'Injonction', 'SAISIE ARRÊT', 'Sanlam']);
   const defaultDossierProceduresWhenMissing = diligenceMode
     ? ['Injonction']
     : ['ASS', 'Restitution', 'SFDC'];
@@ -15415,13 +15417,13 @@ async function applyExcelImport(payload, options = {}){
     const restitutionReference = resolveProcedureReference('Restitution', row.refRestitution);
     const sfdcReference = resolveProcedureReference('SFDC', row.refSfdc);
     const injonctionReference = resolveProcedureReference('Injonction', row.refInjonction);
-    const saisieArretReference = resolveProcedureReference('SAISIE ARRÃŠT', row.refDossier);
+    const saisieArretReference = resolveProcedureReference('SAISIE ARRÊT', row.refDossier);
 
     setProcRef('ASS', assReference);
     setProcRef('Restitution', restitutionReference);
     setProcRef('SFDC', sfdcReference);
     setProcRef('Injonction', injonctionReference);
-    setProcRef('SAISIE ARRÃŠT', saisieArretReference);
+    setProcRef('SAISIE ARRÊT', saisieArretReference);
     const executionNoValue = String(row.executionNo || '').trim();
     const importedDateDepotValue = normalizeDateDDMMYYYY(row.dateDepot || '') || String(row.dateDepot || '').trim();
     const observationValue = String(row.observation || '').trim();
@@ -15544,10 +15546,10 @@ async function applyExcelImport(payload, options = {}){
     assignProcedureMeta('Restitution', restitutionReference);
     assignProcedureMeta('SFDC', sfdcReference);
     assignProcedureMeta('Injonction', injonctionReference);
-    assignProcedureMeta('SAISIE ARRÃŠT', saisieArretReference);
-    if(procedureSet.has('SAISIE ARRÃŠT')){
-      if(!targetDossier.procedureDetails['SAISIE ARRÃŠT']) targetDossier.procedureDetails['SAISIE ARRÃŠT'] = {};
-      const p = targetDossier.procedureDetails['SAISIE ARRÃŠT'];
+    assignProcedureMeta('SAISIE ARRÊT', saisieArretReference);
+    if(procedureSet.has('SAISIE ARRÊT')){
+      if(!targetDossier.procedureDetails['SAISIE ARRÊT']) targetDossier.procedureDetails['SAISIE ARRÊT'] = {};
+      const p = targetDossier.procedureDetails['SAISIE ARRÊT'];
       if(saisieArretReference && !String(p.referenceClient || '').trim()) p.referenceClient = saisieArretReference;
       Object.entries(saisieArretFields).forEach(([field, value])=>{
         if(value) p[field] = value;
@@ -16776,6 +16778,7 @@ function setupEvents(){
       resetDiligenceAuxFilters();
       paginationState.diligence = 1;
       syncDiligenceMiseAPrixFilterVisibility();
+      syncDiligenceSciTfObservationBulkVisibility();
     }
     renderDiligence();
   });
@@ -16816,6 +16819,7 @@ function setupEvents(){
     renderDiligence();
   });
   $('diligenceSearchInput')?.addEventListener('input', renderDiligenceDebounced);
+  $('diligenceSciTfObservationBulkBtn')?.addEventListener('click', applyDiligenceSciTfObservationToCheckedRows);
   $('exportDiligenceBtn')?.addEventListener('click', exportDiligenceXLS);
   $('importDiligenceBtn')?.addEventListener('click', handleDiligenceExcelImport);
   $('diligenceImportInput')?.addEventListener('change', (e)=> {
@@ -19588,6 +19592,10 @@ function isDiligenceAssLikeProcedure(procedure){
   return proc === 'ASS' || proc === 'Nantissement';
 }
 
+function isDiligenceSciTfProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'SCI TF';
+}
+
 function isCasablancaTpiTribunal(tribunal){
   const raw = String(tribunal || '').trim().toLowerCase();
   if(!raw) return false;
@@ -19609,7 +19617,7 @@ function isDiligenceCommandementProcedure(procedure){
 }
 
 function isDiligenceSaisieArretProcedure(procedure){
-  return getDiligenceProcedureFilterValue(procedure) === 'SAISIE ARRÃŠT';
+  return getDiligenceProcedureFilterValue(procedure) === 'SAISIE ARRÊT';
 }
 
 function getDiligenceCommandementHeaderMode(rows){
@@ -20584,6 +20592,40 @@ function getCheckedDiligenceRowsForBatchUpdate(){
   });
 }
 
+function syncDiligenceSciTfObservationBulkVisibility(){
+  const container = $('diligenceSciTfObservationBulkContainer');
+  if(!container) return;
+  container.style.display = isDiligenceSciTfProcedure(filterDiligenceProcedure) && canEditData() ? '' : 'none';
+}
+
+function applyDiligenceSciTfObservationToCheckedRows(){
+  if(!canEditData()) return alert('Modification non autorisee');
+  const input = $('diligenceSciTfObservationBulkInput');
+  const value = String(input?.value || '').trim();
+  if(!value) return alert('Saisissez une observation.');
+  const rows = getCheckedDiligenceRowsForBatchUpdate().filter(row=>isDiligenceSciTfProcedure(row?.procedure));
+  if(!rows.length) return alert('Selectionnez au moins un dossier SCI TF.');
+  let changed = false;
+  const changedDossiers = new Map();
+  rows.forEach(row=>{
+    const result = applyDiligenceFieldValue(row.clientId, row.dossierIndex, row.procedure, 'observation', value);
+    if(!result.changed) return;
+    changed = true;
+    const dossier = result.dossier && typeof result.dossier === 'object' ? result.dossier : null;
+    if(!dossier) return;
+    const changeKey = `${Number(result.clientId) || 0}::${String(dossier.referenceClient || row?.dossier?.referenceClient || row?.dossierIndex || '').trim()}`;
+    changedDossiers.set(changeKey, { clientId: result.clientId, dossier });
+  });
+  if(!changed) return;
+  if(input) input.value = '';
+  clearDiligencePrintSelection({ immediate: true });
+  handleDossierDataChange({ audience: false, rerenderLinked: true });
+  [...changedDossiers.values()].forEach(entry=>{
+    persistDossierReferenceNow(entry.clientId, entry.dossier, { source: 'diligence-sci-tf-observation-batch' }).catch(()=>{});
+  });
+  renderDiligence({ force: true });
+}
+
 function shouldBatchUpdateCheckedDiligenceRows(clientId, dossierIndex, procKey, field){
   if(!DILIGENCE_BATCH_UPDATE_FIELDS.has(String(field || '').trim())) return false;
   if(!diligencePrintSelection.size) return false;
@@ -20981,7 +21023,7 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
       { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
       { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
-      { header: 'Execution NÂ°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
+      { header: 'Execution N°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
       { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || '' },
       { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
@@ -21578,7 +21620,7 @@ async function saveTeamUser(){
       syncCurrentUserFromUsers();
       renderEquipe({ force: true });
       resetTeamForm();
-      alert(isEditing ? 'Compte mis ÃƒÆ’Ã‚Â  jour avec succÃƒÆ’Ã‚Â¨s.' : 'Compte crÃƒÆ’Ã‚Â©ÃƒÆ’Ã‚Â© avec succÃƒÆ’Ã‚Â¨s.');
+      alert(isEditing ? 'Compte mis à jour avec succès.' : 'Compte créé avec succès.');
       return;
     }
   }catch(err){
@@ -21632,7 +21674,7 @@ async function saveTeamUser(){
   syncCurrentUserFromUsers();
   renderEquipe();
   resetTeamForm();
-  alert(isEditing ? 'Compte mis Ã  jour avec succÃ¨s.' : 'Compte crÃ©Ã© avec succÃ¨s.');
+  alert(isEditing ? 'Compte mis à jour avec succès.' : 'Compte créé avec succès.');
 }
 
 function editTeamUser(userId){
@@ -21651,7 +21693,7 @@ function editTeamUser(userId){
   if($('teamSaveBtn')) $('teamSaveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Mettre à jour';
 }
 
-function deleteTeamUser(userId){
+async function deleteTeamUser(userId){
   if(!canManageTeam()) return;
   const user = USERS.find(u=>u.id === userId);
   if(!user) return;
@@ -21664,6 +21706,35 @@ function deleteTeamUser(userId){
   }
   if(currentUser?.id === userId){
     return alert('Impossible de supprimer l’utilisateur connecté');
+  }
+  try{
+    await resolveApiBase();
+    const response = await fetchWithTimeout(`${API_BASE}/team/users/delete`, {
+      method: 'POST',
+      headers: buildRemoteAuthHeaders({
+        'Content-Type': 'application/json'
+      }),
+      body: JSON.stringify({ id: userId })
+    }, 10000);
+    if(response.ok){
+      const payload = await response.json().catch(()=>null);
+      if(payload && typeof payload === 'object'){
+        updateRemoteStateMetadata(payload);
+      }
+      USERS = ensureManagerUser(USERS.filter(u=>u.id !== userId));
+      if(Array.isArray(payload?.teamHistory)){
+        AppState.teamHistory = normalizeTeamHistoryEntries(payload.teamHistory);
+      }
+      syncCurrentUserFromUsers();
+      renderEquipe({ force: true });
+      if(typeof renderTeamHistory === 'function') renderTeamHistory({ force: true });
+      if(editingTeamUserId === userId) resetTeamForm();
+      return;
+    }
+    const payload = await response.json().catch(()=>null);
+    if(payload?.message) return alert(payload.message);
+  }catch(err){
+    console.warn('Team user delete API indisponible, fallback local', err);
   }
   forceDeletionSafetyBackup('delete-team-user');
   USERS = USERS.filter(u=>u.id !== userId);
@@ -21961,7 +22032,7 @@ function isAudienceProcedure(procName){
   if(isAudienceSaisieArretProcedure(raw)) return false;
   const value = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   if(!value) return false;
-  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement';
+  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement' && value !== 'scitf' && value !== 'nantissementmed';
 }
 
 function getAudienceProcedureFilterKey(procName){
@@ -24082,7 +24153,7 @@ function sanitizeAudienceExportSheetName(value, usedNames){
 async function exportAudienceWorkbookByTribunal(dataset, options = {}){
   const directExportHandlePromise = primeDirectExportDirectoryAccess();
   if(false)
-    alert('Export XLSX indisponible: librairie Excel non chargÃ©e.');
+    alert('Export XLSX indisponible: librairie Excel non chargée.');
   const headers = sanitizeExcelExportRow(dataset.headers);
   const subtitle = stripExcelBidiControlChars(dataset.subtitle || '');
   const editionDateText = formatDateDDMMYYYY(new Date());
@@ -25915,6 +25986,7 @@ function syncDiligenceMiseAPrixFilterVisibility(){
   if(!container) return;
   const isCommandement = isDiligenceCommandementProcedure(filterDiligenceProcedure);
   container.style.display = isCommandement ? 'inline-block' : 'none';
+  syncDiligenceSciTfObservationBulkVisibility();
 }
 
 // Final override: keep audience date validation inline and non-blocking.
