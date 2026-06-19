@@ -21269,7 +21269,6 @@ function setupEvents(){
   });
   $('filterAudienceDate')?.addEventListener('change', (e)=>{
     filterAudienceDate = String(e.target?.value || '').trim();
-    clearAudiencePrintSelection({ immediate: true });
     renderAudience();
   });
   $('filterAudienceRefDossier')?.addEventListener('input', debounce((e)=>{
@@ -22016,6 +22015,10 @@ function requestDiligenceSaisieArretModal(){
             Débiteur
             <input id="diligenceSaisieDebiteur" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
           </label>
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            CIN/RC
+            <input id="diligenceSaisieCinRc" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
           <div style="display:grid;gap:9px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
               <strong style="color:#334155;font-size:13px;">Banques</strong>
@@ -22067,6 +22070,7 @@ function requestDiligenceSaisieArretModal(){
     const clientInput = card.querySelector('#diligenceSaisieClientName');
     const referenceInput = card.querySelector('#diligenceSaisieReferenceClient');
     const debiteurInput = card.querySelector('#diligenceSaisieDebiteur');
+    const cinRcInput = card.querySelector('#diligenceSaisieCinRc');
     const banquesContainer = card.querySelector('#diligenceSaisieBanques');
     const addBanqueBtn = card.querySelector('#diligenceSaisieAddBanqueBtn');
     const syncBanqueRows = ()=>{
@@ -22114,7 +22118,7 @@ function requestDiligenceSaisieArretModal(){
     };
     addBanqueBtn?.addEventListener('click', addBanqueRow);
     addBanqueRow();
-    [clientInput, referenceInput, debiteurInput].forEach(input=>{
+    [clientInput, referenceInput, debiteurInput, cinRcInput].forEach(input=>{
       input.addEventListener('focus', ()=>{
         input.style.borderColor = '#2563eb';
         input.style.boxShadow = '0 0 0 3px rgba(37,99,235,.12)';
@@ -22131,6 +22135,7 @@ function requestDiligenceSaisieArretModal(){
       const clientName = String(clientInput.value || '').trim();
       const referenceClient = String(referenceInput.value || '').trim();
       const debiteur = String(debiteurInput.value || '').trim();
+      const cinRc = String(cinRcInput.value || '').trim();
       if(!clientName) return showError('Nom du client obligatoire.', clientInput);
       const selectedClient = findClientByName(clientName);
       if(!selectedClient) return showError('Choisissez un client existant dans la liste.', clientInput);
@@ -22151,6 +22156,7 @@ function requestDiligenceSaisieArretModal(){
         clientName: String(selectedClient.name || '').trim(),
         referenceClient,
         debiteur,
+        cinRc,
         banques: banques.map(({ banque, rib })=>({ banque, rib }))
       });
     });
@@ -22199,7 +22205,7 @@ async function addDiligenceSaisieArretDossier(){
   if(!canEditData()) return alert('Accès refusé');
   const modalValues = await requestDiligenceSaisieArretModal();
   if(!modalValues) return;
-  const { clientId, clientName, referenceClient, debiteur } = modalValues;
+  const { clientId, clientName, referenceClient, debiteur, cinRc } = modalValues;
   const banques = Array.isArray(modalValues.banques) ? modalValues.banques.slice(0, 20) : [];
   const now = new Date();
   const nowIso = now.toISOString();
@@ -22222,7 +22228,7 @@ async function addDiligenceSaisieArretDossier(){
     createdAt: nowIso,
     suiviUpdatedAt: nowIso,
     debiteur,
-    cin: '',
+    cin: cinRc,
     cinNonDebiteur: '',
     adversaire: '',
     nRef: '',
@@ -22238,6 +22244,7 @@ async function addDiligenceSaisieArretDossier(){
         dateDepot: '',
         referenceClient: '',
         debiteurEp: debiteur,
+        cinRc,
         banqueFr: String(banque || '').trim(),
         rib: String(rib || '').trim(),
         sortPle: 'att plie'
@@ -22286,6 +22293,7 @@ async function addDiligenceSaisieArretDossier(){
       `Client: ${client.name}`,
       `Référence client: ${referenceClient}`,
       `Débiteur: ${debiteur}`,
+      `CIN/RC: ${cinRc || '-'}`,
       `Banques: ${banques.map(item=>item.banque).join(', ')}`
     ]
   });
@@ -29911,7 +29919,7 @@ function getAudienceExportRowTribunalFilterKey(row){
 }
 
 function getSelectedAudienceRowsForExport(){
-  const rows = getAllFilteredAudienceRowsForPrintSelection();
+  const rows = getAllAudienceRowsForStoredPrintSelection();
   const tribunalExportKey = getAudienceExportTribunalFilterKey();
   if(
     rows === audienceSelectedExportRowsCacheInput
