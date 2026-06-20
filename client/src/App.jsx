@@ -8,7 +8,7 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
-const LEGACY_ASSET_VERSION = '20260618-sort-ord-colors-1'
+const LEGACY_ASSET_VERSION = '20260620-sbiens-statut-column-8'
 const LEGACY_SCRIPTS = [
   `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,
   `/legacy/audience-ui-helpers.js?v=${LEGACY_ASSET_VERSION}`,

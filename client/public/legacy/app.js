@@ -1663,8 +1663,19 @@ function dossierHasAudienceImpact(dossier){
 
 function isDiligenceOnlyDossier(dossier){
   if(!dossier || typeof dossier !== 'object') return false;
+  const creationSource = String(dossier.creationSource || dossier.source || '').trim().toLowerCase();
+  if(
+    (
+      creationSource === 'diligence-sbien-line-import'
+      || creationSource === 'diligence-sbien-manual-entry'
+    )
+    && dossier.hideFromSuivi === true
+    && normalizeProcedures(dossier).some(procName=>getDiligenceProcedureFilterValue(procName) === 'S/bien')
+  ){
+    return true;
+  }
   const markedDiligenceOnly = dossier.isDiligenceOnly === true || dossier.isDiligenceManualEntry === true;
-  const markedSource = String(dossier.creationSource || dossier.source || '').trim().toLowerCase() === 'diligence-saisie-arret';
+  const markedSource = creationSource === 'diligence-saisie-arret';
   const markedHidden = dossier.hideFromSuivi === true || dossier.hiddenFromSuivi === true;
   const markedByHistory = Array.isArray(dossier.history) && dossier.history.some((entry)=>{
     const source = String(entry?.source || '').trim().toLowerCase();
@@ -8119,7 +8130,7 @@ function parseProcedureToken(token){
   if(compact === 'liquidationjudiciaire' || compact === 'liquidation' || compact === 'liq' || compact === 'declarationdecreance' || compact === 'declarationcreance' || compact === 'declcreance' || compact === 'decl') return 'Liquidation judiciaire';
   if(compact === 'sfdc') return 'SFDC';
   if(compact === 'saisiearret' || compact === 'saisiearrt' || compact === 'saisiarret' || compact === 'saisiarrt' || compact === 'sesiearret' || compact === 'sesiearrt' || compact === 'sa') return 'SAISIE ARR\u00caT';
-  if(compact === 'sbien') return 'S/bien';
+  if(compact === 'sbien' || compact === 'sbiens') return 'S/bien';
   if(compact === 'inj' || compact === 'injonction') return 'Injonction';
   return raw;
 }
@@ -20144,6 +20155,259 @@ async function handleDiligenceSaisieArretLineImportFile(file){
     if(!parsed.headerFound) throw new Error('En-tetes Saisie Arret introuvables.');
     if(!parsed.importedRows.length) throw new Error('Aucune ligne Saisie Arret a importer.');
     const batchId = createImportTrackingId('dil_sa');
+    const importHistoryEntry = createImportHistoryEntry('global', file.name, { category: 'diligence' });
+    importHistoryEntry.id = batchId;
+    const clientMap = new Map();
+    (Array.isArray(AppState.clients) ? AppState.clients : []).forEach(client=>{
+      const key = String(client?.name || '').trim().toLowerCase();
+      if(key && !clientMap.has(key)) clientMap.set(key, client);
+    });
+    const maxClientId = (Array.isArray(AppState.clients) ? AppState.clients : [])
+      .reduce((max, client)=>Math.max(max, Number(client?.id) || 0), 0);
+    let nextClientId = maxClientId + 1;
+    let createdClients = 0;
+    const createdClientIds = new Set();
+    const createdDossierUids = [];
+    parsed.importedRows.forEach(rowData=>{
+      const clientName = String(rowData.clientName || '').trim() || 'VIDE';
+      const key = clientName.toLowerCase();
+      let client = clientMap.get(key);
+      if(!client){
+        client = { id: nextClientId++, name: clientName, dossiers: [] };
+        AppState.clients.push(client);
+        clientMap.set(key, client);
+        grantCurrentViewerAccessToClient(client.id);
+        createdClients += 1;
+        createdClientIds.add(Number(client.id));
+      }
+      if(!Array.isArray(client.dossiers)) client.dossiers = [];
+      const dossier = buildDiligenceSaisieArretImportedDossier(rowData, batchId);
+      client.dossiers.push(dossier);
+      const dossierUid = String(dossier?.importUid || '').trim();
+      if(dossierUid) createdDossierUids.push(dossierUid);
+    });
+    importHistoryEntry.createdClientIds = [...createdClientIds];
+    importHistoryEntry.createdDossierUids = createdDossierUids;
+    importHistoryEntry.stats = {
+      ...importHistoryEntry.stats,
+      dossiers: createdDossierUids.length
+    };
+    saveImportHistoryEntry(importHistoryEntry);
+    clearImportHistoryRenderCaches();
+    updateImportProgress('Sauvegarde...', 2, 3);
+    handleDossierDataChange({ audience: false, rerenderLinked: true });
+    clearDiligencePrintSelection({ immediate: true });
+    filterDiligenceProcedure = 'SAISIE ARRÊT';
+    resetDiligenceAuxFilters();
+    paginationState.diligence = 1;
+    await persistAppStateNow(null, { source: 'diligence-saisie-arret-line-import' });
+    showView('diligence', { force: true });
+    renderDiligence({ force: true });
+    updateImportProgress('Terminé.', 3, 3);
+    alert(`Import Saisie Arret terminé.\nLignes importées: ${parsed.importedRows.length}\nClients créés: ${createdClients}`);
+  }catch(err){
+    console.error(err);
+    const details = String(err?.message || '').trim();
+    alert(`Erreur import Saisie Arret.${details ? `\nDétail: ${details}` : ''}`);
+  }finally{
+    closeImportProgressModal(false);
+    importInProgress = false;
+    endHeavyUiOperation();
+  }
+}
+
+function handleDiligenceSbienLineImport(){
+  if(getDiligenceProcedureFilterValue(filterDiligenceProcedure) !== 'S/bien'){
+    alert('Choisissez d abord la procedure S/BIENS.');
+    return;
+  }
+  const input = $('diligenceSbienImportInput');
+  if(!input){
+    alert('Import S/BIENS indisponible: champ fichier introuvable.');
+    return;
+  }
+  input.value = '';
+  input.click();
+}
+
+const DILIGENCE_SBIEN_LINE_IMPORT_COLUMNS = {
+  clientName: ['client', 'nom client'],
+  type: ['type', 'type dossier'],
+  referenceClient: ['reference client', 'ref client'],
+  debiteur: ['nom', 'debiteur', 'nom debiteur'],
+  depot: ['date depot', 'depot', 'date affectation'],
+  refDossier: ['reference dossier', 'ref dossier'],
+  sortOrd: ['sort ord', 'sort ordonnance', 'ordonnance'],
+  executionNo: ['execution n', 'execution no', 'execution', 'numero execution'],
+  ville: ['ville', 'city', 'commune'],
+  observation: ['observation', 'observations', 'obs', 'remarque'],
+  delegation: ['delegation', 'att delegation', 'delegat'],
+  huissier: ['huissier'],
+  sortExecution: ['sort execution', 'sort execution', 'sort exec'],
+  dateExecution: ['date execution', 'date exec'],
+  tribunal: ['tribunal', 'trib'],
+  montant: ['montant'],
+  adresse: ['adresse', 'adresse complete'],
+  boiteNo: ['boite n', 'boite no', 'boite', 'box'],
+  gestionnaire: ['gestionnaire', 'manager', 'responsable'],
+  statut: ['statut', 'status', 'etat dossier']
+};
+
+function getSbienLineImportColumnIndex(map, key){
+  return getColIndex(map, DILIGENCE_SBIEN_LINE_IMPORT_COLUMNS[key] || []);
+}
+
+function findSbienLineImportHeader(rows){
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const targetKeys = Object.keys(DILIGENCE_SBIEN_LINE_IMPORT_COLUMNS);
+  for(let rowIndex = 0; rowIndex < Math.min(sourceRows.length, 30); rowIndex += 1){
+    const map = buildHeaderMap(sourceRows[rowIndex] || []);
+    const hitCount = targetKeys.reduce((count, key)=>count + (getSbienLineImportColumnIndex(map, key) !== -1 ? 1 : 0), 0);
+    if(hitCount >= 3) return { rowIndex, map };
+  }
+  return null;
+}
+
+function getSbienImportCell(row, map, key, options = {}){
+  const idx = getSbienLineImportColumnIndex(map, key);
+  if(idx === -1) return '';
+  const value = row?.[idx];
+  if(options.date === true){
+    return parseExcelDateValue(value) || String(value || '').trim();
+  }
+  return String(value ?? '').trim();
+}
+
+function parseDiligenceSbienLineImportRows(rows){
+  const header = findSbienLineImportHeader(rows);
+  if(!header) return { importedRows: [], headerFound: false };
+  const importedRows = [];
+  for(let rowIndex = header.rowIndex + 1; rowIndex < rows.length; rowIndex += 1){
+    const row = rows[rowIndex] || [];
+    const values = Object.keys(DILIGENCE_SBIEN_LINE_IMPORT_COLUMNS).map(key=>getSbienImportCell(row, header.map, key));
+    if(!values.some(value=>String(value || '').trim())) continue;
+    importedRows.push({
+      rowNumber: rowIndex + 1,
+      clientName: getSbienImportCell(row, header.map, 'clientName') || 'VIDE',
+      type: getSbienImportCell(row, header.map, 'type'),
+      referenceClient: getSbienImportCell(row, header.map, 'referenceClient') || 'VIDE',
+      debiteur: getSbienImportCell(row, header.map, 'debiteur'),
+      depot: getSbienImportCell(row, header.map, 'depot', { date: true }),
+      refDossier: getSbienImportCell(row, header.map, 'refDossier'),
+      sortOrd: getSbienImportCell(row, header.map, 'sortOrd'),
+      executionNo: getSbienImportCell(row, header.map, 'executionNo'),
+      ville: getSbienImportCell(row, header.map, 'ville'),
+      observation: getSbienImportCell(row, header.map, 'observation'),
+      delegation: getSbienImportCell(row, header.map, 'delegation'),
+      huissier: getSbienImportCell(row, header.map, 'huissier'),
+      sortExecution: getSbienImportCell(row, header.map, 'sortExecution'),
+      dateExecution: getSbienImportCell(row, header.map, 'dateExecution', { date: true }),
+      tribunal: getSbienImportCell(row, header.map, 'tribunal'),
+      montant: getSbienImportCell(row, header.map, 'montant'),
+      adresse: getSbienImportCell(row, header.map, 'adresse'),
+      boiteNo: getSbienImportCell(row, header.map, 'boiteNo'),
+      gestionnaire: getSbienImportCell(row, header.map, 'gestionnaire'),
+      statut: getSbienImportCell(row, header.map, 'statut')
+    });
+  }
+  return { importedRows, headerFound: true };
+}
+
+function buildDiligenceSbienImportedDossier(rowData, batchId){
+  const nowIso = new Date().toISOString();
+  const normalizedStatus = normalizeImportedDossierStatus(rowData.statut || '');
+  return {
+    importUid: createImportTrackingId('dossier'),
+    importGlobalBatchId: '',
+    importAudienceBatchId: '',
+    importDiligenceBatchId: batchId,
+    factureInvoices: [],
+    isDiligenceImportLineEntry: true,
+    isDiligenceOnly: true,
+    creationSource: 'diligence-sbien-line-import',
+    hideFromSuivi: true,
+    createdAt: nowIso,
+    suiviUpdatedAt: nowIso,
+    debiteur: rowData.debiteur || '',
+    cin: '',
+    cinNonDebiteur: '',
+    adversaire: '',
+    nRef: '',
+    boiteNo: rowData.boiteNo || '',
+    referenceClient: rowData.referenceClient || '',
+    dateAffectation: rowData.depot || '',
+    gestionnaire: rowData.gestionnaire || '',
+    sanlamAdversaires: {},
+    procedure: 'S/bien',
+    procedureList: ['S/bien'],
+    procedureDetails: {
+      'S/bien': {
+        depotLe: rowData.depot || '',
+        dateDepot: rowData.depot || '',
+        referenceClient: rowData.refDossier || '',
+        attOrdOrOrdOk: rowData.sortOrd || '',
+        executionNo: rowData.executionNo || '',
+        observation: rowData.observation || '',
+        attDelegationOuDelegat: rowData.delegation || '',
+        huissier: rowData.huissier || '',
+        sort: rowData.sortExecution || '',
+        dateExecution: rowData.dateExecution || '',
+        tribunal: rowData.tribunal || ''
+      }
+    },
+    ville: rowData.ville || '',
+    adresse: rowData.adresse || '',
+    montant: rowData.montant || '',
+    montantByProcedure: [],
+    ww: '',
+    marque: '',
+    type: rowData.type || '',
+    caution: '',
+    cautionAdresse: '',
+    cautionVille: '',
+    cautionCin: '',
+    cautionRc: '',
+    efNumber: '',
+    conservation: '',
+    metrage: '',
+    note: '',
+    avancement: '',
+    statut: normalizedStatus.statut || 'En cours',
+    statutDetails: normalizedStatus.detail || '',
+    files: [],
+    history: []
+  };
+}
+
+async function handleDiligenceSbienLineImportFile(file){
+  if(importInProgress) return;
+  if(!file) return;
+  if(!canImportData()){
+    alert('Accès refusé');
+    return;
+  }
+  if(getDiligenceProcedureFilterValue(filterDiligenceProcedure) !== 'S/bien'){
+    alert('Choisissez d abord la procedure S/BIENS.');
+    return;
+  }
+  const excelReady = await ensureExcelLibraries({ needXlsx: true, needExcelJs: false });
+  if(!excelReady) return;
+  importInProgress = true;
+  beginHeavyUiOperation();
+  try{
+    openImportProgressModal('Importer S/BIENS');
+    updateImportProgress('Lecture du fichier...', 0, 3);
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    if(!sheetName) throw new Error('Le fichier Excel ne contient aucune feuille.');
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true, dateNF: 'dd/mm/yyyy' });
+    updateImportProgress('Préparation des lignes...', 1, 3);
+    const parsed = parseDiligenceSbienLineImportRows(rows);
+    if(!parsed.headerFound) throw new Error('En-tetes S/BIENS introuvables.');
+    if(!parsed.importedRows.length) throw new Error('Aucune ligne S/BIENS a importer.');
+    const batchId = createImportTrackingId('dil_sbien');
     const clientMap = new Map();
     (Array.isArray(AppState.clients) ? AppState.clients : []).forEach(client=>{
       const key = String(client?.name || '').trim().toLowerCase();
@@ -20165,23 +20429,23 @@ async function handleDiligenceSaisieArretLineImportFile(file){
         createdClients += 1;
       }
       if(!Array.isArray(client.dossiers)) client.dossiers = [];
-      client.dossiers.push(buildDiligenceSaisieArretImportedDossier(rowData, batchId));
+      client.dossiers.push(buildDiligenceSbienImportedDossier(rowData, batchId));
     });
     updateImportProgress('Sauvegarde...', 2, 3);
     handleDossierDataChange({ audience: false, rerenderLinked: true });
     clearDiligencePrintSelection({ immediate: true });
-    filterDiligenceProcedure = 'SAISIE ARRÊT';
+    filterDiligenceProcedure = 'S/bien';
     resetDiligenceAuxFilters();
     paginationState.diligence = 1;
-    await persistAppStateNow(null, { source: 'diligence-saisie-arret-line-import' });
+    await persistAppStateNow(null, { source: 'diligence-sbien-line-import' });
     showView('diligence', { force: true });
     renderDiligence({ force: true });
     updateImportProgress('Terminé.', 3, 3);
-    alert(`Import Saisie Arret terminé.\nLignes importées: ${parsed.importedRows.length}\nClients créés: ${createdClients}`);
+    alert(`Import S/BIENS terminé.\nLignes importées: ${parsed.importedRows.length}\nClients créés: ${createdClients}`);
   }catch(err){
     console.error(err);
     const details = String(err?.message || '').trim();
-    alert(`Erreur import Saisie Arret.${details ? `\nDétail: ${details}` : ''}`);
+    alert(`Erreur import S/BIENS.${details ? `\nDétail: ${details}` : ''}`);
   }finally{
     closeImportProgressModal(false);
     importInProgress = false;
@@ -21102,8 +21366,11 @@ function setupEvents(){
   $('diligenceSearchInput')?.addEventListener('input', renderDiligenceDebounced);
   $('exportDiligenceBtn')?.addEventListener('click', exportDiligenceXLS);
   $('addDiligenceSaisieArretBtn')?.addEventListener('click', addDiligenceSaisieArretDossier);
+  $('addDiligenceSbienBtn')?.addEventListener('click', addDiligenceSbienDossier);
   $('importDiligenceSaisieArretBtn')?.addEventListener('click', handleDiligenceSaisieArretLineImport);
+  $('importDiligenceSbienBtn')?.addEventListener('click', handleDiligenceSbienLineImport);
   $('deleteDiligenceSaisieArretBtn')?.addEventListener('click', deleteCheckedDiligenceSaisieArretDossiers);
+  $('deleteDiligenceSbienBtn')?.addEventListener('click', deleteCheckedDiligenceSbienDossiers);
   $('importDiligenceBtn')?.addEventListener('click', handleDiligenceExcelImport);
   $('diligenceImportInput')?.addEventListener('change', (e)=> {
     if(e.target.files?.[0]){
@@ -21114,6 +21381,12 @@ function setupEvents(){
   $('diligenceSaisieArretImportInput')?.addEventListener('change', (e)=> {
     if(e.target.files?.[0]){
       handleDiligenceSaisieArretLineImportFile(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
+  $('diligenceSbienImportInput')?.addEventListener('change', (e)=> {
+    if(e.target.files?.[0]){
+      handleDiligenceSbienLineImportFile(e.target.files[0]);
       e.target.value = '';
     }
   });
@@ -21872,8 +22145,8 @@ function applyRoleUI(options = {}){
   // Sidebar and Dashboard visibility is now handled by React components (Sidebar.jsx, Dashboard.jsx, etc.)
   // No more manual style.display manipulations here to avoid conflicts.
   setRoleControlledVisibility(['importExcelBtn', 'importAudienceExcelBtn', 'exportBackupExcelBtn'], canImport);
-  setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup', 'addDiligenceSaisieArretBtn'], canCreateClient);
-  setRoleControlledVisibility(['deleteDiligenceSaisieArretBtn'], canDeleteDossierOrImportData());
+  setRoleControlledVisibility(['addClientForm', 'addClientBtn', 'clientName', 'clientExcelImportGroup', 'addDiligenceSaisieArretBtn', 'addDiligenceSbienBtn'], canCreateClient);
+  setRoleControlledVisibility(['deleteDiligenceSaisieArretBtn', 'deleteDiligenceSbienBtn'], canDeleteDossierOrImportData());
   setRoleControlledVisibility(['fillClientExcelBtn', 'fillClientExcelClientBtn', 'clientExcelFillGroup'], canUseClientExcelFill());
   setRoleControlledVisibility([
     'selectAllSuiviBtn',
@@ -21957,8 +22230,19 @@ function requestDiligenceSaisieArretModal(){
     const clientOptionsHtml = availableClients
       .map(client=>`<option value="${escapeAttr(String(client.name || '').trim())}"></option>`)
       .join('');
-    const banqueOptionsHtml = collectKnownProcedureFieldLabels('banqueFr')
-      .map(value=>`<option value="${escapeAttr(value)}"></option>`)
+    const diligenceSaisieArretBanks = [
+      'CIH BANK القرض العقاري و السياحي',
+      'BMCI البنك المغربي للتجارة و الصناعة',
+      'BMCE BANK OF AFRICA البنك الإفريقي',
+      'SAHAM BANK سهام بنك',
+      'CREDIT DU MAROC مصرف المغرب',
+      'ATTIJARI التجاري وفابنك',
+      'BANQUE POPULAIRE البنك الشعبي المركزي',
+      'CFG BANK سي ف ج بانك',
+      'CREDIT AGRICOLE'
+    ];
+    const banqueOptionsHtml = diligenceSaisieArretBanks
+      .map(value=>`<option value="${escapeAttr(value)}" style="color:#111827;background:#fff;">${escapeHtml(value)}</option>`)
       .join('');
     const findClientByName = (value)=>{
       const normalized = String(value || '').trim().toLowerCase();
@@ -22019,6 +22303,14 @@ function requestDiligenceSaisieArretModal(){
             CIN/RC
             <input id="diligenceSaisieCinRc" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
           </label>
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            Adresse
+            <input id="diligenceSaisieAdresse" type="text" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
+          <label style="display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;">
+            Montant
+            <input id="diligenceSaisieMontant" type="text" inputmode="decimal" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;">
+          </label>
           <div style="display:grid;gap:9px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
               <strong style="color:#334155;font-size:13px;">Banques</strong>
@@ -22027,8 +22319,7 @@ function requestDiligenceSaisieArretModal(){
               </button>
             </div>
             <div id="diligenceSaisieBanques" style="display:grid;gap:9px;"></div>
-            <datalist id="diligenceSaisieBanqueOptions">${banqueOptionsHtml}</datalist>
-            <small style="color:#64748b;">Chaque banque avec son RIB créera une ligne Saisie Arrêt séparée (maximum 20).</small>
+            <small style="color:#64748b;">Chaque banque créera une ligne Saisie Arrêt séparée (RIB facultatif, maximum 20).</small>
           </div>
           <div id="diligenceSaisieError" style="display:none;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 11px;font-size:13px;font-weight:700;"></div>
         </div>
@@ -22071,6 +22362,8 @@ function requestDiligenceSaisieArretModal(){
     const referenceInput = card.querySelector('#diligenceSaisieReferenceClient');
     const debiteurInput = card.querySelector('#diligenceSaisieDebiteur');
     const cinRcInput = card.querySelector('#diligenceSaisieCinRc');
+    const adresseInput = card.querySelector('#diligenceSaisieAdresse');
+    const montantInput = card.querySelector('#diligenceSaisieMontant');
     const banquesContainer = card.querySelector('#diligenceSaisieBanques');
     const addBanqueBtn = card.querySelector('#diligenceSaisieAddBanqueBtn');
     const syncBanqueRows = ()=>{
@@ -22092,7 +22385,10 @@ function requestDiligenceSaisieArretModal(){
       row.innerHTML = `
         <label style="display:grid;gap:5px;color:#334155;font-weight:700;font-size:12px;">
           <span data-banque-title>Banque</span>
-          <input type="text" data-banque-name list="diligenceSaisieBanqueOptions" autocomplete="off" dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:9px;padding:9px 10px;font-size:13px;outline:none;">
+          <select data-banque-name dir="auto" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:9px;padding:9px 10px;font-size:13px;outline:none;background:#fff;color:#111827;color-scheme:light;">
+            <option value="" style="color:#111827;background:#fff;"></option>
+            ${banqueOptionsHtml}
+          </select>
         </label>
         <label style="display:grid;gap:5px;color:#334155;font-weight:700;font-size:12px;">
           RIB
@@ -22106,7 +22402,7 @@ function requestDiligenceSaisieArretModal(){
         row.remove();
         syncBanqueRows();
       });
-      row.querySelectorAll('input').forEach(input=>{
+      row.querySelectorAll('input, select').forEach(input=>{
         input.addEventListener('input', ()=>{
           const error = card.querySelector('#diligenceSaisieError');
           if(error) error.style.display = 'none';
@@ -22118,7 +22414,7 @@ function requestDiligenceSaisieArretModal(){
     };
     addBanqueBtn?.addEventListener('click', addBanqueRow);
     addBanqueRow();
-    [clientInput, referenceInput, debiteurInput, cinRcInput].forEach(input=>{
+    [clientInput, referenceInput, debiteurInput, cinRcInput, adresseInput, montantInput].forEach(input=>{
       input.addEventListener('focus', ()=>{
         input.style.borderColor = '#2563eb';
         input.style.boxShadow = '0 0 0 3px rgba(37,99,235,.12)';
@@ -22136,6 +22432,8 @@ function requestDiligenceSaisieArretModal(){
       const referenceClient = String(referenceInput.value || '').trim();
       const debiteur = String(debiteurInput.value || '').trim();
       const cinRc = String(cinRcInput.value || '').trim();
+      const adresse = String(adresseInput.value || '').trim();
+      const montant = String(montantInput.value || '').trim();
       if(!clientName) return showError('Nom du client obligatoire.', clientInput);
       const selectedClient = findClientByName(clientName);
       if(!selectedClient) return showError('Choisissez un client existant dans la liste.', clientInput);
@@ -22149,18 +22447,159 @@ function requestDiligenceSaisieArretModal(){
       }));
       const missingBanque = banques.find(item=>!item.banque);
       if(missingBanque) return showError('Nom de la banque obligatoire.', missingBanque.banqueInput);
-      const missingRib = banques.find(item=>!item.rib);
-      if(missingRib) return showError('RIB obligatoire pour chaque banque.', missingRib.ribInput);
       cleanup({
         clientId: Number(selectedClient.id),
         clientName: String(selectedClient.name || '').trim(),
         referenceClient,
         debiteur,
         cinRc,
+        adresse,
+        montant,
         banques: banques.map(({ banque, rib })=>({ banque, rib }))
       });
     });
     card.querySelector('#diligenceSaisieCancelBtn')?.addEventListener('click', ()=>cleanup(null));
+    backdrop.addEventListener('click', (event)=>{
+      if(event.target === backdrop) cleanup(null);
+    });
+    document.addEventListener('keydown', onKeyDown, true);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    setTimeout(()=>clientInput?.focus(), 0);
+  });
+}
+
+function requestDiligenceSbienModal(){
+  return new Promise((resolve)=>{
+    const availableClients = (Array.isArray(AppState?.clients) ? AppState.clients : [])
+      .filter(client=>Number.isFinite(Number(client?.id)) && String(client?.name || '').trim())
+      .sort((a, b)=>String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base', numeric: true }));
+    const clientOptionsHtml = availableClients
+      .map(client=>`<option value="${escapeAttr(String(client.name || '').trim())}"></option>`)
+      .join('');
+    const findClientByName = (value)=>{
+      const normalized = String(value || '').trim().toLowerCase();
+      if(!normalized) return null;
+      return availableClients.find(client=>String(client?.name || '').trim().toLowerCase() === normalized) || null;
+    };
+    const backdrop = document.createElement('div');
+    backdrop.className = 'diligence-saisie-modal-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(15,23,42,.46);backdrop-filter:blur(5px);';
+    const card = document.createElement('div');
+    card.className = 'diligence-saisie-modal';
+    card.style.cssText = 'width:min(100%,560px);max-height:calc(100vh - 44px);background:#fff;border:1px solid #dbe4f0;border-radius:16px;box-shadow:0 28px 80px rgba(15,23,42,.28);overflow:auto;font-family:inherit;';
+    const fieldStyle = 'width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;';
+    const labelStyle = 'display:grid;gap:6px;color:#334155;font-weight:700;font-size:13px;';
+    card.innerHTML = `
+      <form id="diligenceSbienForm" style="margin:0;">
+        <div style="display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid #e5edf7;background:linear-gradient(135deg,#f8fbff,#eef5ff);">
+          <div style="width:42px;height:42px;border-radius:12px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 22px rgba(29,78,216,.22);">
+            <i class="fa-solid fa-list-check"></i>
+          </div>
+          <div style="min-width:0;">
+            <h3 style="margin:0;color:#0f172a;font-size:18px;line-height:1.2;">Ajouter S/BIENS</h3>
+            <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Créer un dossier S/BIENS et l’afficher directement dans Diligence.</p>
+          </div>
+        </div>
+        <div style="padding:18px 20px 8px;display:grid;gap:13px;">
+          <label style="${labelStyle}">Nom du client
+            <input id="diligenceSbienClientName" type="text" list="diligenceSbienClientOptions" autocomplete="off" dir="auto" style="${fieldStyle}">
+            <datalist id="diligenceSbienClientOptions">${clientOptionsHtml}</datalist>
+          </label>
+          <label style="${labelStyle}">Référence client
+            <input id="diligenceSbienReferenceClient" type="text" autocomplete="off" dir="auto" style="${fieldStyle}">
+          </label>
+          <label style="${labelStyle}">Débiteur
+            <input id="diligenceSbienDebiteur" type="text" autocomplete="off" dir="auto" style="${fieldStyle}">
+          </label>
+          <label style="${labelStyle}">CIN/RC
+            <input id="diligenceSbienCinRc" type="text" autocomplete="off" dir="auto" style="${fieldStyle}">
+          </label>
+          <label style="${labelStyle}">Adresse
+            <input id="diligenceSbienAdresse" type="text" autocomplete="off" dir="auto" style="${fieldStyle}">
+          </label>
+          <label style="${labelStyle}">Montant
+            <input id="diligenceSbienMontant" type="text" inputmode="decimal" autocomplete="off" dir="auto" style="${fieldStyle}">
+          </label>
+          <div id="diligenceSbienError" style="display:none;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 11px;font-size:13px;font-weight:700;"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 20px 20px;">
+          <button type="button" id="diligenceSbienCancelBtn" style="border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;">Annuler</button>
+          <button type="submit" style="border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:10px;padding:10px 16px;font-weight:900;cursor:pointer;box-shadow:0 10px 20px rgba(22,163,74,.18);">
+            <i class="fa-solid fa-plus"></i> Créer
+          </button>
+        </div>
+      </form>
+    `;
+    const cleanup = (value)=>{
+      document.removeEventListener('keydown', onKeyDown, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const showError = (message, input)=>{
+      const error = card.querySelector('#diligenceSbienError');
+      if(error){
+        error.textContent = message;
+        error.style.display = '';
+      }
+      if(input){
+        input.style.borderColor = '#ef4444';
+        input.focus();
+      }
+    };
+    const clearInputError = (input)=>{
+      input.style.borderColor = '#cbd5e1';
+      input.style.boxShadow = '';
+    };
+    const onKeyDown = (event)=>{
+      if(event.key === 'Escape'){
+        event.preventDefault();
+        cleanup(null);
+      }
+    };
+    const form = card.querySelector('#diligenceSbienForm');
+    const clientInput = card.querySelector('#diligenceSbienClientName');
+    const referenceInput = card.querySelector('#diligenceSbienReferenceClient');
+    const debiteurInput = card.querySelector('#diligenceSbienDebiteur');
+    const cinRcInput = card.querySelector('#diligenceSbienCinRc');
+    const adresseInput = card.querySelector('#diligenceSbienAdresse');
+    const montantInput = card.querySelector('#diligenceSbienMontant');
+    [clientInput, referenceInput, debiteurInput, cinRcInput, adresseInput, montantInput].forEach(input=>{
+      input.addEventListener('focus', ()=>{
+        input.style.borderColor = '#2563eb';
+        input.style.boxShadow = '0 0 0 3px rgba(37,99,235,.12)';
+      });
+      input.addEventListener('blur', ()=>clearInputError(input));
+      input.addEventListener('input', ()=>{
+        const error = card.querySelector('#diligenceSbienError');
+        if(error) error.style.display = 'none';
+        clearInputError(input);
+      });
+    });
+    form.addEventListener('submit', (event)=>{
+      event.preventDefault();
+      const clientName = String(clientInput.value || '').trim();
+      const referenceClient = String(referenceInput.value || '').trim();
+      const debiteur = String(debiteurInput.value || '').trim();
+      const cinRc = String(cinRcInput.value || '').trim();
+      const adresse = String(adresseInput.value || '').trim();
+      const montant = String(montantInput.value || '').trim();
+      if(!clientName) return showError('Nom du client obligatoire.', clientInput);
+      const selectedClient = findClientByName(clientName);
+      if(!selectedClient) return showError('Choisissez un client existant dans la liste.', clientInput);
+      if(!referenceClient) return showError('Référence client obligatoire.', referenceInput);
+      if(!debiteur) return showError('Débiteur obligatoire.', debiteurInput);
+      cleanup({
+        clientId: Number(selectedClient.id),
+        clientName: String(selectedClient.name || '').trim(),
+        referenceClient,
+        debiteur,
+        cinRc,
+        adresse,
+        montant
+      });
+    });
+    card.querySelector('#diligenceSbienCancelBtn')?.addEventListener('click', ()=>cleanup(null));
     backdrop.addEventListener('click', (event)=>{
       if(event.target === backdrop) cleanup(null);
     });
@@ -22201,11 +22640,56 @@ function focusDiligenceSaisieArretRow(referenceClient){
   syncDiligenceSaisieArretFilterVisibility();
 }
 
+function focusDiligenceSbienRow(referenceClient){
+  filterDiligenceProcedure = 'S/bien';
+  filterDiligenceSort = 'all';
+  filterDiligenceDelegation = 'all';
+  filterDiligenceOrdonnance = 'all';
+  filterDiligenceTribunal = 'all';
+  filterDiligenceLotDu = '';
+  filterDiligenceLotDuValues = new Set();
+  filterDiligenceObservation = '';
+  filterDiligenceMiseAPrix = 'all';
+  paginationState.diligence = 1;
+  const search = $('diligenceSearchInput');
+  if(search) search.value = String(referenceClient || '').trim();
+  const procedureSelect = $('diligenceProcedureFilter');
+  if(procedureSelect) procedureSelect.value = filterDiligenceProcedure;
+  const sortSelect = $('diligenceSortFilter');
+  if(sortSelect) sortSelect.value = 'all';
+  const delegationSelect = $('diligenceDelegationFilter');
+  if(delegationSelect) delegationSelect.value = 'all';
+  const ordonnanceSelect = $('diligenceOrdonnanceFilter');
+  if(ordonnanceSelect) ordonnanceSelect.value = 'all';
+  const tribunalInput = $('diligenceTribunalFilter');
+  if(tribunalInput) tribunalInput.value = '';
+  syncDiligenceSaisieArretFilterVisibility();
+}
+
+function getDiligenceSaisieArretBankAddress(banque){
+  const normalized = String(banque || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if(normalized.includes('cih')) return '187 شارع الحسن الثاني الدارالبيضاء';
+  if(normalized.includes('bmci')) return '26 ساحة الأمم المتحدة';
+  if(normalized.includes('bmce') || normalized.includes('bank of africa')) return '140 شارع الحسن الثاني الدارالبيضاء';
+  if(normalized.includes('saham')) return '55 شارع عبد المومن الدارابيضاء';
+  if(normalized.includes('credit du maroc')) return '48-58 شارع محمد الخامس الدارالبيضاء';
+  if(normalized.includes('attijari')) return '201 شارع انفى الدارالبيضاء';
+  if(normalized.includes('banque populaire')) return '101 شارع محمد الزرقطوني';
+  if(normalized.includes('cfg')) return '5 - 7 زنقة إبن طفيل النخيل الدارالبيضاء';
+  if(normalized.includes('credit agricole')) return '59 شارع مولاي يوسف الدارالبيضاء';
+  return '';
+}
+
 async function addDiligenceSaisieArretDossier(){
   if(!canEditData()) return alert('Accès refusé');
   const modalValues = await requestDiligenceSaisieArretModal();
   if(!modalValues) return;
-  const { clientId, clientName, referenceClient, debiteur, cinRc } = modalValues;
+  const { clientId, clientName, referenceClient, debiteur, cinRc, adresse, montant } = modalValues;
   const banques = Array.isArray(modalValues.banques) ? modalValues.banques.slice(0, 20) : [];
   const now = new Date();
   const nowIso = now.toISOString();
@@ -22245,14 +22729,17 @@ async function addDiligenceSaisieArretDossier(){
         referenceClient: '',
         debiteurEp: debiteur,
         cinRc,
+        adresse: String(adresse || '').trim(),
+        montant: String(montant || '').trim(),
         banqueFr: String(banque || '').trim(),
+        adresseBranche: getDiligenceSaisieArretBankAddress(banque),
         rib: String(rib || '').trim(),
         sortPle: 'att plie'
       }
     },
     ville: '',
-    adresse: '',
-    montant: '',
+    adresse: String(adresse || '').trim(),
+    montant: String(montant || '').trim(),
     montantByProcedure: [],
     ww: '',
     marque: '',
@@ -22294,6 +22781,8 @@ async function addDiligenceSaisieArretDossier(){
       `Référence client: ${referenceClient}`,
       `Débiteur: ${debiteur}`,
       `CIN/RC: ${cinRc || '-'}`,
+      `Adresse: ${adresse || '-'}`,
+      `Montant: ${montant || '-'}`,
       `Banques: ${banques.map(item=>item.banque).join(', ')}`
     ]
   });
@@ -22315,6 +22804,116 @@ async function addDiligenceSaisieArretDossier(){
     persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' }).catch(()=>{});
   }catch(err){
     console.warn('Impossible de sauvegarder le dossier saisie arrêt', err);
+    alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
+  }
+}
+
+async function addDiligenceSbienDossier(){
+  if(!canEditData()) return alert('Accès refusé');
+  const modalValues = await requestDiligenceSbienModal();
+  if(!modalValues) return;
+  const { clientId, clientName, referenceClient, debiteur, cinRc, adresse, montant } = modalValues;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const today = formatDateDDMMYYYY(now);
+  const client = AppState.clients.find(c=>Number(c?.id) === Number(clientId))
+    || AppState.clients.find(c=>String(c?.name || '').trim().toLowerCase() === String(clientName || '').trim().toLowerCase());
+  if(!client) return alert('Choisissez un client existant dans la liste.');
+  if(!canEditClient(client)) return alert('Accès refusé');
+  const dossier = {
+    importUid: createImportTrackingId('dossier'),
+    importGlobalBatchId: '',
+    importAudienceBatchId: '',
+    importDiligenceBatchId: '',
+    factureInvoices: [],
+    isManualEntry: true,
+    isDiligenceManualEntry: true,
+    isDiligenceOnly: true,
+    creationSource: 'diligence-sbien-manual-entry',
+    hideFromSuivi: true,
+    createdAt: nowIso,
+    suiviUpdatedAt: nowIso,
+    debiteur,
+    cin: cinRc,
+    cinNonDebiteur: '',
+    adversaire: '',
+    nRef: '',
+    boiteNo: '',
+    referenceClient,
+    dateAffectation: today,
+    gestionnaire: '',
+    sanlamAdversaires: {},
+    procedure: 'S/bien',
+    procedureList: ['S/bien'],
+    procedureDetails: {
+      'S/bien': {
+        dateDepot: '',
+        referenceClient: '',
+        cinRc,
+        tribunal: ''
+      }
+    },
+    ville: '',
+    adresse: String(adresse || '').trim(),
+    montant: String(montant || '').trim(),
+    montantByProcedure: [],
+    ww: '',
+    marque: '',
+    type: '',
+    caution: '',
+    cautionAdresse: '',
+    cautionVille: '',
+    cautionCin: '',
+    cautionRc: '',
+    efNumber: '',
+    conservation: '',
+    metrage: '',
+    note: '',
+    avancement: '',
+    statut: 'En cours',
+    files: [],
+    history: []
+  };
+  queueDossierHistoryEntry(dossier, {
+    source: 'diligence',
+    field: 'dossier',
+    before: '',
+    after: 'Dossier S/BIENS créé depuis Diligence'
+  }, { immediate: true });
+  client.dossiers.unshift(dossier);
+  appendTeamHistoryEntry({
+    id: `diligence_sbien_${client.id}_${Date.now()}`,
+    at: nowIso,
+    action: 'dossier-create',
+    target: `${client.name} - ${referenceClient}`,
+    actor: String(currentUser?.username || '-'),
+    actorRole: String(currentUser?.role || ''),
+    summary: `Dossier S/BIENS ajouté: ${client.name}`,
+    details: [
+      `Client: ${client.name}`,
+      `Référence client: ${referenceClient}`,
+      `Débiteur: ${debiteur}`,
+      `CIN/RC: ${cinRc || '-'}`,
+      `Adresse: ${adresse || '-'}`,
+      `Montant: ${montant || '-'}`
+    ]
+  });
+  handleDossierDataChange({ audience: false, rerenderLinked: true });
+  focusDiligenceSbienRow(referenceClient);
+  showView('diligence', { force: true });
+  renderDiligence({ force: true });
+  try{
+    const saved = await persistDossierPatchNow({
+      action: 'create',
+      clientId: Number(client.id),
+      dossier
+    }, { source: 'diligence-sbien', immediate: true });
+    if(!saved){
+      alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
+    }
+    persistStateSliceNow('teamHistory', AppState.teamHistory, { source: 'team-history' }).catch(()=>{});
+  }catch(err){
+    console.warn('Impossible de sauvegarder le dossier S/BIENS', err);
     alert('Dossier créé localement mais non sauvegardé sur le serveur. Réessayez avant de quitter.');
   }
 }
@@ -24213,6 +24812,20 @@ function buildSuiviRowForDossier(client, dossier, index){
 function buildSuiviRowsForClient(client){
   if(!client || !canViewClient(client)) return [];
   return (Array.isArray(client?.dossiers) ? client.dossiers : []).reduce((rows, dossier, index)=>{
+    const dossierProcedures = normalizeProcedures(dossier);
+    const isSbienProcedure = dossierProcedures.some(
+      procName=>getDiligenceProcedureFilterValue(procName) === 'S/bien'
+    );
+    const sbienCreationSource = String(dossier?.creationSource || '').trim().toLowerCase();
+    const isDiligenceOnlySbien = isSbienProcedure && (
+      sbienCreationSource === 'diligence-sbien-line-import'
+      || sbienCreationSource === 'diligence-sbien-manual-entry'
+      || dossier?.isDiligenceImportLineEntry === true
+      || /^dil_sbien/i.test(String(dossier?.importDiligenceBatchId || '').trim())
+    );
+    if(isDiligenceOnlySbien){
+      return rows;
+    }
     if(!isDiligenceOnlyDossier(dossier)){
       rows.push(buildSuiviRowForDossier(client, dossier, index));
     }
@@ -25345,7 +25958,11 @@ function syncDiligenceObservationFilterOptions(rows){
   const searchInput = $('diligenceObservationOptionSearch');
   if(!optionsBox) return;
   const values = [...new Set((Array.isArray(rows) ? rows : [])
-    .filter(row=>isDiligenceSciTfProcedure(row?.procedure) || isDiligenceSaisieArretProcedure(row?.procedure))
+    .filter(row=>
+      isDiligenceSciTfProcedure(row?.procedure)
+      || isDiligenceSaisieArretProcedure(row?.procedure)
+      || getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien'
+    )
     .map(getDiligenceRowObservationFilterValue))]
     .sort((a, b)=>getDiligenceObservationFilterLabel(a).localeCompare(getDiligenceObservationFilterLabel(b), 'fr', { sensitivity: 'base', numeric: true }));
   const optionQuery = normalizeDiligenceSearchQuery(searchInput?.value || '');
@@ -25417,7 +26034,10 @@ function syncDiligenceProcedureFilter(rows){
     if(procedureValue) set.add(procedureValue);
   });
   const sorted = [...set].sort((a,b)=>a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' }));
-  select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+  select.innerHTML = `<option value="all">Toutes</option>${sorted.map(v=>{
+    const label = v === 'S/bien' ? 'S/BIENS' : v;
+    return `<option value="${escapeHtml(v)}">${escapeHtml(label)}</option>`;
+  }).join('')}`;
   if(!set.has(filterDiligenceProcedure)){
     filterDiligenceProcedure = 'all';
   }
@@ -25839,7 +26459,9 @@ const DILIGENCE_AUTOSIZE_FIELDS = new Set([
   'attDelegationOuDelegat',
   'huissier',
   'sort',
-  'tribunal'
+  'tribunal',
+  'montant',
+  'adresse'
 ]);
 
 function shouldAutoSizeDiligenceField(field){
@@ -25864,7 +26486,9 @@ function getDiligenceAutoSizeWidthCh(field, text){
     attDelegationOuDelegat: 10,
     huissier: 14,
     sort: 12,
-    tribunal: 16
+    tribunal: 16,
+    montant: 12,
+    adresse: 18
   };
   const maxByField = {
     referenceClient: 34,
@@ -25880,6 +26504,8 @@ function getDiligenceAutoSizeWidthCh(field, text){
     huissier: 34,
     tribunal: 36,
     sort: 18,
+    montant: 20,
+    adresse: 42,
     attOrdOrOrdOk: 14,
     attDelegationOuDelegat: 16
   };
@@ -26092,6 +26718,7 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
     return `
       <select
         class="diligence-inline-select"
+        data-field="sortPle"
         onchange="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
         <option value="" ${val === '' ? 'selected' : ''}>Sort SCI</option>
         <option value="-" ${val === '-' ? 'selected' : ''}>-</option>
@@ -26348,6 +26975,20 @@ function renderDiligenceEditableCell(row, procEncoded, field, value){
       </select>
     `;
   }
+  if(field === 'adresseBranche'){
+    if(!row?.canEdit){
+      return `<span dir="ltr" style="display:inline-block;text-align:left;unicode-bidi:plaintext;">${escapeHtml(normalized || '-')}</span>`;
+    }
+    return `
+      <input
+        type="text"
+        class="diligence-inline-input"
+        dir="ltr"
+        style="text-align:left;unicode-bidi:plaintext;"
+        value="${escapeAttr(value || '')}"
+        oninput="updateDiligenceFieldEncoded(${row.clientId},${row.dossierIndex},'${procEncoded}','${field}',this.value)">
+    `;
+  }
   if(!row?.canEdit){
     return escapeHtml(normalized || '-');
   }
@@ -26383,6 +27024,7 @@ function applyDiligenceFieldValue(clientId, dossierIndex, procKey, field, value)
     || field === 'debiteur'
     || field === 'caution'
     || field === 'montant'
+    || field === 'adresse'
     || field === 'type'
     || (field === 'efNumber' && !isDiligenceSciTfProcedure(proc))
     || (field === 'conservation' && !isDiligenceSciTfProcedure(proc))
@@ -26514,10 +27156,17 @@ function getCheckedDiligenceSaisieArretRows(){
 
 function syncDiligenceSaisieArretDeleteButton(){
   const btn = $('deleteDiligenceSaisieArretBtn');
-  if(!btn) return;
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure) && canEditData();
-  btn.style.display = show ? '' : 'none';
-  btn.disabled = !show || !getCheckedDiligenceSaisieArretRows().length;
+  if(btn){
+    btn.style.display = show ? '' : 'none';
+    btn.disabled = !show || !getCheckedDiligenceSaisieArretRows().length;
+  }
+  const sbienBtn = $('deleteDiligenceSbienBtn');
+  const showSbien = getDiligenceProcedureFilterValue(filterDiligenceProcedure) === 'S/bien' && canEditData();
+  if(sbienBtn){
+    sbienBtn.style.display = showSbien ? '' : 'none';
+    sbienBtn.disabled = !showSbien || !getCheckedDiligenceSbienRows().length;
+  }
 }
 
 async function deleteCheckedDiligenceSaisieArretDossiers(){
@@ -26577,6 +27226,78 @@ async function deleteCheckedDiligenceSaisieArretDossiers(){
   });
   patches.forEach(patch=>{
     persistDossierPatchNow(patch, { source: 'diligence-saisie-arret-delete' }).catch(()=>{});
+  });
+  refreshPrimaryViews({ includeRecycle: true, force: true, showView: 'diligence' });
+}
+
+function getCheckedDiligenceSbienRows(){
+  const seenDossiers = new Set();
+  return getCheckedDiligenceRowsForBatchUpdate().filter(row=>{
+    if(getDiligenceProcedureFilterValue(row?.procedure) !== 'S/bien') return false;
+    const key = `${row?.clientId}::${row?.dossierIndex}`;
+    if(seenDossiers.has(key)) return false;
+    seenDossiers.add(key);
+    return true;
+  });
+}
+
+async function deleteCheckedDiligenceSbienDossiers(){
+  if(!canEditData()) return alert('Suppression non autorisee');
+  const rows = getCheckedDiligenceSbienRows()
+    .slice()
+    .sort((a, b)=>{
+      const clientCompare = String(a?.clientId ?? '').localeCompare(String(b?.clientId ?? ''), 'fr', { numeric: true });
+      if(clientCompare) return clientCompare;
+      return Number(b?.dossierIndex ?? -1) - Number(a?.dossierIndex ?? -1);
+    });
+  if(!rows.length) return alert('Selectionnez au moins un dossier S/BIENS.');
+  const count = rows.length;
+  if(!await confirmDangerousAction(`Envoyer ${count} dossier(s) S/BIENS coches vers la corbeille ?`, { confirmationWord: 'SUPPRIMER' })) return;
+
+  const patches = [];
+  const removedDossiers = [];
+  rows.forEach(row=>{
+    const client = AppState.clients.find(c=>c.id == row.clientId);
+    if(!client || !Array.isArray(client.dossiers)) return;
+    const index = Number(row.dossierIndex);
+    const dossier = client.dossiers[index];
+    if(!dossier || !normalizeProcedures(dossier).some(procName=>getDiligenceProcedureFilterValue(procName) === 'S/bien')) return;
+    pushRecycleBinEntry('dossier_delete', {
+      clientId: client.id,
+      clientName: client.name || '',
+      dossierIndex: index,
+      dossier: JSON.parse(JSON.stringify(dossier || {})),
+      importHistoryEntries: collectRelevantImportHistoryEntries({
+        clientId: client.id,
+        dossiers: [dossier]
+      })
+    });
+    removedDossiers.push(dossier);
+    client.dossiers.splice(index, 1);
+    patches.push({
+      action: 'delete',
+      clientId: Number(client.id),
+      dossierIndex: Number(index),
+      externalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
+      previousExternalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
+      referenceClient: String(dossier.referenceClient || '').trim()
+    });
+  });
+
+  if(!removedDossiers.length){
+    clearDiligencePrintSelection({ immediate: true });
+    renderDiligence({ force: true });
+    return alert('Aucun dossier S/BIENS valide a supprimer.');
+  }
+
+  clearDiligencePrintSelection({ immediate: true });
+  syncImportHistoryWithCurrentState();
+  handleDossierDataChange({
+    audience: removedDossiers.some(dossier=>dossierHasAudienceImpact(dossier)),
+    rerenderLinked: true
+  });
+  patches.forEach(patch=>{
+    persistDossierPatchNow(patch, { source: 'diligence-sbien-delete' }).catch(()=>{});
   });
   refreshPrimaryViews({ includeRecycle: true, force: true, showView: 'diligence' });
 }
@@ -26784,7 +27505,11 @@ function getFilteredDiligenceRows(allRows){
       && normalizeDiligenceSortSciValue(row?.details?.sortSci || '') !== filterDiligenceSortSci
     ) return false;
     if(
-      (isDiligenceSciTfProcedure(row?.procedure) || isDiligenceSaisieArretProcedure(row?.procedure))
+      (
+        isDiligenceSciTfProcedure(row?.procedure)
+        || isDiligenceSaisieArretProcedure(row?.procedure)
+        || getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien'
+      )
       && filterDiligenceObservationValues.size
       && !filterDiligenceObservationValues.has(getDiligenceRowObservationFilterValue(row))
     ) return false;
@@ -27051,6 +27776,49 @@ function buildDiligenceExportRowCells(row, columns){
   });
 }
 
+function getDiligenceSaisieArretArabicBankAddress(row){
+  const details = row?.details && typeof row.details === 'object' ? row.details : {};
+  const bank = details.banqueFr || details.banque || '';
+  const storedAddress = String(details.adresseBranche || details.adresseBanque || '').trim();
+  const mappedAddress = getDiligenceSaisieArretBankAddress(bank);
+  const source = /[\u0600-\u06ff]/.test(storedAddress) ? storedAddress : (mappedAddress || storedAddress);
+  const numbers = (source.match(/\d+(?:\s*[-/]\s*\d+)*/g) || [])
+    .map(value=>value.replace(/\s+/g, ''))
+    .join(' ')
+    .trim();
+  const arabic = source
+    .replace(/\d+(?:\s*[-/]\s*\d+)*/g, ' ')
+    .replace(/[^\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\s\u060c.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [numbers, arabic].filter(Boolean).join(' ').trim();
+}
+
+function getDiligenceSaisieArretSortPlieExportValue(row){
+  const renderedRow = [...document.querySelectorAll('#diligenceBody tr[data-client-id][data-dossier-index][data-proc-key]')]
+    .find((tr)=>
+      String(tr.dataset.clientId || '') === String(row?.clientId ?? '')
+      && String(tr.dataset.dossierIndex || '') === String(row?.dossierIndex ?? '')
+      && String(tr.dataset.procKey || '') === String(row?.procedure || '')
+    );
+  const renderedValue = String(renderedRow?.querySelector('select[data-field="sortPle"]')?.value || '').trim();
+  const data = getDossierByIds(row?.clientId, row?.dossierIndex);
+  const procedure = String(row?.procedure || '').trim();
+  const detailsByProcedure = data?.dossier?.procedureDetails && typeof data.dossier.procedureDetails === 'object'
+    ? data.dossier.procedureDetails
+    : {};
+  const liveDetails = detailsByProcedure[procedure]
+    || Object.entries(detailsByProcedure).find(([key])=>isDiligenceSaisieArretProcedure(key))?.[1];
+  const value = String(
+    renderedValue
+    || liveDetails?.sortPle
+    || row?.details?.sortPle
+    || row?.delegation
+    || ''
+  ).trim();
+  return value || 'att plie';
+}
+
 function finalizeDiligenceExportDataset(rows){
   const sourceRows = Array.isArray(rows) ? rows : [];
   const showSciTfColumns = shouldShowDiligenceSciTfColumnsForRows(sourceRows);
@@ -27097,13 +27865,13 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Montant', width: 18, getValue: (row)=>row?.details?.montant || row?.dossier?.montant || '' },
       { header: 'RIB', width: 26, getValue: (row)=>row?.details?.rib || '' },
       { header: 'Banque / STE FR', width: 24, getValue: (row)=>row?.details?.banqueFr || row?.details?.banque || '' },
-      { header: 'Adresse Banque', width: 34, getValue: (row)=>row?.details?.adresseBranche || row?.details?.adresseBanque || '' },
+      { header: 'Adresse Banque', width: 34, getValue: (row)=>getDiligenceSaisieArretArabicBankAddress(row) },
       { header: 'Depot', width: 20, getValue: (row)=>row?.details?.depotLe || row?.details?.dateDepot || '' },
       { header: 'Ref dossier', width: 26, getValue: (row)=>getDiligenceReferenceDossierValue(row) },
       { header: 'Observation', width: 30, getValue: (row)=>row?.details?.observation || '' },
       { header: 'Sort ORD', width: 18, getValue: (row)=>getDiligenceOrdonnanceCellValue(row) },
       { header: 'Execution N°', width: 20, getValue: (row)=>row?.details?.executionNo || '' },
-      { header: 'Sort plie', width: 18, getValue: (row)=>row?.details?.sortPle || 'att plie' },
+      { header: 'Sort plie', width: 18, getValue: (row)=>getDiligenceSaisieArretSortPlieExportValue(row) },
       { header: 'Notif banque', width: 24, getValue: (row)=>row?.details?.notifBanque || '' },
       { header: 'Notif debiteur', width: 24, getValue: (row)=>row?.details?.notifDebiteur || '' },
       { header: 'Boite', width: 14, getValue: (row)=>row?.dossier?.boiteNo || '' },
@@ -27113,12 +27881,13 @@ function finalizeDiligenceExportDataset(rows){
       { header: 'Gestionnaire', width: 22, getValue: (row)=>row?.dossier?.gestionnaire || row?.details?.gestionnaire || '' },
       { header: 'CIN/RC', width: 18, getValue: (row)=>row?.details?.cinRc || row?.details?.cin || row?.dossier?.cin || row?.dossier?.cautionCin || '' }
     ];
-    const tableRows = sourceRows.map((row)=>columns.map((column)=>String(column.getValue(row) || '').trim()));
+    const activeColumns = columns.filter((column)=>sourceRows.some((row)=>String(column.getValue(row) || '').trim()));
+    const tableRows = sourceRows.map((row)=>activeColumns.map((column)=>String(column.getValue(row) || '').trim()));
     return {
       rows: sourceRows,
-      headers: columns.map((column)=>column.header),
+      headers: activeColumns.map((column)=>column.header),
       tableRows,
-      colWidths: columns.map((column)=>({ wch: Number(column.width) || 22 }))
+      colWidths: activeColumns.map((column)=>({ wch: Number(column.width) || 22 }))
     };
   }
   const showNantissementMedColumns = shouldShowDiligenceNantissementMedColumnsForRows(sourceRows);
@@ -30586,6 +31355,13 @@ function getDiligenceRowReferenceValue(row){
 function buildDiligenceDuplicateKey(row){
   const refDossier = getDiligenceRowReferenceValue(row);
   const procedureValue = getDiligenceProcedureFilterValue(row?.procedure || '');
+  if(
+    procedureValue === 'S/bien'
+    && (
+      row?.dossier?.creationSource === 'diligence-sbien-line-import'
+      || row?.dossier?.creationSource === 'diligence-sbien-manual-entry'
+    )
+  ) return '';
   if(procedureValue === 'SAISIE ARRÊT' || procedureValue === 'SCI TF') return '';
   const procedure = String(row?.procedure || '').trim().toLowerCase();
   const debiteur = String(row?.dossier?.debiteur || '')
@@ -33698,19 +34474,23 @@ function syncDiligenceSaisieArretFilterVisibility(){
   const sortContainer = $('diligenceSortFilterContainer') || $('diligenceSortFilter')?.closest?.('.audience-color-filter');
   const delegationContainer = $('diligenceDelegationFilterContainer') || $('diligenceDelegationFilter')?.closest?.('.audience-color-filter');
   const addBtn = $('addDiligenceSaisieArretBtn');
+  const sbienAddBtn = $('addDiligenceSbienBtn');
   const importBtn = $('importDiligenceSaisieArretBtn');
+  const sbienImportBtn = $('importDiligenceSbienBtn');
   const normalImportBtn = $('importDiligenceBtn');
   const show = isDiligenceSaisieArretProcedure(filterDiligenceProcedure);
+  const isSbien = getDiligenceProcedureFilterValue(filterDiligenceProcedure) === 'S/bien';
   const isSciTf = isDiligenceSciTfFilterSelected();
+  const showObservation = show || isSciTf || isSbien;
   const hideSort = show || isSciTf;
   const useDelegationFilter = shouldUseDiligenceDelegationFilter(filterDiligenceProcedure) || show;
   if(lotDuContainer) lotDuContainer.style.display = (show || isSciTf) ? '' : 'none';
   if(lotDuInput) lotDuInput.style.display = 'none';
   if(lotDuMenu) lotDuMenu.style.display = (show || isSciTf) ? 'block' : 'none';
   if(sortSciContainer) sortSciContainer.style.display = isSciTf ? '' : 'none';
-  if(observationContainer) observationContainer.style.display = (show || isSciTf) ? '' : 'none';
+  if(observationContainer) observationContainer.style.display = showObservation ? '' : 'none';
   if(observationInput) observationInput.style.display = 'none';
-  if(observationMenu) observationMenu.style.display = (show || isSciTf) ? 'block' : 'none';
+  if(observationMenu) observationMenu.style.display = showObservation ? 'block' : 'none';
   if(sciTfObservationBulkContainer) sciTfObservationBulkContainer.style.display = isSciTf && canEditData() ? '' : 'none';
   if(!isSciTf){
     filterDiligenceSortSci = 'all';
@@ -33718,10 +34498,12 @@ function syncDiligenceSaisieArretFilterVisibility(){
     if(sortSciSelect) sortSciSelect.value = 'all';
   }
   if(!show && !isSciTf) closeDiligenceLotDuFilterPanel();
-  if(!show && !isSciTf) closeDiligenceObservationFilterPanel();
+  if(!showObservation) closeDiligenceObservationFilterPanel();
   if(addBtn) addBtn.style.display = show && canEditData() ? '' : 'none';
+  if(sbienAddBtn) sbienAddBtn.style.display = isSbien && canEditData() ? '' : 'none';
   if(importBtn) importBtn.style.display = show && canImportData() ? '' : 'none';
-  if(normalImportBtn) normalImportBtn.style.display = show ? 'none' : '';
+  if(sbienImportBtn) sbienImportBtn.style.display = isSbien && canImportData() ? '' : 'none';
+  if(normalImportBtn) normalImportBtn.style.display = (show || isSbien) ? 'none' : '';
   if(hideSort){
     filterDiligenceSort = 'all';
     const sortSelect = $('diligenceSortFilter');

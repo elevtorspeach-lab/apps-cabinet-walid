@@ -4006,6 +4006,26 @@ tr[class*="color-"]:hover{filter:brightness(0.96)}
   background:#f5f3ff;
 }
 
+#diligenceSection .diligence-sbien-observation-cell{
+  background:#dbeafe;
+  box-shadow:inset 3px 0 0 #2563eb;
+}
+
+#diligenceSection .diligence-sbien-observation-cell .diligence-inline-input{
+  border-color:#60a5fa;
+  background:#eff6ff;
+  color:#1e3a8a;
+  font-weight:600;
+}
+
+#diligenceSection tbody tr:hover .diligence-sbien-observation-cell{
+  background:#bfdbfe;
+}
+
+#diligenceSection tbody tr:hover .diligence-sbien-observation-cell .diligence-inline-input{
+  background:#dbeafe;
+}
+
 #diligenceSection .diligence-injonction-observation-cell{
   background:#eef2ff;
   box-shadow:inset 3px 0 0 #818cf8;

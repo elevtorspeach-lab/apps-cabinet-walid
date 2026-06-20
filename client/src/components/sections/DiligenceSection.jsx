@@ -154,11 +154,21 @@ function DiligenceSection() {
             <button id="addDiligenceSaisieArretBtn" className="btn-success" type="button" style={{ display: 'none' }}>
               <i className="fa-solid fa-plus"></i> Ajouter saisie arrêt
             </button>
+            <button id="addDiligenceSbienBtn" className="btn-success" type="button" style={{ display: 'none' }}>
+              <i className="fa-solid fa-plus"></i> Ajouter S/BIENS
+            </button>
             <button id="importDiligenceSaisieArretBtn" className="btn-primary btn-saisie-arret-import" type="button" style={{ display: 'none' }}>
               <i className="fa-solid fa-file-import"></i> Importer Saisie Arrêt
             </button>
             <input type="file" id="diligenceSaisieArretImportInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
+            <button id="importDiligenceSbienBtn" className="btn-primary" type="button" style={{ display: 'none' }}>
+              <i className="fa-solid fa-file-import"></i> Importer S/BIENS
+            </button>
+            <input type="file" id="diligenceSbienImportInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
             <button id="deleteDiligenceSaisieArretBtn" className="btn-danger" type="button" style={{ display: 'none' }} disabled>
+              <i className="fa-solid fa-trash"></i> Supprimer cochés
+            </button>
+            <button id="deleteDiligenceSbienBtn" className="btn-danger" type="button" style={{ display: 'none' }} disabled>
               <i className="fa-solid fa-trash"></i> Supprimer cochés
             </button>
             <button id="exportDiligenceBtn" className="btn-primary" type="button">

@@ -149,7 +149,7 @@ function getDiligenceColCount(){
     if(cmdMode !== 'default') return 24;
     return 17;
   }
-  if(diligenceVirtualCompactProcedureMode === 'sbien') return 14;
+  if(diligenceVirtualCompactProcedureMode === 'sbien') return 18;
   if(diligenceVirtualCompactProcedureMode === 'sfdc') return 13;
   if(shouldShowDiligenceNantissementColumns(diligenceVirtualRows)){
     if(hasDiligenceNantissementNbRows(diligenceVirtualRows)) return 31;
@@ -355,7 +355,7 @@ function buildDiligenceHeadHtml(){
     <th>Client</th>
     <th>Type</th>
     <th>Référence client</th>
-    <th>Nom</th>
+    <th>${compactMode === 'sbien' ? 'Débiteur' : 'Nom'}</th>
     <th>Date dépôt</th>
     <th>Référence dossier</th>
     ${diligenceVirtualShowAssColumns ? '<th>Juge</th><th>Sort</th>' : ''}
@@ -367,12 +367,15 @@ function buildDiligenceHeadHtml(){
     ${showStandardContinuation ? '<th>Certificat non appel</th>' : (showSharedNotificationColumns && !diligenceVirtualShowAssColumns ? '<th>Certificat non appel</th>' : '')}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Execution N°</th>' : '') : '<th>Execution N°</th>'}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Ville</th>' : '') : '<th>Ville</th>'}
+    ${compactMode === 'sbien' ? '<th>Observation</th>' : ''}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Délégation</th>' : '') : '<th>Délégation</th>'}
     ${diligenceVirtualShowAssColumns ? (showStandardContinuation ? '<th>Huissier</th>' : '') : '<th>Huissier</th>'}
     ${avisHeader ? `<th>${avisHeader}</th>` : ''}
     ${compactMode === 'sbien' ? '<th>Date execution</th>' : ''}
     <th>Tribunal</th>
+    ${compactMode === 'sbien' ? '<th>Montant</th><th>Adresse</th>' : ''}
     <th>Boîte N°</th>
+    ${compactMode === 'sbien' ? '<th>Statut</th>' : ''}
   `;
 }
 
@@ -737,6 +740,10 @@ function renderDiligenceRowHtml(row, showPlieColumn){
     ${(showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue))}</td>` : (showSharedNotificationColumns && !isAssLikeProcedure ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'certificatNonAppelStatus', certificatNonAppelValue))}</td>` : '')}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'executionNo', executionValue))}</td>`}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td class="diligence-ville-cell">${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>` : '') : `<td class="diligence-ville-cell">${hideWrap(renderDiligenceEditableCell(row, procEncoded, 'ville', villeValue))}</td>`}
+    ${diligenceVirtualCompactProcedureMode === 'sbien'
+      ? `<td class="diligence-sbien-observation-cell">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>`
+      : ''
+    }
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, delegationField, delegationValue))}</td>`}
     ${isAssLikeProcedure ? ((showAssFollowupColumns || isAssNotifierLayoutValue || isNantissementCurateurNotifieLayoutValue || isAssCurateurNotifieLayoutValue) ? `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>` : '') : `<td>${hideWrap(renderDiligenceEditableCell(row, procEncoded, huissierField, huissierValue))}</td>`}
     ${(avisHeader || isNantissementCurateurNotifieLayoutValue)
@@ -748,7 +755,16 @@ function renderDiligenceRowHtml(row, showPlieColumn){
       : ''
     }
     <td>${isCommandementProcedure ? '' : renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
+    ${diligenceVirtualCompactProcedureMode === 'sbien'
+      ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'montant', row.dossier?.montant || '')}</td>
+         <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', row.dossier?.adresse || '')}</td>`
+      : ''
+    }
     <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
+    ${diligenceVirtualCompactProcedureMode === 'sbien'
+      ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'statut', row.dossier?.statut || '')}</td>`
+      : ''
+    }
   `;
   return `
     <tr ${rowAttrs}>
@@ -1012,7 +1028,11 @@ function renderDiligence(options = {}){
       ) return false;
       if(
         typeof filterDiligenceObservationValues !== 'undefined'
-        && isDiligenceSciTfProcedure(row?.procedure)
+        && (
+          isDiligenceSciTfProcedure(row?.procedure)
+          || isDiligenceSaisieArretProcedure(row?.procedure)
+          || getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien'
+        )
         && filterDiligenceObservationValues.size
         && !filterDiligenceObservationValues.has(getDiligenceRowObservationFilterValue(row))
       ) return false;
