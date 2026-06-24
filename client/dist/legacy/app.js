@@ -711,6 +711,8 @@ const AUDIENCE_EXPORT_HEADER_IMAGE_URL = IS_FILE_PROTOCOL ? './assets/audience-e
 const AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION = 'ad99528-audience-header';
 const AUDIENCE_EXPORT_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/audience-export-template.xlsx' : '/assets/audience-export-template.xlsx'}?v=${AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION}`;
 const AUDIENCE_EXPORT_TEMPLATE_BASE64_SCRIPT_URL = `${IS_FILE_PROTOCOL ? './assets/audience-export-template.base64.js' : '/assets/audience-export-template.base64.js'}?v=${AUDIENCE_EXPORT_TEMPLATE_ASSET_VERSION}`;
+const AUDIENCE_ASS_WORD_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/article-paiement-ass-template.docx' : '/assets/article-paiement-ass-template.docx'}?v=20260620-ass-word-1`;
+const AUDIENCE_RESTITUTION_WORD_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/article-urgence-restitution-template.docx' : '/assets/article-urgence-restitution-template.docx'}?v=20260620-rest-word-1`;
 const FACTURE_EXPORT_TEMPLATE_URL = `${IS_FILE_PROTOCOL ? './assets/facture-export-template.xlsx' : '/assets/facture-export-template.xlsx'}?v=20260604-facture-reference-1`;
 const AUDIENCE_EXPORT_HEADER_IMAGE_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAlgCWAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAElBLoDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9U6KKKACiiigAooooAKKKKACiiigAooooAKKKKAMrxB4V0nxXarbavYQ6hAp3COYZAPrXmnir9k34Y+KrWWJ/DVvp08gwbqx+SUficj9K9goranWq0vgk18zGpRpVfjin8j8s/wBpf9lnU/gfeJf2kj6j4buH2xXWPmjbsj+/XmvA6/Z/4neBbP4keBdX8PXyr5V5AyK5GTG2OGHoR61+OPiLRp/D+tXmn3MZint5WjZG6gg4r7zKsdLF03Gp8UfxPg81wMcJUUqfwy/AzqKKVfvD617Z4h9Kfso/spj41NPreuTzWfh22fywIcCS4fuFY5wBjnjvX2xof7Knwu0KJFTwnZ3cqjHn3QLv+dc1+wzJDJ+z1pPkAAC6uA2P72/mvoCvz7McbXnXnBSaSdrI/QcuwVCGHhNxTbV7sxfDfg3RPB8MkWi6bBpscmN6wLgNjpW1RRXiOTk7tntpKKskFFFFIYUUUUAFZviTW7fw3oGoapdyCK3tYWldz2wK0q+df25vH3/CI/Bi406Jv9I1mUWhQHB8vBZm/wDHR+ddGHouvWjSXVnPiKyoUZVX0R+b/jjxPceL/GGqa1efNcXlw00nuSf8K/Tv9j74lH4jfBrTftEqvqOlj7FOoP3VXIj/ADUCvymJyc19V/sA/Ez/AIRn4kTeG7mYR2OtR7UX+9cKRs/QtX3ea4ZVcK+Vax1X9eh8JlWJdLFLmektH/Xqfo7RRRX54foYUUUUAFMmhS4heKRQ8bjaynoR6U+igDir74L+B9TDC68M2E4Y5O+M8/rXHeIP2Q/hbr0LovhqHTHccyWJKN9ec17NRXRHEVoO8ZtfM55YejUVpQT+R8NfFT/gneLexlu/A+qSXEkYLCxvyC8nsrgAD8a+K9e0G+8NarcadqVtJaXlu5jkikXBUg9K/bmvhP8A4KJ/DuxtdQ8PeJrKBY76/MltdFRjft2lWwOp+Y19RleZ1atVUKzvfZny+aZZSpUnXoq1t0fG3hzw3qXizV7fTNKtJb29nbYkUSliTX2j8Kf+CeIltIbzxzqbwSOAx0+wK74z6M/IP4V6n+xz+zvbfC/wjB4g1a2R/EupR+Zl1ybaI8qqn1IwSffFfSNZZhm8+d0sO7Jde/obZflEORVcQrt9O3qeP6H+yX8LdEhRT4Vtb+Rek15l3/pXf+GPh/4c8Fs7aHo9tphcbW+zrjI9K6Givm516tT45N/M+jhQpU/ggl8gooorA3CiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvy6/be8B/8Id8btRuUQiHV0W/XA+UZJUgfiv61+ot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NH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABNH/Db3wu/6JXX/AL/yn/xNH9mYb/n8+X/gD+zMJfz7/BHjVFfRn/Db3wu/6JXX/v/Kf/ABP/2Q==';
 const CLIENT_FILTER_WORKER_URL = IS_FILE_PROTOCOL ? './workers/client-filter.worker.js' : '/workers/client-filter.worker.js';
@@ -4586,6 +4588,7 @@ function buildSuiviExportTableRows(rows, options = {}){
     const procedures = getSuiviExportProcedureNames(row);
     return procedures.map((procedureName)=>{
       const procedureValues = collectSuiviProcedureExportValues(row?.d, procedureName);
+      const refClientValue = String(row?.__audienceReferenceClientExportValue || row?.d?.referenceClient || '').trim();
       const fallbackTribunal = (row?.tribunalList && row.tribunalList.length)
         ? row.tribunalList.join(', ')
         : '';
@@ -4593,7 +4596,7 @@ function buildSuiviExportTableRows(rows, options = {}){
         row.c?.name || '',
         normalizeDateDDMMYYYY(procedureValues.dateAffectation || row.d?.dateAffectation || '') || '',
         row.d?.type || '',
-        row.d?.referenceClient || '',
+        refClientValue,
         procedureName || '',
         row.d?.debiteur || '',
         row.d?.cin || '',
@@ -21577,6 +21580,8 @@ function setupEvents(){
     });
   });
   $('exportAudienceDiligenceBtn')?.addEventListener('click', ()=>exportAudienceDiligenceXLS({ openAfterExport: true, browserOpenInline: false }));
+  $('exportAudienceAssWordBtn')?.addEventListener('click', exportSelectedAudienceAssWord);
+  $('exportAudienceRestitutionWordBtn')?.addEventListener('click', exportSelectedAudienceRestitutionWords);
   $('exportAudienceFactureBtn')?.addEventListener('click', ()=>{
     exportSelectedAudienceFactureExcel().catch((err)=>{
       console.error(err);
@@ -25519,6 +25524,7 @@ function getDiligenceProcedureVariantValue(procedure){
   if(base === 'ASS') return base;
   if(base === 'S/bien') return base;
   if(base === 'SAISIE ARRÊT') return base;
+  if(base === 'SCI TF') return base;
   return parsed;
 }
 
@@ -29556,19 +29562,34 @@ function isAudienceSaisieArretProcedure(procName){
   return value === 'saisiearret' || value === 'saisiearrt';
 }
 
+function isExcludedAudienceProcedure(procName){
+  const raw = String(procName || '').trim();
+  if(!raw) return false;
+  const normalized = parseProcedureToken(raw);
+  const base = getProcedureBaseName(normalized);
+  const value = String(base || normalized || raw).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return value === 'sfdc'
+    || value === 'sbien'
+    || value === 'injonction'
+    || value === 'commandement'
+    || value === 'scitf'
+    || value === 'nantissementmed';
+}
+
 function isAudienceProcedure(procName){
   const raw = String(procName || '').trim();
   if(!raw) return false;
   if(isAudienceSaisieArretProcedure(raw)) return false;
   const value = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   if(!value) return true;
-  return value !== 'sfdc' && value !== 'sbien' && value !== 'injonction' && value !== 'commandement' && value !== 'scitf' && value !== 'nantissementmed';
+  return !isExcludedAudienceProcedure(raw);
 }
 
 function getAudienceProcedureFilterKey(procName){
   const raw = String(procName || '').trim();
   if(!raw) return '';
   if(isAudienceSaisieArretProcedure(raw)) return '';
+  if(isExcludedAudienceProcedure(raw)) return '';
   const normalized = parseProcedureToken(raw);
   const base = getProcedureBaseName(normalized);
   return String(base || normalized || raw).trim();
@@ -29953,6 +29974,370 @@ function syncAudienceRenderedSelectionCache(rows, pageRows, stateKey, page){
 
 function isAudienceSelectedForPrint(ci, di, procKey){
   return audiencePrintSelection.has(makeAudiencePrintKey(ci, di, procKey));
+}
+
+function getAudienceAssWordAddressLine(address, city){
+  const cleanAddress = String(address || '').trim().replace(/[.\s]+$/g, '');
+  const cleanCity = String(city || '').trim();
+  if(!cleanAddress) return cleanCity;
+  if(!cleanCity) return cleanAddress;
+  const normalizedAddress = normalizeCaseInsensitiveSearchText(cleanAddress);
+  const normalizedCity = normalizeCaseInsensitiveSearchText(cleanCity);
+  return normalizedCity && normalizedAddress.includes(normalizedCity)
+    ? cleanAddress
+    : `${cleanAddress} ${cleanCity}`;
+}
+
+function replaceAudienceAssWordParagraphText(paragraph, replacements){
+  const textNodes = [...paragraph.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    't'
+  )];
+  if(!textNodes.length) return {};
+  const originalLengths = textNodes.map(node=>String(node.textContent || '').length);
+  const originalText = textNodes.map(node=>String(node.textContent || '')).join('');
+  let nextText = originalText;
+  const counts = {};
+  replacements.forEach(({ key, search, value })=>{
+    if(!search || !nextText.includes(search)) return;
+    const pieces = nextText.split(search);
+    const count = pieces.length - 1;
+    if(!count) return;
+    counts[key] = (counts[key] || 0) + count;
+    nextText = pieces.join(String(value || ''));
+  });
+  if(nextText === originalText) return counts;
+  let offset = 0;
+  textNodes.forEach((node, index)=>{
+    const isLast = index === textNodes.length - 1;
+    const length = isLast ? Math.max(0, nextText.length - offset) : originalLengths[index];
+    node.textContent = nextText.slice(offset, offset + length);
+    offset += length;
+  });
+  return counts;
+}
+
+function fillAudienceAssWordDocumentXml(xmlText, values){
+  const parser = new DOMParser();
+  const documentXml = parser.parseFromString(xmlText, 'application/xml');
+  if(documentXml.querySelector('parsererror')) throw new Error('Le modèle Word est illisible.');
+  const replacements = [
+    { key: 'cin', search: 'B6033283', value: values.cin },
+    { key: 'city', search: 'الإبتدائية سلا', value: `الإبتدائية ${values.city}` },
+    { key: 'address', search: '54 شارع لمزرعة رقم 54 تابريكت سلا', value: values.addressLine },
+    { key: 'debtor', search: 'خليفةبامة', value: values.debtor },
+    { key: 'debtor', search: 'خليفة بامة', value: values.debtor },
+    { key: 'amount', search: '12717.63', value: values.amount }
+  ];
+  const totals = {};
+  [...documentXml.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    'p'
+  )].forEach(paragraph=>{
+    const counts = replaceAudienceAssWordParagraphText(paragraph, replacements);
+    Object.entries(counts).forEach(([key, count])=>{
+      totals[key] = (totals[key] || 0) + Number(count || 0);
+    });
+  });
+  const missing = ['cin', 'city', 'address', 'debtor', 'amount'].filter(key=>!totals[key]);
+  if(missing.length) throw new Error(`Champs du modèle introuvables: ${missing.join(', ')}`);
+  return new XMLSerializer().serializeToString(documentXml);
+}
+
+function sanitizeAudienceAssWordFilename(value){
+  return String(value || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80) || 'Dossier ASS';
+}
+
+function getAudienceAssWordValues(row){
+  const client = AppState.clients?.[Number(row?.ci)];
+  const dossier = row?.dossier || row?.d || client?.dossiers?.[Number(row?.di)];
+  if(!dossier) throw new Error('Dossier ASS introuvable.');
+  const procedure = String(row?.procKey || '');
+  const details = dossier?.procedureDetails?.[procedure] || {};
+  const values = {
+    debtor: String(dossier.debiteur || '').trim(),
+    address: String(dossier.adresse || details.adresse || '').trim(),
+    amount: String(getSuiviProcedureMontantValue(dossier, procedure) || '').trim(),
+    cin: String(dossier.cinNonDebiteur || dossier.cin || dossier.cautionCin || '').trim(),
+    city: String(dossier.ville || details.ville || '').trim()
+  };
+  values.addressLine = getAudienceAssWordAddressLine(values.address, values.city);
+  const missingLabels = [];
+  if(!values.debtor) missingLabels.push('Débiteur');
+  if(!values.address) missingLabels.push('Adresse');
+  if(!values.amount) missingLabels.push('Montant');
+  if(!values.cin) missingLabels.push('CIN');
+  if(!values.city) missingLabels.push('Ville');
+  if(missingLabels.length){
+    const debtor = values.debtor || dossier.referenceClient || 'dossier sélectionné';
+    throw new Error(`Complétez dans le dossier ASS "${debtor}": ${missingLabels.join(', ')}.`);
+  }
+  return values;
+}
+
+async function buildCombinedAudienceAssWord(templateBuffer, valuesList){
+  const documentZip = await window.JSZip.loadAsync(templateBuffer.slice(0));
+  const documentEntry = documentZip.file('word/document.xml');
+  if(!documentEntry) throw new Error('Contenu du modèle Word introuvable.');
+  const templateXml = await documentEntry.async('string');
+  const articleXmlDocuments = valuesList.map(values=>fillAudienceAssWordDocumentXml(templateXml, values));
+  documentZip.file('word/document.xml', combineAudienceRestitutionWordXml(articleXmlDocuments));
+  return documentZip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  });
+}
+
+async function exportSelectedAudienceAssWord(){
+  const checkedRows = getSelectedSuiviRowsForExport().map(row=>{
+    const procedure = getSuiviExportProcedureNames(row)
+      .find(value=>isDiligenceAssProcedure(value)) || '';
+    return { dossier: row?.d, procKey: procedure };
+  });
+  if(!checkedRows.length){
+    alert('Cochez un ou plusieurs dossiers ASS dans Suivi des dossiers.');
+    return;
+  }
+  const invalidRows = checkedRows.filter(row=>!isDiligenceAssProcedure(row?.procKey));
+  if(invalidRows.length){
+    alert('Tous les dossiers cochés doivent avoir la procédure ASS.');
+    return;
+  }
+  if(typeof window.JSZip !== 'function'){
+    alert('Génération Word indisponible. Actualisez la page avec Ctrl + F5.');
+    return;
+  }
+  try{
+    beginHeavyUiOperation();
+    const response = await fetch(AUDIENCE_ASS_WORD_TEMPLATE_URL, { cache: 'no-store' });
+    if(!response.ok) throw new Error(`Modèle Word indisponible (${response.status}).`);
+    const templateBuffer = await response.arrayBuffer();
+    const valuesList = checkedRows.map(row=>getAudienceAssWordValues(row));
+    const wordBlob = await buildCombinedAudienceAssWord(templateBuffer, valuesList);
+    const firstValues = valuesList[0] || {};
+    const filename = valuesList.length === 1
+      ? `مقال الأداء - ${sanitizeAudienceAssWordFilename(firstValues.debtor)}.docx`
+      : `ASS - ${valuesList.length} مقالات الأداء.docx`;
+    await saveBlobDirectOrDownload(wordBlob, filename, { openAfterExport: true });
+  }catch(err){
+    console.error('Génération articles paiement ASS impossible', err);
+    alert(err?.message || 'Impossible de générer les documents Word ASS.');
+  }finally{
+    endHeavyUiOperation();
+  }
+}
+
+function isAudienceRestitutionWordProcedure(procedure){
+  return getDiligenceProcedureFilterValue(procedure) === 'Restitution';
+}
+
+function getAudienceRestitutionVehicleValues(dossier){
+  const candidates = [dossier?.ww, dossier?.marque]
+    .map(value=>String(value || '').trim())
+    .filter(Boolean);
+  const ww = candidates.find(value=>/^WW[\s-]*[A-Z0-9]+$/i.test(value))
+    || candidates.find(value=>/\bWW[\s-]*[A-Z0-9]+\b/i.test(value))
+    || '';
+  const vehicle = candidates.find(value=>value !== ww && !/^WW[\s-]*/i.test(value))
+    || (() => {
+      const type = String(dossier?.type || '').trim();
+      return /^(auto|automobile|vehicule|véhicule)$/i.test(type) ? '' : type;
+    })();
+  return { vehicle, ww };
+}
+
+function keepFirstAudienceRestitutionArticle(documentXml){
+  const namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const body = documentXml.getElementsByTagNameNS(namespace, 'body')[0];
+  if(!body) throw new Error('Corps du modèle Word introuvable.');
+  const children = [...body.childNodes];
+  let articleTitleCount = 0;
+  let cutIndex = -1;
+  children.forEach((child, index)=>{
+    if(cutIndex !== -1 || child.nodeType !== 1) return;
+    const paragraphText = [...child.getElementsByTagNameNS(namespace, 't')]
+      .map(node=>String(node.textContent || ''))
+      .join('');
+    if(paragraphText.includes('مقال استعجالي رام إلى معاينة')){
+      articleTitleCount += 1;
+      if(articleTitleCount === 2) cutIndex = index;
+    }
+  });
+  if(cutIndex === -1) return;
+  const sectionProperties = children.find(child=>child.nodeType === 1 && child.localName === 'sectPr');
+  children.slice(cutIndex).forEach(child=>{
+    if(child !== sectionProperties && child.parentNode === body) body.removeChild(child);
+  });
+  if(sectionProperties && sectionProperties.parentNode === body){
+    body.appendChild(sectionProperties);
+  }
+}
+
+function fillAudienceRestitutionWordDocumentXml(xmlText, values){
+  const parser = new DOMParser();
+  const documentXml = parser.parseFromString(xmlText, 'application/xml');
+  if(documentXml.querySelector('parsererror')) throw new Error('Le modèle Word REST est illisible.');
+  keepFirstAudienceRestitutionArticle(documentXml);
+  const replacements = [
+    { key: 'contract', search: 'C30C3345', value: values.contract },
+    { key: 'vehicle', search: 'LAND ROVER', value: values.vehicle },
+    { key: 'ww', search: 'WW103467', value: values.ww },
+    { key: 'amount', search: '959011,09', value: values.amount },
+    { key: 'debtor', search: 'STE CINDIMAR', value: values.debtor },
+    { key: 'address', search: 'AL GREVILLEAS 17 زاوية طريق الرباط كلم 5 AL ORANGER تجزئة 54 إقامة EDEN 2 الدار البيضاء', value: values.addressLine }
+  ];
+  const totals = {};
+  [...documentXml.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    'p'
+  )].forEach(paragraph=>{
+    const counts = replaceAudienceAssWordParagraphText(paragraph, replacements);
+    Object.entries(counts).forEach(([key, count])=>{
+      totals[key] = (totals[key] || 0) + Number(count || 0);
+    });
+  });
+  const missing = ['contract', 'vehicle', 'ww', 'amount', 'debtor', 'address'].filter(key=>!totals[key]);
+  if(missing.length) throw new Error(`Champs du modèle REST introuvables: ${missing.join(', ')}`);
+  return new XMLSerializer().serializeToString(documentXml);
+}
+
+function getAudienceRestitutionWordValues(row){
+  const client = AppState.clients?.[Number(row?.ci)];
+  const dossier = row?.dossier || row?.d || client?.dossiers?.[Number(row?.di)];
+  if(!dossier) throw new Error('Dossier Restitution introuvable.');
+  const procedure = String(row?.procKey || '');
+  const details = dossier?.procedureDetails?.[procedure] || {};
+  const vehicleValues = getAudienceRestitutionVehicleValues(dossier);
+  const address = String(dossier.adresse || details.adresse || '').trim();
+  const city = String(dossier.ville || details.ville || '').trim();
+  return {
+    contract: String(dossier.referenceClient || '').trim(),
+    debtor: String(dossier.debiteur || '').trim(),
+    addressLine: getAudienceAssWordAddressLine(address, city),
+    amount: String(getSuiviProcedureMontantValue(dossier, procedure) || '').trim(),
+    vehicle: vehicleValues.vehicle,
+    ww: vehicleValues.ww
+  };
+}
+
+async function buildAudienceRestitutionWord(templateBuffer, values){
+  const documentZip = await window.JSZip.loadAsync(templateBuffer.slice(0));
+  const documentEntry = documentZip.file('word/document.xml');
+  if(!documentEntry) throw new Error('Contenu du modèle Word REST introuvable.');
+  const documentXml = await documentEntry.async('string');
+  documentZip.file('word/document.xml', fillAudienceRestitutionWordDocumentXml(documentXml, values));
+  return documentZip.generateAsync({
+    type: 'uint8array',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  });
+}
+
+function combineAudienceRestitutionWordXml(xmlDocuments){
+  const parser = new DOMParser();
+  const namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const combinedDocument = parser.parseFromString(xmlDocuments[0], 'application/xml');
+  if(combinedDocument.querySelector('parsererror')) throw new Error('Le document Word REST est illisible.');
+  const combinedBody = combinedDocument.getElementsByTagNameNS(namespace, 'body')[0];
+  if(!combinedBody) throw new Error('Corps du document Word REST introuvable.');
+  const sectionProperties = [...combinedBody.childNodes]
+    .find(node=>node.nodeType === 1 && node.localName === 'sectPr');
+  [...combinedBody.childNodes].forEach(node=>{
+    if(node !== sectionProperties) combinedBody.removeChild(node);
+  });
+  xmlDocuments.forEach((xmlText, index)=>{
+    const sourceDocument = parser.parseFromString(xmlText, 'application/xml');
+    if(sourceDocument.querySelector('parsererror')) throw new Error('Un article Word REST est illisible.');
+    const sourceBody = sourceDocument.getElementsByTagNameNS(namespace, 'body')[0];
+    if(!sourceBody) throw new Error('Corps d’un article Word REST introuvable.');
+    if(index > 0){
+      const paragraph = combinedDocument.createElementNS(namespace, 'w:p');
+      const run = combinedDocument.createElementNS(namespace, 'w:r');
+      const pageBreak = combinedDocument.createElementNS(namespace, 'w:br');
+      pageBreak.setAttributeNS(namespace, 'w:type', 'page');
+      run.appendChild(pageBreak);
+      paragraph.appendChild(run);
+      combinedBody.insertBefore(paragraph, sectionProperties || null);
+    }
+    [...sourceBody.childNodes].forEach(node=>{
+      if(node.nodeType === 1 && node.localName === 'sectPr') return;
+      combinedBody.insertBefore(combinedDocument.importNode(node, true), sectionProperties || null);
+    });
+  });
+  if(sectionProperties && sectionProperties.parentNode === combinedBody){
+    combinedBody.appendChild(sectionProperties);
+  }
+  return new XMLSerializer().serializeToString(combinedDocument);
+}
+
+async function buildCombinedAudienceRestitutionWord(templateBuffer, valuesList){
+  const documentZip = await window.JSZip.loadAsync(templateBuffer.slice(0));
+  const documentEntry = documentZip.file('word/document.xml');
+  if(!documentEntry) throw new Error('Contenu du modèle Word REST introuvable.');
+  const templateXml = await documentEntry.async('string');
+  const articleXmlDocuments = valuesList.map(values=>
+    fillAudienceRestitutionWordDocumentXml(templateXml, values)
+  );
+  documentZip.file(
+    'word/document.xml',
+    combineAudienceRestitutionWordXml(articleXmlDocuments)
+  );
+  return documentZip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  });
+}
+
+async function exportSelectedAudienceRestitutionWords(){
+  const checkedRows = getSelectedSuiviRowsForExport().map(row=>{
+    const procedure = getSuiviExportProcedureNames(row)
+      .find(value=>isAudienceRestitutionWordProcedure(value)) || '';
+    return { dossier: row?.d, procKey: procedure };
+  });
+  if(!checkedRows.length){
+    alert('Cochez un ou plusieurs dossiers Restitution dans Suivi des dossiers.');
+    return;
+  }
+  const invalidRows = checkedRows.filter(row=>!isAudienceRestitutionWordProcedure(row?.procKey));
+  if(invalidRows.length){
+    alert('Tous les dossiers cochés doivent avoir la procédure Restitution.');
+    return;
+  }
+  if(typeof window.JSZip !== 'function'){
+    alert('Génération Word indisponible. Actualisez la page avec Ctrl + F5.');
+    return;
+  }
+  try{
+    beginHeavyUiOperation();
+    const response = await fetch(AUDIENCE_RESTITUTION_WORD_TEMPLATE_URL, { cache: 'no-store' });
+    if(!response.ok) throw new Error(`Modèle Word REST indisponible (${response.status}).`);
+    const templateBuffer = await response.arrayBuffer();
+    const valuesList = checkedRows.map(row=>getAudienceRestitutionWordValues(row));
+    const wordBlob = await buildCombinedAudienceRestitutionWord(templateBuffer, valuesList);
+    const firstValues = valuesList[0] || {};
+    const filename = valuesList.length === 1
+      ? `مقال استعجالي REST - ${sanitizeAudienceAssWordFilename(firstValues.debtor || firstValues.contract)}.docx`
+      : `REST - ${valuesList.length} مقالات استعجالية.docx`;
+    await saveBlobDirectOrDownload(
+      wordBlob,
+      filename,
+      { openAfterExport: true }
+    );
+  }catch(err){
+    console.error('Génération article urgent Restitution impossible', err);
+    alert(err?.message || 'Impossible de générer les documents Word Restitution.');
+  }finally{
+    endHeavyUiOperation();
+  }
 }
 
 function getSelectedAudienceRowsCount(){
@@ -30716,6 +31101,7 @@ function buildAudienceSelectedExportDatasetBase(rowsOverride = null, options = {
   const closedStatusLookup = audienceRows.length ? getAudienceClosedStatusLookupCached() : null;
   const headers = omitSort ? [
     'Client',
+    'Référence Client',
     'Adversaire',
     'N° Dossier',
     'Juge',
@@ -30723,6 +31109,7 @@ function buildAudienceSelectedExportDatasetBase(rowsOverride = null, options = {
     'Tribunal'
   ] : [
     'Client',
+    'Référence Client',
     'Adversaire',
     'N° Dossier',
     'Juge',
@@ -30739,9 +31126,10 @@ function buildAudienceSelectedExportDatasetBase(rowsOverride = null, options = {
     headers,
     subtitle: `Date d'audience : ${dateAudienceTop}`,
     colWidths: omitSort
-      ? [{ wch: 22 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 34 }, { wch: 46 }]
+      ? [{ wch: 22 }, { wch: 34 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 34 }, { wch: 46 }]
       : [
         { wch: 14.77734375 },
+        { wch: 34 },
         { wch: 20.6640625 },
         { wch: 16.33203125 },
         { wch: 13.77734375 },
@@ -30816,6 +31204,7 @@ function buildAudienceSelectedExportTableRow(row, options = {}){
   const adversaireValue = formatAudienceExportWrappedName(d.adversaire || d.debiteur || '');
   const out = [
     clientValue,
+    getAudienceGroupedReferenceClientExportValue(row),
     adversaireValue,
     dossierRef || '-',
     jugeValue,
@@ -30838,6 +31227,7 @@ function buildAudienceDiligenceExportTableRow(row){
   const sortValue = draft.sort || p.sort || '';
   return [
     row?.c?.name || '',
+    getAudienceGroupedReferenceClientExportValue(row),
     procedureValue,
     d.debiteur || d.adversaire || '',
     getAudienceRowDraftReferenceValue(row),
@@ -30854,9 +31244,10 @@ function buildAudienceDiligenceExportDatasetBase(rowsOverride = null){
     : getSelectedAudienceRowsForExport();
   return {
     rows,
-    headers: ['client', 'Proc\u00e9dure', 'debiteur', 'R\u00e9f Ass', 'Audience', 'Juge', 'Sort', 'Tribunal'],
+    headers: ['client', 'Référence Client', 'Proc\u00e9dure', 'debiteur', 'R\u00e9f Ass', 'Audience', 'Juge', 'Sort', 'Tribunal'],
     colWidths: [
       { wch: 20 },
+      { wch: 34 },
       { wch: 16 },
       { wch: 30 },
       { wch: 22 },
@@ -31498,6 +31889,40 @@ function getAudienceGroupedRows(row){
     : (row ? [row] : []);
 }
 
+function formatAudienceReferenceClientExportDisplay(refs){
+  const cleanRefs = [];
+  const seen = new Set();
+  (Array.isArray(refs) ? refs : []).forEach(value=>{
+    const ref = String(value || '').trim();
+    if(!ref) return;
+    const key = normalizeCaseInsensitiveSearchText(ref);
+    if(seen.has(key)) return;
+    seen.add(key);
+    cleanRefs.push(ref);
+  });
+  if(cleanRefs.length <= 2) return cleanRefs.join(' / ');
+  const lines = [];
+  for(let index = 0; index < cleanRefs.length; index += 2){
+    lines.push(cleanRefs.slice(index, index + 2).join(' / '));
+  }
+  return lines.join('\n');
+}
+
+function getAudienceGroupedReferenceClientExportValue(row){
+  const fallback = row?.p?._refClientMismatch
+    ? String(row?.p?._refClientProvided || row?.d?.referenceClient || '').trim()
+    : String(row?.d?.referenceClient || '').trim();
+  if(row?.p?._refClientMismatch) return fallback;
+  const refs = [];
+  getAudienceGroupedRows(row).forEach(item=>{
+    refs.push(item?.d?.referenceClient || '');
+  });
+  if(typeof getAudienceRelatedGlobalReferenceClients === 'function'){
+    getAudienceRelatedGlobalReferenceClients(row).forEach(ref=>refs.push(ref));
+  }
+  return formatAudienceReferenceClientExportDisplay(refs) || fallback;
+}
+
 function setAudienceGroupedRows(row, groupedRows){
   if(!row) return row;
   const seen = new Set();
@@ -32041,6 +32466,7 @@ function buildSuiviRowsFromAudienceExportRows(audienceRows){
   const rows = Array.isArray(audienceRows) ? audienceRows : [];
   return rows.map((row)=>{
     const procedureName = String(row?.procKey || '').trim();
+    const referenceClientExportValue = getAudienceGroupedReferenceClientExportValue(row);
     const details = row?.d?.procedureDetails && typeof row.d.procedureDetails === 'object'
       ? row.d.procedureDetails
       : {};
@@ -32069,8 +32495,10 @@ function buildSuiviRowsFromAudienceExportRows(audienceRows){
       c: row?.c,
       d: {
         ...(row?.d || {}),
+        referenceClient: referenceClientExportValue || row?.d?.referenceClient || '',
         procedureDetails: mergedProcedureDetails
       },
+      __audienceReferenceClientExportValue: referenceClientExportValue,
       index: row?.di,
       procSource: procedureName ? [procedureName] : [],
       tribunalList: tribunal ? [tribunal] : (Array.isArray(row?.tribunalList) ? row.tribunalList : []),
@@ -33939,6 +34367,7 @@ function isProcedureVariantName(procName){
 function canAddProcedureVariant(existingNames, sourceProc){
   const base = getProcedureBaseName(sourceProc);
   if(!base) return false;
+  if(normalizeProcedureName(base) === 'sci tf') return false;
   return true;
 }
 

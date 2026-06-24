@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import JSZip from 'jszip'
 import LoginScreen from './components/LoginScreen'
 import AppContent from './components/AppContent'
 import DossierModal from './components/modals/DossierModal'
@@ -8,7 +9,8 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
-const LEGACY_ASSET_VERSION = '20260620-sbiens-statut-column-8'
+const LEGACY_ASSET_VERSION = '20260623-sbiens-edit-debiteur-depot-1'
+if (typeof window !== 'undefined') window.JSZip = JSZip
 const LEGACY_SCRIPTS = [
   `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,
   `/legacy/audience-ui-helpers.js?v=${LEGACY_ASSET_VERSION}`,

@@ -257,12 +257,6 @@ function buildDiligenceHeadHtml(){
       <th>R&eacute;f&eacute;rence client</th>
       <th>Lot du</th>
       <th>D&eacute;biteur FR</th>
-      <th>Adresse</th>
-      <th>Ville</th>
-      <th>Montant</th>
-      <th>RIB</th>
-      <th>Banque / STE FR</th>
-      <th>Adresse Banque</th>
       <th>D&eacute;p&ocirc;t</th>
       <th>Ref dossier</th>
       <th>Observation</th>
@@ -271,6 +265,12 @@ function buildDiligenceHeadHtml(){
       <th>Sort plie</th>
       <th>Notif banque</th>
       <th>Notif d&eacute;biteur</th>
+      <th>Adresse</th>
+      <th>Ville</th>
+      <th>Montant</th>
+      <th>RIB</th>
+      <th>Banque / STE FR</th>
+      <th>Adresse Banque</th>
       <th>Bo&icirc;te</th>
       <th>Statut</th>
       <th>Tribunal</th>
@@ -575,8 +575,8 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         </td>
         <td>${escapeHtml(row.dossier?.type || '-')}</td>
         <td>${escapeHtml(refClientValue || '-')}</td>
-        <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
-        <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
+        <td>${getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien' ? renderDiligenceEditableCell(row, procEncoded, 'debiteur', row.dossier?.debiteur || '') : escapeHtml(row.dossier?.debiteur || '-')}</td>
+        <td>${getDiligenceProcedureFilterValue(row?.procedure) === 'S/bien' ? renderDiligenceEditableCell(row, procEncoded, 'depotLe', row.details?.depotLe || row.details?.dateDepot || '') : escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', refValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'juge', judgeValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>
@@ -624,12 +624,6 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${escapeHtml(refClientValue || '-')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'lotDu', row.details?.lotDu || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'debiteurEp', debiteurEpValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', adresseValue)}</td>
-        <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', montantValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'rib', row.details?.rib || '')}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueFr', banqueFrValue)}</td>
-        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresseBranche', adresseBrancheValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'depotLe', row.details?.depotLe || row.details?.dateDepot || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'referenceClient', getDiligenceReferenceDossierValue(row))}</td>
         <td class="diligence-saisie-arret-observation-cell">${renderDiligenceEditableCell(row, procEncoded, 'observation', row.details?.observation || '')}</td>
@@ -638,6 +632,12 @@ function renderDiligenceRowHtml(row, showPlieColumn){
         <td>${renderDiligenceEditableCell(row, procEncoded, 'sortPle', row.details?.sortPle || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifBanque', row.details?.notifBanque || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'notifDebiteur', row.details?.notifDebiteur || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresse', adresseValue)}</td>
+        <td class="diligence-ville-cell">${renderDiligenceEditableCell(row, procEncoded, 'ville', row.dossier?.ville || row.details?.ville || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'montant', montantValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'rib', row.details?.rib || '')}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'banqueFr', banqueFrValue)}</td>
+        <td>${renderDiligenceEditableCell(row, procEncoded, 'adresseBranche', adresseBrancheValue)}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'boiteNo', row.dossier?.boiteNo || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'statut', row.dossier?.statut || '')}</td>
         <td>${renderDiligenceEditableCell(row, procEncoded, 'tribunal', tribunalValue)}</td>
@@ -780,8 +780,8 @@ function renderDiligenceRowHtml(row, showPlieColumn){
       </td>
       <td>${escapeHtml(row.dossier?.type || '-')}</td>
       <td>${escapeHtml(refClientValue || '-')}</td>
-      <td>${escapeHtml(row.dossier?.debiteur || '-')}</td>
-      <td>${escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
+      <td>${diligenceVirtualCompactProcedureMode === 'sbien' ? renderDiligenceEditableCell(row, procEncoded, 'debiteur', row.dossier?.debiteur || '') : escapeHtml(row.dossier?.debiteur || '-')}</td>
+      <td>${diligenceVirtualCompactProcedureMode === 'sbien' ? renderDiligenceEditableCell(row, procEncoded, 'depotLe', row.details?.depotLe || row.details?.dateDepot || '') : escapeHtml(row.details?.depotLe || row.details?.dateDepot || '-')}</td>
       <td>${renderDiligenceEditableCell(row, procEncoded, refField, refValue)}</td>
       ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'juge', judgeValue)}</td>` : ''}
       ${diligenceVirtualShowAssColumns ? `<td>${renderDiligenceEditableCell(row, procEncoded, 'sort', sortValue)}</td>` : ''}

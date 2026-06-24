@@ -48,6 +48,12 @@ function SuiviSection() {
         <button id="clearAllSuiviBtn" className="btn-primary" type="button">
           <i className="fa-regular fa-square-xmark"></i> Décocher page
         </button>
+        <button id="exportAudienceAssWordBtn" className="btn-primary audience-legal-word-btn" type="button">
+          <i className="fa-solid fa-file-word"></i> {"مقال الأداء Word"}
+        </button>
+        <button id="exportAudienceRestitutionWordBtn" className="btn-primary audience-legal-word-btn" type="button">
+          <i className="fa-solid fa-file-word"></i> {"REST مقال استعجالي"}
+        </button>
         <button id="exportSuiviBtn" className="btn-primary" type="button">
           <i className="fa-solid fa-file-export"></i> Exporter
         </button>

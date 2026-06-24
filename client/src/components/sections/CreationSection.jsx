@@ -208,7 +208,7 @@ function CreationSection() {
               <label data-proc="SFDC"><input type="checkbox" defaultValue="SFDC" className="proc-check" /> SFDC</label>
               <label data-proc="SAISIE ARRÊT"><input type="checkbox" defaultValue="SAISIE ARRÊT" className="proc-check" /> SAISIE ARRÊT</label>
               <label data-proc="Injonction"><input type="checkbox" defaultValue="Injonction" className="proc-check" /> Injonction</label>
-              <label data-proc="S/bien"><input type="checkbox" defaultValue="S/bien" className="proc-check" /> S/bien</label>
+              <label data-proc="S/bien"><input type="checkbox" defaultValue="S/bien" className="proc-check" /> S/BIENS</label>
               <label data-proc="Commandement"><input type="checkbox" defaultValue="Commandement" className="proc-check" /> Commandement</label>
               <label data-proc="Vérification de créance"><input type="checkbox" defaultValue="Vérification de créance" className="proc-check" /> Vérification de créance</label>
               <label data-proc="Redressement"><input type="checkbox" defaultValue="Redressement" className="proc-check" /> Redressement</label>
