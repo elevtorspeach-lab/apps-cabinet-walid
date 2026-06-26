@@ -9,7 +9,7 @@ import FactureDocumentPreviewModal from './components/modals/FactureDocumentPrev
 import ImportProgressModal from './components/modals/ImportProgressModal'
 import PasswordSetupModal from './components/modals/PasswordSetupModal'
 
-const LEGACY_ASSET_VERSION = '20260623-sbiens-edit-debiteur-depot-1'
+const LEGACY_ASSET_VERSION = '20260626-suivi-boite-no-1'
 if (typeof window !== 'undefined') window.JSZip = JSZip
 const LEGACY_SCRIPTS = [
   `/legacy/state-persistence.js?v=${LEGACY_ASSET_VERSION}`,

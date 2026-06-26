@@ -75,6 +75,7 @@ function SuiviSection() {
               <th>Débiteur</th>
               <th>Montant</th>
               <th>Ville</th>
+              <th>Boîte N°</th>
               <th>Statut</th>
               <th>Actions</th>
             </tr>

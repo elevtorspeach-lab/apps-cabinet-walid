@@ -5,7 +5,7 @@ const SUIVI_EMPTY_MESSAGE = 'Aucun dossier trouvé avec ces filtres.';
 const SUIVI_LOADING_MESSAGE = 'Recherche dossier en cours...';
 const SUIVI_NO_CLIENT_MESSAGE = 'Aucun client assigné à ce compte. Contactez le gestionnaire.';
 const AUDIENCE_TABLE_COL_COUNT = 14;
-const SUIVI_TABLE_COL_COUNT = 11;
+const SUIVI_TABLE_COL_COUNT = 12;
 
 function getAudienceVirtualWindow(rowsLength){
   return getVirtualWindowByContainer('audienceTableContainer', rowsLength);
@@ -319,8 +319,8 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
   const canFixRefClient = canEdit && (isRefClientMismatch || isMissingGlobal);
   const refClientCellClass = (isRefClientMismatch || isMissingGlobal) ? 'audience-refclient-mismatch' : '';
   const refClientDisplay = isRefClientMismatch
-    ? String(row?.p?._refClientProvided || d.referenceClient || '-')
-    : String(d.referenceClient || '-');
+    ? String(row?.p?._refClientProvided || row?.__referenceClient || d.referenceClient || '-')
+    : String(row?.__referenceClient || d.referenceClient || '-');
   const groupedRefClients = Array.isArray(row?.__dedupedAudienceRows)
     ? [...new Set(row.__dedupedAudienceRows
         .map(item=>String(item?.d?.referenceClient || '').trim())
@@ -347,7 +347,8 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
   const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
   const procKeyEncoded = encodeURIComponent(String(procKey));
   const keyEncoded = encodeURIComponent(String(key));
-  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
+  const rowPrintKeyEncoded = encodeURIComponent(makeAudienceRowPrintKey(row));
+  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey, row);
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
   const jugementAddValue = getAudienceRowJugementAddStatus(row);
@@ -358,8 +359,9 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
           data-ci="${row.ci}"
           data-di="${row.di}"
           data-proc-key="${procKeyEncoded}"
+          data-row-print-key="${rowPrintKeyEncoded}"
           ${isPrintChecked ? 'checked' : ''}
-          onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
+          onchange="toggleAudienceSelectionAndColorByRowKeyEncoded('${rowPrintKeyEncoded}', this.checked)">
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="Référence Client" class="${refClientCellClass}">
@@ -446,7 +448,8 @@ function renderAudienceRowHtml(row, duplicateKeySet){
   const rowColor = (isDuplicate || hasError) ? 'red' : safeColor;
   const procKeyEncoded = encodeURIComponent(String(procKey));
   const keyEncoded = encodeURIComponent(String(key));
-  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey);
+  const rowPrintKeyEncoded = encodeURIComponent(makeAudienceRowPrintKey(row));
+  const isPrintChecked = isAudienceSelectedForPrint(row.ci, row.di, procKey, row);
   const displayDateDepot = getAudienceDateDepotDisplayValue(row);
   const audienceDateValue = formatAudienceDateDisplayValue(draft.dateAudience || p.audience || '');
   const tribunalValue = String(draft.tribunal || p.tribunal || '').trim();
@@ -461,8 +464,9 @@ function renderAudienceRowHtml(row, duplicateKeySet){
           data-ci="${row.ci}"
           data-di="${row.di}"
           data-proc-key="${procKeyEncoded}"
+          data-row-print-key="${rowPrintKeyEncoded}"
           ${isPrintChecked ? 'checked' : ''}
-          onchange="toggleAudienceSelectionAndColorEncoded(${row.ci},${row.di},'${procKeyEncoded}', this.checked)">
+          onchange="toggleAudienceSelectionAndColorByRowKeyEncoded('${rowPrintKeyEncoded}', this.checked)">
       </td>
       <td data-label="Client">${escapeHtml(c.name)}</td>
       <td data-label="Référence Client" class="${refClientCellClass}">
@@ -580,6 +584,7 @@ function renderSuiviRowHtml(row){
       <td data-label="Débiteur">${escapeHtml(row.d.debiteur || '-')}</td>
       <td data-label="Montant">${escapeHtml(row.d.montant || '-')}</td>
       <td data-label="Ville">${escapeHtml(row.d.ville || '-')}</td>
+      <td data-label="Boîte N°">${escapeHtml(row.d.boiteNo || '-')}</td>
       <td data-label="Statut">${renderStatusDisplay(statusSnapshot.statut || 'En cours', statusSnapshot.detail || '')}</td>
       <td data-label="Actions">
         <button type="button" class="btn-primary" data-action="view" data-client-id="${row.c.id}" data-dossier-index="${row.index}">

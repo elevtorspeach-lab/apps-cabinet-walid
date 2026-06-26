@@ -1,0 +1,57 @@
+[
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\01 - IMPORT GLOBAL.xlsx",
+    "filename": "01 - IMPORT GLOBAL.xlsx",
+    "headers": 70
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\02 - IMPORT AUDIENCE.xlsx",
+    "filename": "02 - IMPORT AUDIENCE.xlsx",
+    "headers": 13
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\03 - DILIGENCE ASS.xlsx",
+    "filename": "03 - DILIGENCE ASS.xlsx",
+    "headers": 30
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\04 - DILIGENCE SFDC.xlsx",
+    "filename": "04 - DILIGENCE SFDC.xlsx",
+    "headers": 16
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\05 - DILIGENCE INJONCTION.xlsx",
+    "filename": "05 - DILIGENCE INJONCTION.xlsx",
+    "headers": 20
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\06 - DILIGENCE S-BIEN.xlsx",
+    "filename": "06 - DILIGENCE S-BIEN.xlsx",
+    "headers": 18
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\07 - DILIGENCE SAISIE ARRET.xlsx",
+    "filename": "07 - DILIGENCE SAISIE ARRET.xlsx",
+    "headers": 24
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\08 - DILIGENCE SCI TF.xlsx",
+    "filename": "08 - DILIGENCE SCI TF.xlsx",
+    "headers": 21
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\09 - DILIGENCE COMMANDEMENT.xlsx",
+    "filename": "09 - DILIGENCE COMMANDEMENT.xlsx",
+    "headers": 26
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\10 - DILIGENCE NANTISSEMENT.xlsx",
+    "filename": "10 - DILIGENCE NANTISSEMENT.xlsx",
+    "headers": 31
+  },
+  {
+    "path": "D:\\apps-cabinet-walid-main\\apps-cabinet-walid-main\\tmp-import-excel-templates-2026-06-19\\fichiers\\11 - DILIGENCE NANTISSEMENT MED.xlsx",
+    "filename": "11 - DILIGENCE NANTISSEMENT MED.xlsx",
+    "headers": 20
+  }
+]

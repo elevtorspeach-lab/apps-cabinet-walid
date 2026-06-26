@@ -55,6 +55,16 @@ function normalizePersistedStateSource(rawState){
       return !batchId || !deletedBatchIds.has(batchId);
     })
   })).filter(client=>Array.isArray(client?.dossiers) ? client.dossiers.length || String(client?.name || '').trim() : true);
+  if(typeof sanitizeProcedureDetailsReferenceDossiers === 'function'){
+    filteredClients.forEach(client=>{
+      (Array.isArray(client?.dossiers) ? client.dossiers : []).forEach(dossier=>{
+        sanitizeProcedureDetailsReferenceDossiers(
+          dossier?.procedureDetails,
+          String(dossier?.referenceClient || '').trim()
+        );
+      });
+    });
+  }
   const nextUsers = ensureManagerUser(loadedUsers);
   const nextSignature = buildPersistedStateSignature({
     clients: filteredClients,

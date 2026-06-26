@@ -200,7 +200,6 @@ function CreationSection() {
           <div className="form-group full">
             <label>Procédure (choix multiple)</label>
             <div className="checkbox-group">
-              <label id="procExceptionelLabel" data-proc="Procedure exceptionel" style={{ display: 'none' }}><input type="checkbox" defaultValue="Procedure exceptionel" className="proc-check" /> Procedure exceptionel</label>
               <label data-proc="ASS"><input type="checkbox" defaultValue="ASS" className="proc-check" /> ASS</label>
               <label data-proc="Restitution"><input type="checkbox" defaultValue="Restitution" className="proc-check" /> Restitution</label>
               <label data-proc="Nantissement"><input type="checkbox" defaultValue="Nantissement" className="proc-check" /> Nantissement</label>
