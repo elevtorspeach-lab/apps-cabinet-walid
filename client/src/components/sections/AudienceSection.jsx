@@ -10,14 +10,63 @@ function AudienceSection() {
               <div className="audience-color-group-label">Couleur</div>
               <div className="color-filters">
                 <button className="color-btn all active" data-color="all">Tous</button>
-                <button className="color-btn white" data-color="white">Blanc</button>
                 <button id="audienceErrorsBtn" className="color-btn error" type="button">Erreurs</button>
-                <button className="color-btn blue" data-color="blue">Att sort</button>
-                <button className="color-btn green" data-color="green">ATT ORD</button>
-                <button className="color-btn yellow" data-color="yellow">ORD OK</button>
-                <button className="color-btn document-ok" data-color="document-ok">Document OK</button>
-                <button className="color-btn pink" data-color="pink">ATT DELEGATION</button>
-                <button className="color-btn purple-dark" data-color="closed">{"Sold\u00e9 / Arr\u00eat d\u00e9finitif"}</button>
+                <button
+                  id="markAudienceWhiteBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-white"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'white')}
+                >
+                  BLANC
+                </button>
+                <button
+                  id="markAudienceAttSortBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-att-sort"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'blue')}
+                >
+                  ATT SORT
+                </button>
+                <button
+                  id="markAudienceAttOrdBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-att"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'green')}
+                >
+                  ATT ORD
+                </button>
+                <button
+                  id="markAudienceOrdOkBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-ok"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'yellow')}
+                >
+                  ORD OK
+                </button>
+                <button
+                  id="markAudienceDocumentOkBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-document-ok"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'document-ok')}
+                >
+                  DOC OK
+                </button>
+                <button
+                  id="markAudienceAttDelegationBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-delegation"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'pink')}
+                >
+                  ATT DELEGATION
+                </button>
+                <button
+                  id="markAudienceClosedBtn"
+                  className="btn-primary audience-ord-action audience-ord-action-closed"
+                  type="button"
+                  onClick={(event) => window.handleAudienceOrdButtonClick?.(event, 'closed')}
+                >
+                  SOLDE / ARRET DEFINITIF
+                </button>
               </div>
             </div>
           </div>
@@ -28,9 +77,6 @@ function AudienceSection() {
               <span className="label">{"Coch\u00e9s"}</span>
               <span id="audienceCheckedCountValue" className="value">0</span>
             </label>
-            <button id="undoAudienceColorBtn" className="btn-primary" type="button" disabled>
-              <i className="fa-solid fa-rotate-left"></i> {"Pr\u00e9c\u00e9dent"}
-            </button>
             <button id="printAudienceBtn" className="btn-primary" type="button">
               <i className="fa-solid fa-square-check"></i> Cocher
             </button>
@@ -83,7 +129,7 @@ function AudienceSection() {
               <option value="blue">Att sort</option>
               <option value="green">ATT ORD</option>
               <option value="yellow">ORD OK</option>
-              <option value="document-ok">Document OK</option>
+              <option value="document-ok">DOC OK</option>
               <option value="pink">ATT DELEGATION</option>
               <option value="jugement-ok">ADD J OK</option>
               <option value="jugement-att">J ATT ADD</option>
@@ -119,10 +165,10 @@ function AudienceSection() {
           <span id="audienceSaveFeedback" className="audience-save-feedback" aria-live="polite" style={{ display: 'none' }}></span>
           <div className="import-excel">
             <input type="file" id="importAudienceExcelInput" accept=".xlsx,.xls" style={{ display: 'none' }} />
-            <button id="importAudienceExcelBtn" className="btn-primary" type="button">
-              <i className="fa-solid fa-file-import"></i> Importer Audience
-            </button>
-          </div>
+          <button id="importAudienceExcelBtn" className="btn-primary" type="button">
+            <i className="fa-solid fa-file-import"></i> Importer Audience
+          </button>
+        </div>
         </div>
 
       </div>

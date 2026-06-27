@@ -261,6 +261,8 @@ let lastRemoteRefreshStartedAt = 0;
 let lastRemoteRefreshCompletedAt = 0;
 let diligenceOpenRemoteRefreshInFlight = false;
 let lastDiligenceOpenRemoteRefreshAt = 0;
+let suiviOpenRemoteRefreshInFlight = false;
+let lastSuiviOpenRemoteRefreshAt = 0;
 let deferredLocalSnapshotTimer = null;
 let deferredLocalSnapshotPayload = null;
 let deferredLocalSnapshotSource = 'persist';
@@ -1309,7 +1311,7 @@ function getAudienceColorHistoryLabel(color){
     blue: 'Att sort',
     green: 'ATT ORD',
     yellow: 'ORD OK',
-    'document-ok': 'Document OK',
+    'document-ok': 'DOC OK',
     pink: 'ATT DELEGATION',
     'purple-dark': 'Soldé / Arrêt définitif',
     'purple-light': 'Arrêt définitif',
@@ -1667,6 +1669,175 @@ function dossierHasAudienceImpact(dossier){
   return normalizeProcedures(dossier).some(procName=>isAudienceProcedure(procName));
 }
 
+const SUIVI_20250520_MIXED_REFERENCE_KEYS = new Set(`B4003169|DBILIJ ABDELLAH
+B4071517|CHAABANE BOUAZZA
+B6054953|SOMERKA TRANSIT TRANSPORT LOGI
+B7031059|MAGHREB OLEO TECH
+B7033115|ZMARNA MFADEL
+B7033307|TOP CANDY
+B7046037|RHANDOUR ABDELILAH
+B8013754|TACHAFINE DIAA
+B8015905|LOURIDI KHALID
+B8023475|TRANSMISE TOURS SARL AU
+B8024290|EL HOUMAIDI SOUFIANE
+B8027287|ECHRAK TRANS
+B8031681|HANNOUD BTISSAM
+B8031988|ORIENTALIA
+B8041849|BENCHIDMIA MOHAMMED
+B8042500|EL OULA NOUR EDDINE
+B8043794|ZAOUCH FOUZIA
+B8045051|N K BTP
+B8045569|BENNANI CHAKIR
+B8046354|ADILI MOHAMED
+B8058427|SAISSI AMINA
+B8061610|CHABBI MAJDI
+B8065901|AGHIGHA TRAVAUX SARL
+B8065996|SMARTOTEK
+B8066583|HONNIT HICHAME
+B8066708|DECO PUB LE CHEMIN
+B8072683|ECO BABNA
+B8075469|EL MESTARI HAFID
+B8081165|ZGOUNDI ABDELFATTAH
+B9003993|CHYADMY ILHAM
+B9013559|ADYAS CLIM
+B9014458|R L A EXPO
+B9015558|RACHDI AMINE
+B9019825|EVEREST INTERNATIONAL ENGINEER
+B9021738|QMIAT AZIZ
+B9021922|ANOUAR NORA
+B9022571|BARKA MOUHCINE
+B9023692|ABOUKHASSIB HANANE
+B9029199|IMJAD SOUSS
+B9030898|DIALMY LAILA
+B9031124|MOUNTASSIR ABDELILAH
+B9033375|BOUHLAL ABDERRAZAK
+B9037035|KM TOURS
+B9039908|ILUSION MAROC
+B9041884|TRANS HICHAM ET FILS
+B9045980|FABRINOV METAL
+B9046104|AAZEROU NAWAL
+B9047172|EL HARRAK MARYAM
+B9048727|DEMKILA AZZEDDINE
+B9048886|RAFLEC MAROC
+B9049492|BENSMINA SALAH EDDINE
+B9050918|TAFRAOUTI SAMIR
+B9056321|INFO HOUSE MAROC
+B9059769|IMOUKZAN
+B9059856|BENSEBAIYA ABDELMAJID
+B9061876|BEN IMRAN AHLAM
+B9065077|ILUSION MAROC
+B9067825|MICMAINTE
+B9073062|WINNER SOURCING
+B9076285|AUTO DILUSSO
+B9077157|KIDS SCHOOL PRIVE
+B9080861|BENHAIMOUD ABDELLATIF
+B9081808|NIZAR TOUR
+B9082964|NTS MAGHREB
+B9083343|MEDSOTRANS
+B9085279|H Y LOGISTIC
+B9086586|RAISS BOUTAINA
+B9089379|BIS TEX
+B9089799|CHERRAT ZAHRA
+B9094895|BENSEGHIRA LAKHDAR
+B9096541|GHRABI TAHA YASSINE
+B9099335|MIDEL SERVICES
+B90K0423|KARAMI MOHAMED
+C00A0099|ZOE MAROC FREE ZONE
+C00A2810|BOUMLALY SERVICE
+C00A8240|SCHAMEL FATIMA ZAHRA
+C00A8698|F KAM LOC
+C00B0649|CHAWAD LILIA
+C00B2095|MOUMEN HAFID
+C00B2670|CONSODIVERS
+C00B5819|LMEJJATI SAIDA
+C00B6725|IMMOPROJECT
+C00B8900|ZAHI ZAINA
+C00C1475|BOXERTOURS
+C00C5030|AMM RABAT FOOD
+C00D6224|KANTAS INTERNATIONAL CONSULTIN
+C00D7686|KHALDOUN NEZHA
+C00E1066|SOUFIAM TRANS
+C00E1449|QADDOURI FATIMA EZZAHRA
+C00E4366|MAISON BENELUX
+C00E6103|GREATEX
+C00F1257|EL MOUFID LAMIA
+C00F3675|BARRIO ESPANO
+C00F4551|MACOTITRANS
+C00F5910|AUXIMUM TRAVAUX
+C00F6300|BADR ZIN CONSTRUCTION
+C00F6683|HICHAM AMEUBLEMENT
+C00G0394|SARA SPORT
+C00G1142|BOUYALLOUL SOFIA
+C00G9968|WORLD OIL TRANS
+C00H3840|ESPACE DAIF TRIK
+C00H4623|ABRANO CAR
+C00H9774|L EMPREINTE DU LIVRE
+C00I1050|BEST MEDICAL SUPPLY
+C00I2649|AHMIMED CAR SARL
+C00I6480|GRINDA CAR MAROC
+C00J1685|BRANES INFORMATIQUE
+C00J2093|IMAGIX
+C00J4624|TOP SEWING
+C00K4023|BOUHAFID ABDELLATIF
+C10K1506|L AVENIR RADIEUX
+C10K2397|ROUTE ENVOYE
+C10N4447|SOGADGI
+C10N9667|M L CERAM
+C10O0893|UNI ONE SERVICE
+C10O1645|AFRIQUE HERBES
+C10O6009|ALMATEC B
+C10O9949|MARWA MONDE
+C10P2822|ABRANO CAR
+C10P5290|MALISMA CONDUITE
+C10P7605|LENJRI TRANS
+C10Q1820|AMSOMER TECHNOLOGY
+C10R1624|BENROCHD SIDI NAOUFAL
+C10R3423|BARYALA EL HACHMI
+C10R6148|INVERSIONES ADAM
+C10R8904|ARGACOSMO
+C10S4220|CABINET D ETUDES ET SOLUTIONS
+C10S4878|ORE DECOR
+C10S8813|RAY CARGO
+C10S9947|PALOMA CALL CENTER
+C10T5913|MOL PNEU
+C10U3892|FARAH ILHAM
+C10U6917|STUDIO F
+C2033961|EL HAMZAOUI SANAA
+C2044975|ATLAS ENERGY
+C2094669|K B MARINE CONSULTING
+C2098763|ARHA MOHAMED
+C20X6604|MEZIANE AHMED
+C20Y0004|AIT NACEUR ISSAM
+C20Y0427|GHEZIEL FATIMA ZAHRAE
+C30K5671|VIRS CAPITAL
+C30O1873|KNDK GROUP
+C4057179|DOUAIK KACEM`.split('\n'));
+
+function normalizeSuivi20250520ReferenceKeyPart(value){
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim();
+}
+
+function getSuivi20250520ReferenceKey(dossier){
+  return [
+    normalizeSuivi20250520ReferenceKeyPart(dossier?.referenceClient),
+    normalizeSuivi20250520ReferenceKeyPart(dossier?.debiteur)
+  ].join('|');
+}
+
+function hasMixedSaisieArretSuiviProcedures(dossier){
+  const procedures = normalizeProcedures(dossier)
+    .map(procName=>getDiligenceProcedureFilterValue(procName))
+    .filter(Boolean);
+  const unique = [...new Set(procedures)];
+  return unique.includes('SAISIE ARRÊT')
+    && unique.some(procName=>procName !== 'SAISIE ARRÊT');
+}
+
 function isDiligenceOnlyDossier(dossier){
   if(!dossier || typeof dossier !== 'object') return false;
   const creationSource = String(dossier.creationSource || dossier.source || '').trim().toLowerCase();
@@ -1681,7 +1852,8 @@ function isDiligenceOnlyDossier(dossier){
     return true;
   }
   const markedDiligenceOnly = dossier.isDiligenceOnly === true || dossier.isDiligenceManualEntry === true;
-  const markedSource = creationSource === 'diligence-saisie-arret';
+  const markedSource = creationSource.startsWith('diligence-saisie-arret')
+    || creationSource.startsWith('diligence-sci-tf');
   const markedHidden = dossier.hideFromSuivi === true || dossier.hiddenFromSuivi === true;
   const markedByHistory = Array.isArray(dossier.history) && dossier.history.some((entry)=>{
     const source = String(entry?.source || '').trim().toLowerCase();
@@ -1689,7 +1861,10 @@ function isDiligenceOnlyDossier(dossier){
     return source === 'diligence' && text.includes('saisie') && text.includes('diligence');
   });
   if(!markedDiligenceOnly && !markedSource && !markedHidden && !markedByHistory) return false;
-  return normalizeProcedures(dossier).some(procName=>isDiligenceSaisieArretProcedure(procName));
+  return markedSource || normalizeProcedures(dossier).some(procName=>{
+    const baseProcedure = getDiligenceProcedureFilterValue(procName);
+    return isDiligenceSaisieArretProcedure(procName) || baseProcedure === 'SCI TF';
+  });
 }
 
 function getDossiersVisibleOutsideDiligence(client){
@@ -10845,7 +11020,17 @@ function restoreRecycleEntryAt(index, options = {}){
         AppState.clients.push(client);
       }
       if(!Array.isArray(client.dossiers)) client.dossiers = [];
-      client.dossiers.push(dossier);
+      if(payload.partialProcedureDelete === true){
+        const externalId = String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim();
+        const existingIndex = client.dossiers.findIndex(entry=>{
+          const entryExternalId = String(entry?.externalId || entry?.importUid || entry?.uid || entry?.id || '').trim();
+          return externalId && entryExternalId === externalId;
+        });
+        if(existingIndex >= 0) client.dossiers[existingIndex] = dossier;
+        else client.dossiers.push(dossier);
+      }else{
+        client.dossiers.push(dossier);
+      }
       restored = true;
     }
   }else if(type === 'facture_delete'){
@@ -13683,7 +13868,7 @@ async function refreshRemoteState(options = {}){
   remoteRefreshInFlight = true;
   lastRemoteRefreshStartedAt = Date.now();
   try{
-    const hasChanged = await loadPersistedState();
+    const hasChanged = await loadPersistedState({ forceSnapshot: options.force === true });
     if(hasChanged){
       const refreshSections = [
         'dashboard',
@@ -19116,6 +19301,12 @@ async function applyExcelImport(payload, options = {}){
     const isSciTfDiligenceRow = diligenceMode
       && procedures.some(proc=>getDiligenceProcedureFilterValue(proc) === 'SCI TF');
     const forceCreateDiligenceRow = isSaisieArretDiligenceRow || isSciTfDiligenceRow;
+    const isolatedDiligenceProcedures = forceCreateDiligenceRow
+      ? procedures.filter(proc=>{
+          const baseProcedure = getDiligenceProcedureFilterValue(proc);
+          return isDiligenceSaisieArretProcedure(proc) || baseProcedure === 'SCI TF';
+        })
+      : procedures;
     if(!procedures.length){
       skippedDossiersCount += 1;
       addSkippedImportIssue(`${rowNumberLabel}: dossier ignoré (aucune procédure valide) - Ref client "${row.refClient || '-'}", Débiteur "${row.debiteur || '-'}"${dossierContext}`);
@@ -19147,8 +19338,8 @@ async function applyExcelImport(payload, options = {}){
       referenceClient: row.refClient || row.refAssignation || row.refRestitution || row.refSfdc || row.refInjonction || '',
       dateAffectation: rowDateAffectation || '',
       gestionnaire: String(row.gestionnaire || '').trim(),
-      procedure: procedures.join(', '),
-      procedureList: procedures.slice(),
+      procedure: isolatedDiligenceProcedures.join(', '),
+      procedureList: isolatedDiligenceProcedures.slice(),
       procedureDetails,
       ville: row.ville,
       adresse: row.adresse,
@@ -19179,10 +19370,12 @@ async function applyExcelImport(payload, options = {}){
       files: []
     };
     if(forceCreateDiligenceRow){
+      dossier.isDiligenceImportLineEntry = true;
       dossier.isDiligenceOnly = true;
       dossier.isDiligenceManualEntry = false;
       dossier.creationSource = isSciTfDiligenceRow ? 'diligence-sci-tf-line-import' : 'diligence-saisie-arret-import';
       dossier.hideFromSuivi = true;
+      dossier.hiddenFromSuivi = true;
     }
 
     let existingDossierToUpdate = null;
@@ -19229,7 +19422,7 @@ async function applyExcelImport(payload, options = {}){
           }
         }
       }
-      if(hasAssDiligencePayload && procedures.includes('ASS') && !existingDossierToUpdate){
+      if(hasAssDiligencePayload && procedures.includes('ASS') && !existingDossierToUpdate && !forceCreateDiligenceRow){
         skippedDossiersCount += 1;
         const refDossierDiagnostic = rowRefDossierKey
           ? `reference dossier "${rowRefDossier}" introuvable`
@@ -19289,13 +19482,15 @@ async function applyExcelImport(payload, options = {}){
       if(!targetDossier.conservation && row.conservation) targetDossier.conservation = String(row.conservation).trim();
     }
 
-    const procedureSet = new Set(procedures);
+    const procedureSet = new Set(isolatedDiligenceProcedures);
     const setProcRef = (proc, ref)=>{
       const refText = String(ref || '').trim();
       const refKey = normalizeReferenceForAudienceLookup(refText);
       if(!refKey) return;
       dossierRefClientSet.add(refKey);
-      const keepProcedureInDossier = !allowedDossierProcedureSet || allowedDossierProcedureSet.has(proc);
+      const keepProcedureInDossier = forceCreateDiligenceRow
+        ? procedureSet.has(proc)
+        : (!allowedDossierProcedureSet || allowedDossierProcedureSet.has(proc));
       if(keepProcedureInDossier){
         if(!targetDossier.procedureDetails[proc]) targetDossier.procedureDetails[proc] = {};
         targetDossier.procedureDetails[proc].referenceClient = refText;
@@ -19515,7 +19710,9 @@ async function applyExcelImport(payload, options = {}){
     const normalizedImportedProcs = [...procedureSet];
     // Keep Excel procedure order as the source of truth.
     // Any extra procedures discovered from references are appended after.
-    const excelOrderedProcs = (parsedProcedures && parsedProcedures.length ? parsedProcedures : procedures).slice();
+    const excelOrderedProcs = forceCreateDiligenceRow
+      ? isolatedDiligenceProcedures.slice()
+      : (parsedProcedures && parsedProcedures.length ? parsedProcedures : procedures).slice();
     const extraImportedProcs = normalizedImportedProcs.filter(proc=>!excelOrderedProcs.includes(proc));
     const orderedImportedProcs = [...excelOrderedProcs, ...extraImportedProcs];
     const normalizedPrimaryDate = normalizeDateDDMMYYYY(primaryDateCandidate) || primaryDateCandidate;
@@ -21723,6 +21920,23 @@ function setupEvents(){
   $('exportAudienceDiligenceBtn')?.addEventListener('click', ()=>exportAudienceDiligenceXLS({ openAfterExport: true, browserOpenInline: false }));
   $('exportAudienceAssWordBtn')?.addEventListener('click', exportSelectedAudienceAssWord);
   $('exportAudienceRestitutionWordBtn')?.addEventListener('click', exportSelectedAudienceRestitutionWords);
+  document.addEventListener('click', (event)=>{
+    const actionBtn = event.target?.closest?.('#markAudienceWhiteBtn, #markAudienceAttSortBtn, #markAudienceAttOrdBtn, #markAudienceOrdOkBtn, #markAudienceDocumentOkBtn, #markAudienceAttDelegationBtn, #markAudienceClosedBtn');
+    if(!actionBtn) return;
+    if(event.__audienceOrdHandled) return;
+    event.preventDefault();
+    const actionColorById = {
+      markAudienceWhiteBtn: 'white',
+      markAudienceAttSortBtn: 'blue',
+      markAudienceAttOrdBtn: 'green',
+      markAudienceOrdOkBtn: 'yellow',
+      markAudienceDocumentOkBtn: 'document-ok',
+      markAudienceAttDelegationBtn: 'pink',
+      markAudienceClosedBtn: 'closed'
+    };
+    const color = actionColorById[actionBtn.id] || '';
+    handleAudienceOrdButtonClick(event, color);
+  });
   $('exportAudienceFactureBtn')?.addEventListener('click', ()=>{
     exportSelectedAudienceFactureExcel().catch((err)=>{
       console.error(err);
@@ -21834,6 +22048,25 @@ function refreshDiligenceFromServerOnOpen(){
   });
 }
 
+function refreshSuiviFromServerOnOpen(){
+  if(!currentUser || !hasRemoteAuthSession() || importInProgress) return;
+  if(suiviOpenRemoteRefreshInFlight) return;
+  const now = Date.now();
+  if((now - lastSuiviOpenRemoteRefreshAt) < 2500) return;
+  suiviOpenRemoteRefreshInFlight = true;
+  lastSuiviOpenRemoteRefreshAt = now;
+  remoteRefreshPending = true;
+  refreshRemoteState({ force: true }).then(()=>{
+    if(currentView !== 'suivi') return;
+    markDeferredRenderDirty('suivi');
+    runSectionRenderSafely('suivi', ()=>renderSuivi({ force: true }), { delayMs: 30 });
+  }).catch((err)=>{
+    console.warn('Actualisation suivi depuis serveur impossible', err);
+  }).finally(()=>{
+    suiviOpenRemoteRefreshInFlight = false;
+  });
+}
+
 // ================== NAV ==================
 function showView(v, options = {}){
   const nextView = resolveAccessibleView(v);
@@ -21908,6 +22141,9 @@ function showView(v, options = {}){
   }
   if(nextView === 'diligence'){
     refreshDiligenceFromServerOnOpen();
+  }
+  if(nextView === 'suivi'){
+    refreshSuiviFromServerOnOpen();
   }
   if(isMobileViewport()){
     setSidebarCollapsed(true);
@@ -27366,26 +27602,54 @@ async function deleteCheckedDiligenceSaisieArretDossiers(){
     const index = Number(row.dossierIndex);
     const dossier = client.dossiers[index];
     if(!dossier || !normalizeProcedures(dossier).some(procName=>isDiligenceSaisieArretProcedure(procName))) return;
+    const beforeDossier = JSON.parse(JSON.stringify(dossier || {}));
+    const remainingProcedures = normalizeProcedures(dossier)
+      .filter(procName=>!isDiligenceSaisieArretProcedure(procName));
+    const isPartialProcedureDelete = remainingProcedures.length > 0;
     pushRecycleBinEntry('dossier_delete', {
       clientId: client.id,
       clientName: client.name || '',
       dossierIndex: index,
-      dossier: JSON.parse(JSON.stringify(dossier || {})),
+      dossier: beforeDossier,
+      partialProcedureDelete: isPartialProcedureDelete,
       importHistoryEntries: collectRelevantImportHistoryEntries({
         clientId: client.id,
         dossiers: [dossier]
       })
     });
-    removedDossiers.push(dossier);
-    client.dossiers.splice(index, 1);
-    patches.push({
-      action: 'delete',
-      clientId: Number(client.id),
-      dossierIndex: Number(index),
-      externalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
-      previousExternalId: String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim(),
-      referenceClient: String(dossier.referenceClient || '').trim()
-    });
+    removedDossiers.push(beforeDossier);
+    const externalId = String(dossier.externalId || dossier.importUid || dossier.uid || dossier.id || '').trim();
+    if(isPartialProcedureDelete){
+      const details = dossier.procedureDetails && typeof dossier.procedureDetails === 'object'
+        ? dossier.procedureDetails
+        : {};
+      Object.keys(details).forEach(procName=>{
+        if(isDiligenceSaisieArretProcedure(procName)) delete details[procName];
+      });
+      dossier.procedureDetails = details;
+      dossier.procedureList = remainingProcedures;
+      dossier.procedure = remainingProcedures.join(', ');
+      dossier.suiviUpdatedAt = new Date().toISOString();
+      patches.push({
+        action: 'update',
+        clientId: Number(client.id),
+        dossierIndex: Number(index),
+        externalId,
+        previousExternalId: externalId,
+        referenceClient: String(dossier.referenceClient || '').trim(),
+        dossier: JSON.parse(JSON.stringify(dossier))
+      });
+    }else{
+      client.dossiers.splice(index, 1);
+      patches.push({
+        action: 'delete',
+        clientId: Number(client.id),
+        dossierIndex: Number(index),
+        externalId,
+        previousExternalId: externalId,
+        referenceClient: String(dossier.referenceClient || '').trim()
+      });
+    }
   });
 
   if(!removedDossiers.length){
@@ -31463,6 +31727,112 @@ async function applyColorToSelectedAudienceRows(color, rowsOverride = null){
   return true;
 }
 
+async function confirmAndMarkSelectedAudienceOrdonnance(color){
+  const targetColor = String(color || '').trim();
+  const label = targetColor === 'white'
+    ? 'BLANC'
+    : targetColor === 'blue'
+      ? 'ATT SORT'
+      : targetColor === 'green'
+        ? 'ATT ORD'
+        : targetColor === 'yellow'
+          ? 'ORD OK'
+          : targetColor === 'document-ok'
+            ? 'DOC OK'
+            : targetColor === 'pink'
+              ? 'ATT DELEGATION'
+              : targetColor === 'closed'
+                ? 'SOLDE / ARRET DEFINITIF'
+                : '';
+  if(!label) return false;
+  const rows = getAllAudienceRowsForStoredPrintSelection();
+  const selectedRows = rows.filter(row=>audiencePrintSelection.has(makeAudienceRowPrintKey(row)));
+  if(!selectedRows.length){
+    syncAudienceColorActionAvailability();
+    alert('Cochez d’abord un ou plusieurs dossiers.');
+    return false;
+  }
+  const message = `Confirmer le changement de ${selectedRows.length} ligne(s) sélectionnée(s) vers ${label} ?`;
+  if(!await confirmAudienceOrdonnanceAction(message, label)) return false;
+  setSelectedAudienceColor(targetColor, false);
+  const undoEntries = selectedRows.map(row=>buildAudienceColorUndoEntry(row.ci, row.di, row.procKey));
+  const applied = await applyColorToSelectedAudienceRows(targetColor, rows);
+  if(applied){
+    rememberAudienceColorUndoState(undoEntries, {
+      filterAudienceColor,
+      selectedAudienceColor: targetColor,
+      filterAudienceCheckedFirst
+    });
+    setSelectedAudienceColor('all', false);
+    filterAudienceCheckedFirst = true;
+    if($('filterAudienceCheckedOrder')) $('filterAudienceCheckedOrder').value = 'checked-first';
+    filterAudienceColor = 'all';
+    const colorSel = $('filterAudienceColor');
+    if(colorSel) colorSel.value = 'all';
+    paginationState.audience = 1;
+    syncAudienceColorFilterSelectAppearance();
+    renderAudience();
+  }
+  return applied;
+}
+
+function handleAudienceOrdButtonClick(event, color){
+  if(event){
+    event.__audienceOrdHandled = true;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+  }
+  confirmAndMarkSelectedAudienceOrdonnance(color);
+}
+
+if(typeof window !== 'undefined'){
+  window.handleAudienceOrdButtonClick = handleAudienceOrdButtonClick;
+}
+
+function confirmAudienceOrdonnanceAction(message, label){
+  return new Promise((resolve)=>{
+    const existing = document.getElementById('audienceOrdConfirmModal');
+    if(existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'audienceOrdConfirmModal';
+    modal.className = 'modal-backdrop audience-ord-confirm-backdrop';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="modal-card audience-ord-confirm-card" role="dialog" aria-modal="true" aria-labelledby="audienceOrdConfirmTitle">
+        <div class="audience-ord-confirm-icon">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="audience-ord-confirm-content">
+          <h2 id="audienceOrdConfirmTitle">Confirmation ${escapeHtml(label || '')}</h2>
+          <p>${escapeHtml(message || '')}</p>
+        </div>
+        <div class="audience-ord-confirm-actions">
+          <button type="button" class="btn-secondary" data-action="cancel">Annuler</button>
+          <button type="button" class="btn-success" data-action="confirm">Confirmer</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const cleanup = (value)=>{
+      modal.remove();
+      document.removeEventListener('keydown', onKeyDown);
+      resolve(value);
+    };
+    const onKeyDown = (event)=>{
+      if(event.key === 'Escape') cleanup(false);
+      if(event.key === 'Enter') cleanup(true);
+    };
+    modal.addEventListener('click', (event)=>{
+      if(event.target === modal) cleanup(false);
+      const action = event.target?.closest?.('[data-action]')?.dataset?.action || '';
+      if(action === 'cancel') cleanup(false);
+      if(action === 'confirm') cleanup(true);
+    });
+    document.addEventListener('keydown', onKeyDown);
+    modal.querySelector('[data-action="confirm"]')?.focus();
+  });
+}
+
 function setAllVisibleAudienceRowsForPrint(checked){
   const rows = getVisibleAudiencePageRowsForPrintSelection();
   if(!rows.length){
@@ -33646,11 +34016,15 @@ function applyAudienceGroupedFieldValue(rows, field, value, sourceKey = ''){
   });
 }
 
-function updateAudienceDraft(key, field, value){
+function updateAudienceDraft(key, field, value, options = {}){
   if(!canEditData()) return;
+  if(String(field || '').trim() === 'refDossier' && options.confirmed !== true) return;
   markAudienceRowsCacheDirty();
   if(!audienceDraft[key]) audienceDraft[key] = {};
   audienceDraft[key][field] = value;
+  if(String(field || '').trim() === 'refDossier' && options.confirmed === true){
+    audienceDraft[key]._refDossierConfirmed = true;
+  }
   audienceDirtyDraftKeys.add(key);
   const groupedRows = shouldShareAudienceFieldAcrossGroup(field)
     ? getAudienceRowsSharingDraftKey(key)
@@ -34054,17 +34428,21 @@ function saveAudienceDraftEntry(key, options = {}){
 
   if(data && typeof data === 'object'){
     if(data.refDossier !== undefined){
-      const before = getAudienceProcedureFieldValue(p, 'refDossier');
-      previousReferenceClientForPersist = String(before || '').trim();
-      applyAudienceFieldToProcedure(p, 'refDossier', data.refDossier);
-      const after = getAudienceProcedureFieldValue(p, 'refDossier');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.referenceClient',
-        procedure: procKey,
-        before,
-        after
-      });
+      if(data._refDossierConfirmed === true){
+        const before = getAudienceProcedureFieldValue(p, 'refDossier');
+        previousReferenceClientForPersist = String(before || '').trim();
+        applyAudienceFieldToProcedure(p, 'refDossier', data.refDossier);
+        const after = getAudienceProcedureFieldValue(p, 'refDossier');
+        queueDossierHistoryEntry(dossier, {
+          source: 'audience',
+          field: 'procedureDetails.referenceClient',
+          procedure: procKey,
+          before,
+          after
+        });
+      }
+      delete data.refDossier;
+      delete data._refDossierConfirmed;
     }
     if(data.dateAudience !== undefined){
       const before = getAudienceProcedureFieldValue(p, 'dateAudience');
@@ -34204,6 +34582,41 @@ function confirmAudienceInlineEditFromEncoded(keyEncoded, field, inputEl, event)
   }
 }
 
+async function confirmAudienceReferenceDossierEditFromEncoded(keyEncoded, inputEl, event){
+  const isEnter = event?.type === 'keydown';
+  if(isEnter && event.key !== 'Enter') return false;
+  if(event?.preventDefault) event.preventDefault();
+  if(!inputEl || inputEl.readOnly) return false;
+  if(inputEl.dataset.audienceRefDossierConfirming === '1') return false;
+  const key = decodeURIComponent(String(keyEncoded || ''));
+  if(!key) return false;
+  const { ci, di, procKey } = parseAudienceDraftKey(key);
+  const p = getAudienceProcedure(ci, di, procKey);
+  const before = String(getAudienceProcedureFieldValue(p, 'refDossier') || '').trim();
+  const next = String(inputEl.value || '').trim();
+  inputEl.value = next;
+  if(before === next) return false;
+  inputEl.dataset.audienceRefDossierConfirming = '1';
+  try{
+    const fromLabel = before || '-';
+    const toLabel = next || '-';
+    const confirmed = await confirmAudienceOrdonnanceAction(
+      `Confirmer la modification de Référence dossier de "${fromLabel}" vers "${toLabel}" ?`,
+      'Référence dossier'
+    );
+    if(!confirmed){
+      inputEl.value = before;
+      return false;
+    }
+    updateAudienceDraft(key, 'refDossier', next, { confirmed: true });
+    return true;
+  }finally{
+    setTimeout(()=>{
+      if(inputEl?.dataset) delete inputEl.dataset.audienceRefDossierConfirming;
+    }, 0);
+  }
+}
+
 function saveAllAudience(options = {}){
   if(!canEditData()){
     alert('Accès refusé');
@@ -34236,35 +34649,39 @@ function saveAllAudience(options = {}){
         dossier?.isAudienceOrphanImport
         && data
         && typeof data === 'object'
-        && (data.refClient !== undefined || data.refDossier !== undefined)
+        && (data.refClient !== undefined || (data.refDossier !== undefined && data._refDossierConfirmed === true))
       ){
         shouldReconcileAudienceRefs = true;
       }
     }
     if(data.refDossier!==undefined){
-      const before = getAudienceProcedureFieldValue(p, 'refDossier');
-      const previousReferenceClient = String(before || '').trim();
-      if(client && dossier){
-        const changeKey = `${Number(client.id) || 0}::${String(dossier.referenceClient || di || '').trim()}`;
-        const existingChange = changedDossiers.get(changeKey) || {
-          clientId: client.id,
-          dossier,
-          previousReferenceClient: ''
-        };
-        changedDossiers.set(changeKey, {
-          ...existingChange,
-          previousReferenceClient: existingChange.previousReferenceClient || previousReferenceClient
+      if(data._refDossierConfirmed === true){
+        const before = getAudienceProcedureFieldValue(p, 'refDossier');
+        const previousReferenceClient = String(before || '').trim();
+        if(client && dossier){
+          const changeKey = `${Number(client.id) || 0}::${String(dossier.referenceClient || di || '').trim()}`;
+          const existingChange = changedDossiers.get(changeKey) || {
+            clientId: client.id,
+            dossier,
+            previousReferenceClient: ''
+          };
+          changedDossiers.set(changeKey, {
+            ...existingChange,
+            previousReferenceClient: existingChange.previousReferenceClient || previousReferenceClient
+          });
+        }
+        applyAudienceFieldToProcedure(p, 'refDossier', data.refDossier);
+        const after = getAudienceProcedureFieldValue(p, 'refDossier');
+        queueDossierHistoryEntry(dossier, {
+          source: 'audience',
+          field: 'procedureDetails.referenceClient',
+          procedure: procKey,
+          before,
+          after
         });
       }
-      applyAudienceFieldToProcedure(p, 'refDossier', data.refDossier);
-      const after = getAudienceProcedureFieldValue(p, 'refDossier');
-      queueDossierHistoryEntry(dossier, {
-        source: 'audience',
-        field: 'procedureDetails.referenceClient',
-        procedure: procKey,
-        before,
-        after
-      });
+      delete data.refDossier;
+      delete data._refDossierConfirmed;
     }
     if(data.dateAudience!==undefined){
       const before = getAudienceProcedureFieldValue(p, 'dateAudience');

@@ -373,7 +373,7 @@ function renderAudienceRowHtmlLegacyUnused(row, duplicateKeySet){
       </td>
       <td data-label="Débiteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(getAudienceDebiteurDisplay(row)) || '-')}</td>
       <td data-label="Référence dossier">
-        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
+        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} onchange="confirmAudienceReferenceDossierEditFromEncoded('${keyEncoded}',this,event)" onkeydown="confirmAudienceReferenceDossierEditFromEncoded('${keyEncoded}',this,event)">
         ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
       </td>
       <td data-label="Date d’audience"><input value="${escapeAttr(audienceDateValue)}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','dateAudience',this.value)" onblur="normalizeAudienceDateDraftInputFromEncoded('${keyEncoded}', this)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','dateAudience',this,event)"></td>
@@ -478,7 +478,7 @@ function renderAudienceRowHtml(row, duplicateKeySet){
       </td>
       <td data-label="Débiteur">${escapeHtml(getAudienceDebiteurFrenchDisplay(getAudienceDebiteurDisplay(row)) || '-')}</td>
       <td data-label="Référence dossier">
-        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} oninput="updateAudienceDraftFromEncoded('${keyEncoded}','refDossier',this.value)" onkeydown="confirmAudienceInlineEditFromEncoded('${keyEncoded}','refDossier',this,event)">
+        <input class="${isMissingGlobal ? 'audience-ref-missing' : ''}" value="${escapeAttr(getAudienceRowDraftReferenceValue(row))}" ${canEdit ? '' : 'readonly'} onchange="confirmAudienceReferenceDossierEditFromEncoded('${keyEncoded}',this,event)" onkeydown="confirmAudienceReferenceDossierEditFromEncoded('${keyEncoded}',this,event)">
         ${refDossierErrorMessage ? `<div class="audience-inline-error">${escapeHtml(refDossierErrorMessage)}</div>` : ''}
       </td>
       <td data-label="Date d’audience">
